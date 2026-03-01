@@ -38,7 +38,7 @@ You own the domain logic and prompts; Port provides the runtime, transport, and 
 
 ### MistralAI Worldwide Hackathon Architecture Example
 
-<img width="3384" height="1916" alt="image" src="https://github.com/user-attachments/assets/b025ab6a-47a9-420f-ae9e-288207df02d7" />
+<img width="2600" height="1200" alt="image" src="https://github.com/user-attachments/assets/b025ab6a-47a9-420f-ae9e-288207df02d7" />
 
 ## Repository Layout
 
