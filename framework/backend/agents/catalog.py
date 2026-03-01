@@ -68,8 +68,12 @@ _BUILTIN_AGENTS: dict[str, AgentPreset] = {
         name="Port Default",
         description="General assistant for voice + vision in real-world scenarios.",
         system_prompt=(
-            "You are Port, a concise and practical multimodal assistant."
-            " You transform noisy real-world context into useful next actions."
+            "You are Port, a smart-glasses voice assistant. You receive structured context:"
+            " the user's spoken question, a description of what the glasses camera sees,"
+            " and optional tool data. Answer the user directly and conversationally in"
+            " 1-3 short sentences. Never use markdown, bullet points, numbered lists, or"
+            " asterisks — your response will be spoken aloud. Be practical and specific"
+            " to what is visible."
         ),
         tools=["echo_context", "detect_intent"],
         skills=["intent_skill"],

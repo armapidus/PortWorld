@@ -13,6 +13,7 @@ from backend.core.utils import build_messages_for_main_llm, parse_history, read_
 from backend.providers.mistral import call_main_llm_non_stream
 from backend.providers.nvidia import summarize_video
 from backend.providers.voxtral import transcribe_audio
+from backend.services.run_log import RUN_LOG, RunLogEntry, _utc_now
 from backend.tools.registry import ToolRunResult, run_requested_tools
 from backend.tracing.manager import TraceManager
 
@@ -27,9 +28,10 @@ class PreparedPipelineRun:
     messages: list[dict[str, Any]]
 
 
-def _build_tools_prompt_suffix(tool_runs: list[ToolRunResult]) -> str:
+def _build_tools_context(tool_runs: list[ToolRunResult]) -> str | None:
+    """Build a structured context string from tool outputs (or None if empty)."""
     if not tool_runs:
-        return ""
+        return None
 
     serializable = [
         {
@@ -39,8 +41,7 @@ def _build_tools_prompt_suffix(tool_runs: list[ToolRunResult]) -> str:
         }
         for item in tool_runs
     ]
-    serialized = json.dumps(serializable, ensure_ascii=False)
-    return f"\n\nContext from tools/skills:\n{serialized}"
+    return json.dumps(serializable, ensure_ascii=False)
 
 
 async def prepare_pipeline_run(
@@ -111,15 +112,16 @@ async def prepare_pipeline_run(
         "mcp_servers": profile.mcp_servers,
     }
     tool_runs = await run_requested_tools(profile=profile, tracer=tracer, context=tool_context)
-    effective_prompt = prompt + _build_tools_prompt_suffix(tool_runs)
+    tools_ctx = _build_tools_context(tool_runs)
 
     messages = build_messages_for_main_llm(
         history=history,
-        user_prompt=effective_prompt,
+        user_prompt=prompt,
         audio_transcript=transcript,
         video_summary=video_summary,
         image_data_urls=image_data_urls,
         system_prompt=profile.prompts["main_system_prompt"],
+        tool_context=tools_ctx,
     )
 
     return PreparedPipelineRun(
@@ -143,6 +145,14 @@ async def run_pipeline(
     video: UploadFile | None,
     llm_model: str | None = None,
 ) -> dict[str, Any]:
+    import uuid as _uuid
+
+    run = RunLogEntry(
+        query_id=f"pipe_{_uuid.uuid4().hex[:12]}",
+        source="pipeline",
+        started_at=_utc_now(),
+    )
+
     prepared = await prepare_pipeline_run(
         profile=profile,
         tracer=tracer,
@@ -154,12 +164,45 @@ async def run_pipeline(
         llm_model=llm_model,
     )
 
-    assistant_text = await call_main_llm_non_stream(
-        profile=profile,
-        tracer=tracer,
-        model=prepared.model,
-        messages=prepared.messages,
-    )
+    # Record intermediate outputs from the prepare step
+    run.stt_model = profile.voxtral.model
+    run.stt_transcript = prepared.transcript
+    run.video_model = profile.nemotron.model
+    run.video_summary = prepared.video_summary
+    run.video_prompt_sent = str(profile.prompts.get("nemotron_video_prompt", ""))
+    run.tool_runs = [
+        {"tool": r.name, "status": r.status, "output": r.output}
+        for r in prepared.tool_runs
+    ]
+    run.main_llm_model = prepared.model
+    run.main_llm_system_prompt = profile.prompts["main_system_prompt"]
+    run.main_llm_messages_count = len(prepared.messages)
+    user_msgs = [m for m in prepared.messages if m.get("role") == "user"]
+    if user_msgs:
+        c = user_msgs[-1].get("content", "")
+        run.main_llm_user_content = c if isinstance(c, str) else json.dumps(c, ensure_ascii=False)[:2000]
+
+    try:
+        assistant_text = await call_main_llm_non_stream(
+            profile=profile,
+            tracer=tracer,
+            model=prepared.model,
+            messages=prepared.messages,
+        )
+        run.main_llm_response = assistant_text
+        run.status = "ok"
+    except Exception as exc:
+        run.main_llm_error = str(exc)
+        run.status = "error"
+        run.error = str(exc)
+        raise
+    finally:
+        run.finished_at = _utc_now()
+        run.metadata = {
+            "agent_id": str(profile.metadata.get("agent_id", "")),
+            "agent_name": str(profile.metadata.get("agent_name", "")),
+        }
+        RUN_LOG.record(run)
 
     await tracer.event("pipeline.done", data={"assistant_chars": len(assistant_text)})
 
@@ -180,11 +223,11 @@ async def run_pipeline(
         },
         "tools": [
             {
-                "name": run.name,
-                "status": run.status,
-                "output": run.output,
+                "name": r.name,
+                "status": r.status,
+                "output": r.output,
             }
-            for run in prepared.tool_runs
+            for r in prepared.tool_runs
         ],
         "mcp_servers": profile.mcp_servers,
         "trace": tracer.export(),

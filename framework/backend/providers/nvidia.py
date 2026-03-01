@@ -29,7 +29,15 @@ async def summarize_video(
     }
 
     default_prompt = str(profile.prompts.get("nemotron_video_prompt") or SETTINGS.default_nemotron_prompt)
-    prompt = prompt_hint.strip() or default_prompt
+
+    # Always use the configured video-analysis prompt as the primary
+    # instruction.  If a prompt_hint (e.g. the user's transcript) is
+    # available, append it so Nemotron knows what to focus on — but never
+    # let it replace the analysis instruction.
+    prompt = default_prompt
+    hint = prompt_hint.strip()
+    if hint:
+        prompt = f"{default_prompt}\n\nThe user is asking: \"{hint}\" — pay attention to details relevant to this question."
 
     payload: dict[str, Any] = {
         "model": provider.model,

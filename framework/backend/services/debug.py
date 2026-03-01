@@ -30,9 +30,10 @@ from backend.tools.registry import ToolRunResult, run_requested_tools
 from backend.tracing.manager import TraceManager
 
 
-def _build_tools_prompt_suffix(tool_runs: list[ToolRunResult]) -> str:
+def _build_tools_context(tool_runs: list[ToolRunResult]) -> str | None:
+    """Build a structured context string from tool outputs (or None if empty)."""
     if not tool_runs:
-        return ""
+        return None
 
     payload = [
         {
@@ -42,7 +43,7 @@ def _build_tools_prompt_suffix(tool_runs: list[ToolRunResult]) -> str:
         }
         for item in tool_runs
     ]
-    return "\n\nTool/Skill outputs:\n" + json.dumps(payload, ensure_ascii=False)
+    return json.dumps(payload, ensure_ascii=False)
 
 
 async def run_ios_debug_simulation(
@@ -119,15 +120,16 @@ async def run_ios_debug_simulation(
         "mcp_servers": profile.mcp_servers,
     }
     tool_runs = await run_requested_tools(profile=profile, tracer=tracer, context=tool_context)
-    prompt_with_tools = user_prompt + _build_tools_prompt_suffix(tool_runs)
+    tools_ctx = _build_tools_context(tool_runs)
 
     messages = build_messages_for_main_llm(
         history=history,
-        user_prompt=prompt_with_tools,
+        user_prompt=user_prompt,
         audio_transcript=transcript,
         video_summary=video_summary,
         image_data_urls=[],
         system_prompt=profile.prompts["main_system_prompt"],
+        tool_context=tools_ctx,
     )
 
     main_llm_stream_debug: dict[str, Any] = {}

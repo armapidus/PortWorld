@@ -47,6 +47,7 @@ def to_data_url(raw: bytes, content_type: str) -> str:
 
 
 def extract_chat_text(content: Any) -> str:
+    """Extract and strip text from a final (non-streaming) message content."""
     if isinstance(content, str):
         return content.strip()
     if not isinstance(content, list):
@@ -60,15 +61,32 @@ def extract_chat_text(content: Any) -> str:
     return " ".join(parts).strip()
 
 
+def _extract_delta_text(content: Any) -> str:
+    """Extract text from a streaming delta, preserving whitespace (word boundaries)."""
+    if isinstance(content, str):
+        return content  # NO strip — spaces are meaningful tokens
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for item in content:
+        if isinstance(item, dict):
+            text = item.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+    return "".join(parts)  # join without separator; each part already spaced
+
+
 def extract_choice_text(choice: dict[str, Any]) -> str:
+    # Streaming delta — preserve whitespace
+    delta = choice.get("delta")
+    if isinstance(delta, dict):
+        text = _extract_delta_text(delta.get("content"))
+        if text:  # a single space " " is valid
+            return text
+    # Non-streaming final message — strip is fine
     message = choice.get("message")
     if isinstance(message, dict):
         text = extract_chat_text(message.get("content"))
-        if text:
-            return text
-    delta = choice.get("delta")
-    if isinstance(delta, dict):
-        text = extract_chat_text(delta.get("content"))
         if text:
             return text
     fallback = choice.get("text")
@@ -180,16 +198,37 @@ def is_mp4_upload(content_type: str, filename: str | None) -> bool:
     return "mp4" in mime or name.endswith(".mp4")
 
 
-def build_main_llm_content(*, prompt: str, audio_transcript: str | None, video_summary: str | None, image_data_urls: list[str]) -> str | list[dict[str, Any]]:
+def build_main_llm_content(*, prompt: str, audio_transcript: str | None, video_summary: str | None, image_data_urls: list[str], tool_context: str | None = None) -> str | list[dict[str, Any]]:
+    """Build structured user content for the main LLM.
+
+    Each input source (transcript, video, tools) is clearly labelled so the
+    LLM can distinguish the user's spoken question from contextual scene
+    descriptions and tool outputs.
+    """
     sections: list[str] = []
-    if prompt.strip():
-        sections.append(prompt.strip())
-    if audio_transcript and audio_transcript.strip():
-        sections.append(f"Transcription audio (Voxtral):\n{audio_transcript.strip()}")
-    if video_summary and video_summary.strip():
-        sections.append(f"Analyse video (Nemotron):\n{video_summary.strip()}")
+
+    # The user's spoken query (from Voxtral STT)
+    transcript_text = (audio_transcript or "").strip()
+    if transcript_text:
+        sections.append(f"[User speech transcript]\n{transcript_text}")
+
+    # Visual context from video analysis (from Nemotron)
+    video_text = (video_summary or "").strip()
+    if video_text:
+        sections.append(f"[Visual context from smart-glasses camera]\n{video_text}")
+
+    # Tool / skill outputs
+    tool_text = (tool_context or "").strip()
+    if tool_text:
+        sections.append(f"[Context from tools/skills]\n{tool_text}")
+
+    # Fallback: use raw prompt if nothing structured was provided
     if not sections:
-        sections.append("Reponds en francais de facon concise et utile.")
+        raw = prompt.strip()
+        if raw:
+            sections.append(raw)
+        else:
+            sections.append("Reponds en francais de facon concise et utile.")
 
     text_payload = "\n\n".join(sections)
     if not image_data_urls:
@@ -201,7 +240,7 @@ def build_main_llm_content(*, prompt: str, audio_transcript: str | None, video_s
     return content
 
 
-def build_messages_for_main_llm(*, history: list[dict[str, Any]], user_prompt: str, audio_transcript: str | None, video_summary: str | None, image_data_urls: list[str], system_prompt: str) -> list[dict[str, Any]]:
+def build_messages_for_main_llm(*, history: list[dict[str, Any]], user_prompt: str, audio_transcript: str | None, video_summary: str | None, image_data_urls: list[str], system_prompt: str, tool_context: str | None = None) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
@@ -214,6 +253,7 @@ def build_messages_for_main_llm(*, history: list[dict[str, Any]], user_prompt: s
                 audio_transcript=audio_transcript,
                 video_summary=video_summary,
                 image_data_urls=image_data_urls,
+                tool_context=tool_context,
             ),
         }
     )
