@@ -123,14 +123,18 @@ class AppSettings:
 def load_settings() -> AppSettings:
     _load_env()
 
-    voxtral_base_url = os.getenv("VOXTRAL_BASE_URL", "https://api.mistral.ai/v1").strip()
+    voxtral_base_url = os.getenv(
+        "VOXTRAL_BASE_URL", "https://api.mistral.ai/v1"
+    ).strip()
     voxtral_stt_path = os.getenv(
         "VOXTRAL_STT_PATH",
         _default_openai_compat_path(voxtral_base_url, "/audio/transcriptions"),
     ).strip()
     raw_voxtral_model = os.getenv("VOXTRAL_STT_MODEL", "voxtral-mini-latest").strip()
 
-    main_llm_base_url = os.getenv("MAIN_LLM_BASE_URL", "https://api.mistral.ai/v1").strip()
+    main_llm_base_url = os.getenv(
+        "MAIN_LLM_BASE_URL", "https://api.mistral.ai/v1"
+    ).strip()
 
     vision_base_url = os.getenv("VISION_LLM_BASE_URL", main_llm_base_url).strip()
 
@@ -146,36 +150,72 @@ def load_settings() -> AppSettings:
         default_voxtral_base_url=voxtral_base_url,
         default_voxtral_api_key=os.getenv("VOXTRAL_API_KEY", "").strip(),
         default_voxtral_stt_path=voxtral_stt_path,
-        default_voxtral_model=_normalize_voxtral_model(raw_voxtral_model, voxtral_stt_path),
-        default_voxtral_language=os.getenv("VOXTRAL_LANGUAGE", "fr").strip(),
-        default_nemotron_base_url=os.getenv("NEMOTRON_BASE_URL", "http://127.0.0.1:8000/v1").strip(),
+        default_voxtral_model=_normalize_voxtral_model(
+            raw_voxtral_model, voxtral_stt_path
+        ),
+        default_voxtral_language=os.getenv("VOXTRAL_LANGUAGE", "en").strip(),
+        default_nemotron_base_url=os.getenv(
+            "NEMOTRON_BASE_URL", "http://127.0.0.1:8000/v1"
+        ).strip(),
         default_nemotron_api_key=os.getenv("NEMOTRON_API_KEY", "EMPTY").strip(),
-        default_nemotron_chat_path=os.getenv("NEMOTRON_CHAT_PATH", "/chat/completions").strip(),
-        default_nemotron_model=os.getenv("NEMOTRON_MODEL", "nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-BF16").strip(),
+        default_nemotron_chat_path=os.getenv(
+            "NEMOTRON_CHAT_PATH", "/chat/completions"
+        ).strip(),
+        default_nemotron_model=os.getenv(
+            "NEMOTRON_MODEL", "nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-BF16"
+        ).strip(),
         default_nemotron_max_tokens=_read_int_env("NEMOTRON_MAX_TOKENS", 700),
         default_nemotron_temperature=_read_float_env("NEMOTRON_TEMPERATURE", 0.2),
-        default_nemotron_prompt=os.getenv("NEMOTRON_VIDEO_PROMPT", "You are the vision component of a smart-glasses assistant. Describe what you see in this video concisely and practically: identify objects, people, actions, text, signs, and any safety hazards. Focus on details the user is likely asking about or that are immediately useful. Do NOT speculate beyond what is visible. Keep your description under 150 words.").strip(),
+        default_nemotron_prompt=os.getenv(
+            "NEMOTRON_VIDEO_PROMPT",
+            "You are the vision component of a smart-glasses assistant. Describe what you see in this video concisely and practically: identify objects, people, actions, text, signs, and any safety hazards. Focus on details the user is likely asking about or that are immediately useful. Do NOT speculate beyond what is visible. Keep your description under 150 words.",
+        ).strip(),
         default_main_llm_base_url=main_llm_base_url,
         default_main_llm_api_key=os.getenv("MAIN_LLM_API_KEY", "").strip(),
-        default_main_llm_chat_path=os.getenv("MAIN_LLM_CHAT_PATH", _default_openai_compat_path(main_llm_base_url, "/chat/completions")).strip(),
-        default_main_llm_model=os.getenv("MAIN_LLM_MODEL", "mistral-large-latest").strip(),
+        default_main_llm_chat_path=os.getenv(
+            "MAIN_LLM_CHAT_PATH",
+            _default_openai_compat_path(main_llm_base_url, "/chat/completions"),
+        ).strip(),
+        default_main_llm_model=os.getenv(
+            "MAIN_LLM_MODEL", "mistral-large-latest"
+        ).strip(),
         default_main_llm_max_tokens=_read_int_env("MAIN_LLM_MAX_TOKENS", 700),
         default_main_llm_temperature=_read_float_env("MAIN_LLM_TEMPERATURE", 0.2),
         default_main_llm_driver=os.getenv("MAIN_LLM_DRIVER", "openai_compat").strip(),
-        default_main_llm_system_prompt=os.getenv("MAIN_LLM_SYSTEM_PROMPT", "You are a helpful voice assistant running on smart glasses. You receive structured input with clearly labelled sections: [User speech transcript] is what the user said (transcribed from their voice), [Visual context from smart-glasses camera] is a description of what the glasses camera sees right now, and [Context from tools/skills] contains any additional data. Your job is to answer the user's spoken question, using the visual context to enrich your response when relevant. Respond naturally as if speaking conversationally. Keep responses brief (1-3 sentences), clear, and directly relevant. Use simple everyday language suitable for voice output. If there are safety concerns visible in the scene, mention them immediately. Never repeat the section labels back to the user.").strip(),
+        default_main_llm_system_prompt=os.getenv(
+            "MAIN_LLM_SYSTEM_PROMPT",
+            "You are a helpful voice assistant running on smart glasses. You receive structured input with clearly labelled sections: [User speech transcript] is what the user said (transcribed from their voice), [Visual context from smart-glasses camera] is a description of what the glasses camera sees right now, and [Context from tools/skills] contains any additional data. Your job is to answer the user's spoken question, using the visual context to enrich your response when relevant. Respond naturally as if speaking conversationally. Keep responses brief (1-3 sentences), clear, and directly relevant. Use simple everyday language suitable for voice output. If there are safety concerns visible in the scene, mention them immediately. Never repeat the section labels back to the user.",
+        ).strip(),
         default_vision_base_url=vision_base_url,
         default_vision_api_key=os.getenv("VISION_LLM_API_KEY", "").strip(),
-        default_vision_chat_path=os.getenv("VISION_LLM_CHAT_PATH", _default_openai_compat_path(vision_base_url, "/chat/completions")).strip(),
-        default_vision_model=_normalize_vision_model(os.getenv("VISION_LLM_MODEL", "mistral.ministral-3-3b-instruct")),
+        default_vision_chat_path=os.getenv(
+            "VISION_LLM_CHAT_PATH",
+            _default_openai_compat_path(vision_base_url, "/chat/completions"),
+        ).strip(),
+        default_vision_model=_normalize_vision_model(
+            os.getenv("VISION_LLM_MODEL", "mistral.ministral-3-3b-instruct")
+        ),
         default_vision_temperature=_read_float_env("VISION_LLM_TEMPERATURE", 0.2),
         default_vision_max_tokens=_read_int_env("VISION_LLM_MAX_TOKENS", 350),
-        default_vision_system_prompt=os.getenv("VISION_SYSTEM_PROMPT", "You are the visual analysis component of a smart glasses voice assistant system. Your outputs feed directly into the main LLM that generates spoken responses. You receive real-time images from Meta Ray-Ban smart glasses and must provide: 1. Accurate object detection and scene understanding 2. Clear identification of people, actions, and environmental context 3. Extraction of any visible text that might be relevant 4. Immediate flagging of safety concerns or hazards Your analysis enables the voice assistant to provide context-aware responses. Be precise, objective, and comprehensive in your observations.").strip(),
-        default_vision_prompt=os.getenv("VISION_PROMPT", "Analyse l'image et reponds uniquement en JSON valide avec les champs: description, should_contact, contact_message.").strip(),
+        default_vision_system_prompt=os.getenv(
+            "VISION_SYSTEM_PROMPT",
+            "You are the visual analysis component of a smart glasses voice assistant system. Your outputs feed directly into the main LLM that generates spoken responses. You receive real-time images from Meta Ray-Ban smart glasses and must provide: 1. Accurate object detection and scene understanding 2. Clear identification of people, actions, and environmental context 3. Extraction of any visible text that might be relevant 4. Immediate flagging of safety concerns or hazards Your analysis enables the voice assistant to provide context-aware responses. Be precise, objective, and comprehensive in your observations.",
+        ).strip(),
+        default_vision_prompt=os.getenv(
+            "VISION_PROMPT",
+            "Analyse the image and respond only in valid JSON with the fields: description, should_contact, contact_message.",
+        ).strip(),
         default_elevenlabs_api_key=os.getenv("ELEVENLABS_API_KEY", "").strip(),
-        default_elevenlabs_voice_id=os.getenv("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL").strip(),
-        default_elevenlabs_model_id=os.getenv("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5").strip(),
+        default_elevenlabs_voice_id=os.getenv(
+            "ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL"
+        ).strip(),
+        default_elevenlabs_model_id=os.getenv(
+            "ELEVENLABS_MODEL_ID", "eleven_flash_v2_5"
+        ).strip(),
         default_elevenlabs_speed=_read_float_env("ELEVENLABS_SPEED", 1.0),
-        default_elevenlabs_output_format=os.getenv("ELEVENLABS_OUTPUT_FORMAT", "mp3_44100_128").strip(),
+        default_elevenlabs_output_format=os.getenv(
+            "ELEVENLABS_OUTPUT_FORMAT", "mp3_44100_128"
+        ).strip(),
         default_trace_backends=_read_csv_env("TRACE_BACKENDS", ["console"]),
     )
 
