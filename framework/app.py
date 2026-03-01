@@ -10,6 +10,7 @@ from backend.routers.config import router as config_router
 from backend.routers.debug import router as debug_router
 from backend.routers.health import router as health_router
 from backend.routers.pipeline import router as pipeline_router
+from backend.routers.ws import router as ws_router
 
 
 app = FastAPI(title=SETTINGS.app_name, version=SETTINGS.app_version)
@@ -25,6 +26,7 @@ app.include_router(health_router)
 app.include_router(config_router)
 app.include_router(pipeline_router)
 app.include_router(debug_router)
+app.include_router(ws_router)
 
 
 if __name__ == "__main__":

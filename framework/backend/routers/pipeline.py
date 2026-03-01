@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+from typing import Any
+
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -12,6 +15,40 @@ from backend.services.pipeline import prepare_pipeline_run, run_pipeline
 from backend.tracing.manager import build_trace_manager
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+@router.post("/vision/frame")
+async def vision_frame(payload: dict[str, Any]) -> JSONResponse:
+    """iOS vision frame endpoint.
+    
+    Accepts the iOS JSON format with inline base64 image data.
+    For now, just acknowledges receipt - frame analysis can be added later.
+    
+    Expected payload:
+    {
+        "session_id": "sess_<UUID>",
+        "ts_ms": 1740777601000,
+        "frame_id": "frame_<nowMs>",
+        "capture_ts_ms": 1740777600990,
+        "width": 1280,
+        "height": 720,
+        "frame_b64": "<base64 encoded JPEG>"
+    }
+    """
+    session_id = payload.get("session_id")
+    frame_id = payload.get("frame_id")
+    ts_ms = payload.get("ts_ms")
+    frame_b64 = payload.get("frame_b64")
+    
+    if not session_id or not frame_id or not frame_b64 or ts_ms is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Missing required fields")
+    
+    # Log receipt (analysis can be added later)
+    logger.debug(f"Vision frame received: session={session_id} frame={frame_id} bytes={len(frame_b64)}")
+    
+    return JSONResponse(content={"status": "ok", "frame_id": frame_id})
 
 
 @router.post("/v1/pipeline")
@@ -131,4 +168,69 @@ async def pipeline_tts_stream(
             "X-Video-Summary-Available": "1" if prepared.video_summary else "0",
             "X-TTS-Relay-Mode": "llm-token-live",
         },
+    )
+
+
+@router.post("/v1/query")
+async def ios_query(
+    request: Request,
+    metadata: str = Form(...),
+    audio: UploadFile = File(...),
+    video: UploadFile = File(...),
+    runtime_config: str | None = Form(default=None),
+) -> JSONResponse:
+    """iOS query bundle endpoint.
+    
+    Accepts the iOS multipart format (metadata + audio + video), processes
+    the query through the pipeline, and streams audio back over WebSocket.
+    
+    The HTTP response returns immediately with {"status": "ok", "query_id": "...", "processing": true}.
+    Actual audio delivery happens asynchronously over the WebSocket connection.
+    """
+    import asyncio
+    import json
+    
+    from backend.services.ios_query import process_ios_query_background
+    
+    # Parse metadata JSON
+    try:
+        metadata_obj = json.loads(metadata)
+    except json.JSONDecodeError as exc:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=f"Invalid metadata JSON: {exc}")
+    
+    # Extract required fields
+    session_id = metadata_obj.get("session_id")
+    query_id = metadata_obj.get("query_id")
+    
+    if not session_id or not query_id:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=400,
+            detail="metadata.session_id and metadata.query_id are required",
+        )
+    
+    # Read file data
+    audio_bytes = await audio.read()
+    video_bytes = await video.read()
+    
+    # Spawn background task for pipeline processing
+    asyncio.create_task(
+        process_ios_query_background(
+            session_id=session_id,
+            query_id=query_id,
+            audio_bytes=audio_bytes,
+            video_bytes=video_bytes,
+            metadata=metadata_obj,
+            runtime_config_json=runtime_config,
+        )
+    )
+    
+    # Return immediately
+    return JSONResponse(
+        content={
+            "status": "ok",
+            "query_id": query_id,
+            "processing": True,
+        }
     )

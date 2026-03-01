@@ -22,6 +22,12 @@ async def healthcheck() -> dict[str, str]:
     }
 
 
+@router.get("/health")
+async def health_alias() -> dict[str, str]:
+    """Alias for /healthz to support iOS app expectations."""
+    return await healthcheck()
+
+
 @router.get("/v1/debug/endpoints")
 async def debug_endpoints(request: Request) -> JSONResponse:
     require_edge_api_key(request)
