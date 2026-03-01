@@ -1,0 +1,4 @@
+# Optional tracing/plugin dependencies for v1.5.1
+# Install only if you need these integrations.
+weave
+strands-agents

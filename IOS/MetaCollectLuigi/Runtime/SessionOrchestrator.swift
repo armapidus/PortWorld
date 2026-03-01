@@ -1,0 +1,640 @@
+import AVFAudio
+import Foundation
+import UIKit
+
+@MainActor
+final class SessionOrchestrator {
+  struct Dependencies {
+    let startStream: () async -> Void
+    let stopStream: () async -> Void
+    let exportAudioClip: (AudioClipExportWindow) throws -> URL
+    let flushPendingAudioChunks: () -> Void
+    let audioBufferDurationProvider: () -> Int
+    /// Shared AVAudioEngine from AudioCollectionManager for playback.
+    /// Pass nil to create an internal engine (not recommended for HFP).
+    let sharedAudioEngine: AVAudioEngine?
+  }
+
+  struct StatusSnapshot {
+    var sessionState: SessionState = .idle
+    var wakeState: WakeState = .listening
+    var queryState: QueryState = .idle
+    var photoState: PhotoUploadState = .idle
+    var playbackState: String = "idle"
+    var sessionID: String = "-"
+    var queryID: String = "-"
+    var wakeCount: Int = 0
+    var queryCount: Int = 0
+    var photoUploadCount: Int = 0
+    var playbackChunkCount: Int = 0
+    var videoFrameCount: Int = 0
+    var wakeEngine: String = WakeWordEngineKind.manual.rawValue
+    var wakeRuntimeStatus: String = WakeWordRuntimeStatus.idle.rawValue
+    var speechAuthorization: String = WakeWordAuthorizationState.notRequired.rawValue
+    var manualWakeFallbackEnabled: Bool = true
+    var backendSummary: String = "-"
+    var lastError: String = ""
+  }
+
+  private struct ActiveQueryContext {
+    let queryID: String
+    let wakeTsMs: Int64
+    var startTsMs: Int64
+  }
+
+  var onStatusUpdated: ((StatusSnapshot) -> Void)?
+
+  private let config: RuntimeConfig
+  private let dependencies: Dependencies
+  private let eventLogger = EventLogger()
+  private let healthIntervalMs: UInt64 = 10_000
+
+  private let manualWakeEngine: ManualWakeWordEngine
+  private let primaryWakeEngine: WakeWordEngine
+
+  private func configureWakeEngine(_ engine: WakeWordEngine) {
+    engine.onWakeDetected = { [weak self] event in
+      Task { @MainActor in
+        self?.handleWakeDetected(event)
+      }
+    }
+    engine.onError = { [weak self] error in
+      Task { @MainActor in
+        self?.setError(error.localizedDescription)
+      }
+    }
+    engine.onStatusChanged = { [weak self] status in
+      Task { @MainActor in
+        self?.snapshot.wakeEngine = status.engine.rawValue
+        self?.snapshot.wakeRuntimeStatus = status.runtime.rawValue
+        self?.snapshot.speechAuthorization = status.authorization.rawValue
+        self?.publishSnapshot()
+      }
+    }
+  }
+
+  private lazy var queryEndpointDetector: QueryEndpointDetector = {
+    let detector = QueryEndpointDetector(silenceTimeoutMs: Int64(config.silenceTimeoutMs))
+    detector.onQueryStarted = { [weak self] event in
+      Task { @MainActor in
+        self?.handleQueryStarted(event)
+      }
+    }
+    detector.onQueryEnded = { [weak self] event in
+      Task { @MainActor in
+        await self?.handleQueryEnded(event)
+      }
+    }
+    return detector
+  }()
+
+  private lazy var visionFrameUploader: VisionFrameUploader = {
+    let uploader = VisionFrameUploader(
+      endpointURL: config.visionFrameURL,
+      defaultHeaders: config.requestHeaders,
+      sessionIDProvider: { [weak self] in self?.activeSessionID },
+      uploadIntervalMs: Self.photoUploadIntervalMs(photoFps: config.photoFps)
+    )
+    uploader.onUploadResult = { [weak self] result in
+      Task { @MainActor in
+        self?.handleVisionUploadResult(result)
+      }
+    }
+    return uploader
+  }()
+
+  private lazy var rollingVideoBuffer = RollingVideoBuffer(maxDurationMs: Int64(max(config.preWakeVideoMs * 6, 30_000)))
+  private lazy var queryBundleBuilder = QueryBundleBuilder(endpointURL: config.queryURL, defaultHeaders: config.requestHeaders)
+  private let playbackEngine: AssistantPlaybackEngine
+
+  private lazy var webSocketClient: SessionWebSocketClient = {
+    SessionWebSocketClient(
+      url: config.webSocketURL,
+      requestHeaders: config.requestHeaders,
+      onStateChange: { [weak self] state in
+        Task { @MainActor in
+          self?.handleWebSocketState(state)
+        }
+      },
+      onMessage: { [weak self] message in
+        Task { @MainActor in
+          await self?.handleInboundWebSocketMessage(message)
+        }
+      },
+      onError: { [weak self] error in
+        Task { @MainActor in
+          self?.setError(error.localizedDescription)
+        }
+      },
+      eventLogger: eventLogger
+    )
+  }()
+
+  private var snapshot = StatusSnapshot()
+  private var activeSessionID: String?
+  private var activeQueryContext: ActiveQueryContext?
+  private var isActivated = false
+  private var runtimeState: RuntimeState = .foregroundActive
+  private var photosFailed = 0
+  private var queryBundlesUploaded = 0
+  private var queryBundlesFailed = 0
+  private var wsReconnectAttempts = 0
+  private var sessionActivatedAtMs: Int64 = 0
+  private var lastKnownPlaybackRoute = "unknown"
+  private var healthTask: Task<Void, Never>?
+
+  init(config: RuntimeConfig, dependencies: Dependencies) {
+    self.config = config
+    self.dependencies = dependencies
+    
+    // Initialize playback engine with shared audio engine from AudioCollectionManager
+    self.playbackEngine = AssistantPlaybackEngine(audioEngine: dependencies.sharedAudioEngine)
+    
+    let manual = ManualWakeWordEngine(defaultPhrase: config.wakePhrase)
+    self.manualWakeEngine = manual
+
+    if config.wakeWordMode == .onDevicePreferred {
+      self.primaryWakeEngine = SFSpeechWakeWordEngine(
+        wakePhrase: config.wakePhrase,
+        localeIdentifier: config.wakeWordLocaleIdentifier,
+        requiresOnDeviceRecognition: config.wakeWordRequiresOnDeviceRecognition,
+        detectionCooldownMs: config.wakeWordDetectionCooldownMs
+      )
+      self.snapshot.manualWakeFallbackEnabled = true
+    } else {
+      self.primaryWakeEngine = manual
+      self.snapshot.manualWakeFallbackEnabled = true
+    }
+
+    configureWakeEngine(manualWakeEngine)
+    if primaryWakeEngine !== manualWakeEngine {
+      configureWakeEngine(primaryWakeEngine)
+    }
+    self.snapshot.backendSummary = config.backendSummary
+    configurePlaybackEngine()
+  }
+
+  func preflightWakeAuthorization() async {
+    let status = await primaryWakeEngine.requestAuthorizationIfNeeded()
+    snapshot.speechAuthorization = status.rawValue
+    if status != .authorized, primaryWakeEngine !== manualWakeEngine {
+      snapshot.wakeRuntimeStatus = WakeWordRuntimeStatus.fallbackManual.rawValue
+    }
+    publishSnapshot()
+  }
+
+  func activate() async {
+    guard !isActivated else { return }
+
+    isActivated = true
+    let sessionID = "sess_\(UUID().uuidString)"
+    activeSessionID = sessionID
+
+    snapshot.sessionState = .connecting
+    snapshot.sessionID = sessionID
+    snapshot.wakeState = .listening
+    snapshot.queryState = .idle
+    snapshot.wakeEngine = primaryWakeEngine.engineKind.rawValue
+    snapshot.speechAuthorization = primaryWakeEngine.currentAuthorizationStatus().rawValue
+    publishSnapshot()
+    runtimeState = .foregroundActive
+    photosFailed = 0
+    queryBundlesUploaded = 0
+    queryBundlesFailed = 0
+    wsReconnectAttempts = 0
+    sessionActivatedAtMs = RuntimeClock.nowMs()
+
+    await dependencies.startStream()
+    visionFrameUploader.start()
+    manualWakeEngine.startListening()
+    if primaryWakeEngine !== manualWakeEngine {
+      _ = await primaryWakeEngine.requestAuthorizationIfNeeded()
+      primaryWakeEngine.startListening()
+    }
+
+    await webSocketClient.connect()
+    startHealthLoop()
+
+    await logEvent(name: "session.activate")
+    await sendOutbound(type: .sessionActivate, payload: EmptyPayload())
+    await emitHealth(reason: "activate")
+  }
+
+  func deactivate() async {
+    guard isActivated else { return }
+
+    queryEndpointDetector.reset()
+    manualWakeEngine.stopListening()
+    if primaryWakeEngine !== manualWakeEngine {
+      primaryWakeEngine.stopListening()
+    }
+    visionFrameUploader.stop()
+    rollingVideoBuffer.clear()
+    playbackEngine.shutdown()
+    stopHealthLoop()
+
+    await sendOutbound(type: .sessionDeactivate, payload: EmptyPayload())
+    await webSocketClient.disconnect()
+    await dependencies.stopStream()
+
+    activeQueryContext = nil
+    activeSessionID = nil
+    isActivated = false
+
+    snapshot.sessionState = .ended
+    snapshot.queryState = .idle
+    snapshot.wakeState = .listening
+    snapshot.photoState = .idle
+    snapshot.playbackState = "idle"
+    snapshot.queryID = "-"
+    publishSnapshot()
+  }
+
+  func handleAppDidEnterBackground() {
+    runtimeState = .backgroundBestEffort
+    playbackEngine.prepareForBackground()
+    Task {
+      await logEvent(name: "runtime.background")
+      await emitHealth(reason: "background")
+    }
+  }
+
+  func handleAppWillResignActive() {
+    runtimeState = .suspended
+    Task {
+      await logEvent(name: "runtime.suspended")
+    }
+  }
+
+  func handleAppDidBecomeActive() {
+    runtimeState = .resumed
+    playbackEngine.restoreFromBackground()
+    Task {
+      await logEvent(name: "runtime.resumed")
+      if isActivated {
+        await webSocketClient.ensureConnected()
+      }
+      runtimeState = .foregroundActive
+      await emitHealth(reason: "foreground")
+    }
+  }
+
+  func pushVideoFrame(_ image: UIImage, timestampMs: Int64) {
+    guard isActivated else { return }
+
+    rollingVideoBuffer.append(frame: image, timestampMs: timestampMs)
+    visionFrameUploader.submitLatestFrame(image, captureTimestampMs: timestampMs)
+
+    snapshot.videoFrameCount += 1
+    publishSnapshot()
+  }
+
+  func submitCapturedPhoto(_ image: UIImage, timestampMs: Int64) {
+    guard isActivated else { return }
+    visionFrameUploader.submitLatestFrame(image, captureTimestampMs: timestampMs)
+  }
+
+  func processWakePCMFrame(_ frame: WakeWordPCMFrame) {
+    guard isActivated else { return }
+    if primaryWakeEngine !== manualWakeEngine {
+      primaryWakeEngine.processPCMFrame(frame)
+    }
+  }
+
+  func recordSpeechActivity(at timestampMs: Int64) {
+    guard activeQueryContext != nil else { return }
+    queryEndpointDetector.recordSpeechActivity(at: timestampMs)
+  }
+
+  func triggerWakeForTesting() {
+    manualWakeEngine.triggerManualWake()
+  }
+
+  var wakeEngineType: String {
+    primaryWakeEngine.engineKind.rawValue
+  }
+
+  private func handleWakeDetected(_ event: WakeWordDetectionEvent) {
+    guard isActivated else { return }
+    guard activeQueryContext == nil else { return }
+
+    let queryID = "query_\(UUID().uuidString)"
+    activeQueryContext = ActiveQueryContext(
+      queryID: queryID,
+      wakeTsMs: event.timestampMs,
+      startTsMs: event.timestampMs
+    )
+
+    snapshot.wakeState = .triggered
+    snapshot.wakeCount += 1
+    snapshot.queryID = queryID
+    publishSnapshot()
+
+    let payload = WakewordDetectedPayload(
+      wakePhrase: event.wakePhrase,
+      engine: event.engine,
+      confidence: event.confidence.map(Double.init)
+    )
+
+    Task {
+      await logEvent(name: "wakeword.detected", queryID: queryID)
+      await sendOutbound(type: .wakewordDetected, payload: payload)
+    }
+
+    queryEndpointDetector.beginQuery(queryId: queryID, startedAtMs: event.timestampMs)
+  }
+
+  private func handleQueryStarted(_ event: QueryEndpointStartedEvent) {
+    guard var context = activeQueryContext, context.queryID == event.queryId else { return }
+
+    context.startTsMs = event.startedAtMs
+    activeQueryContext = context
+    snapshot.queryState = .recording
+    snapshot.wakeState = .listening
+    publishSnapshot()
+
+    Task {
+      await logEvent(name: "query.started", queryID: context.queryID)
+      await sendOutbound(type: .queryStarted, payload: QueryStartedPayload(queryID: context.queryID))
+    }
+  }
+
+  private func handleQueryEnded(_ event: QueryEndpointEndedEvent) async {
+    guard let context = activeQueryContext, context.queryID == event.queryId else { return }
+
+    snapshot.queryState = .processingBundle
+    snapshot.queryCount += 1
+    publishSnapshot()
+
+    await logEvent(name: "query.ended", queryID: context.queryID)
+    await sendOutbound(
+      type: .queryEnded,
+      payload: QueryEndedPayload(
+        queryID: context.queryID,
+        reason: event.reason.rawValue,
+        silenceTimeoutMs: config.silenceTimeoutMs,
+        durationMs: Int(event.durationMs)
+      )
+    )
+
+    do {
+      // Flush any buffered audio to ensure partial chunks are written before export
+      dependencies.flushPendingAudioChunks()
+      
+      // Extend window backwards by 2 seconds to account for potential timing drift
+      // between wake detection timestamp and audio chunk timestamps
+      let adjustedStartTs = max(0, context.startTsMs - 2000)
+      let clipWindow = AudioClipExportWindow(startTimestampMs: adjustedStartTs, endTimestampMs: event.endedAtMs)
+      print("[SessionOrchestrator] Export clip window: [\(adjustedStartTs)-\(event.endedAtMs)] (original start: \(context.startTsMs))")
+      let audioURL = try dependencies.exportAudioClip(clipWindow)
+
+      let videoStartMs = max(0, context.wakeTsMs - Int64(config.preWakeVideoMs))
+      let videoResult = try await rollingVideoBuffer.exportInterval(
+        startTimestampMs: videoStartMs,
+        endTimestampMs: event.endedAtMs
+      )
+
+      let metadata = QueryMetadata(
+        sessionID: activeSessionID ?? "unknown",
+        queryID: context.queryID,
+        wakeTsMs: context.wakeTsMs,
+        queryStartTsMs: context.startTsMs,
+        queryEndTsMs: event.endedAtMs,
+        videoStartTsMs: videoStartMs,
+        videoEndTsMs: event.endedAtMs
+      )
+
+      snapshot.queryState = .uploading
+      publishSnapshot()
+
+      let uploadResult = try await queryBundleBuilder.uploadQueryBundle(
+        metadata: metadata,
+        audioFileURL: audioURL,
+        videoFileURL: videoResult.outputURL
+      )
+      queryBundlesUploaded += 1
+
+      await sendOutbound(
+        type: .queryBundleUploaded,
+        payload: QueryBundleUploadedPayload(
+          queryID: context.queryID,
+          uploadStatus: uploadResult.success ? "ok" : "failed",
+          audioBytes: uploadResult.audioBytes,
+          videoBytes: uploadResult.videoBytes
+        )
+      )
+
+      snapshot.queryState = .idle
+      snapshot.queryID = "-"
+      activeQueryContext = nil
+      publishSnapshot()
+      await emitHealth(reason: "query_uploaded")
+    } catch {
+      queryBundlesFailed += 1
+      setError(error.localizedDescription)
+      snapshot.queryState = .failed
+      publishSnapshot()
+      activeQueryContext = nil
+      snapshot.queryID = "-"
+      await emitHealth(reason: "query_failed")
+    }
+  }
+
+  private func handleVisionUploadResult(_ result: VisionFrameUploadResult) {
+    snapshot.photoState = result.success ? .idle : .failed
+    if result.success {
+      snapshot.photoUploadCount += 1
+    } else {
+      photosFailed += 1
+      if let description = result.errorDescription {
+        setError("[\(result.errorCode ?? "PHOTO_UPLOAD_FAILED")] \(description)")
+      } else {
+        setError(result.errorCode ?? "PHOTO_UPLOAD_FAILED")
+      }
+    }
+    publishSnapshot()
+  }
+
+  private func handleWebSocketState(_ state: SessionWebSocketConnectionState) {
+    switch state {
+    case .idle:
+      snapshot.sessionState = .idle
+    case .connecting:
+      snapshot.sessionState = .connecting
+    case .connected:
+      snapshot.sessionState = .active
+    case .reconnecting(let attempt, _):
+      snapshot.sessionState = .reconnecting
+      wsReconnectAttempts = max(wsReconnectAttempts, attempt)
+    case .disconnected:
+      if isActivated {
+        snapshot.sessionState = .reconnecting
+      } else {
+        snapshot.sessionState = .ended
+      }
+    }
+    publishSnapshot()
+    Task {
+      await emitHealth(reason: "ws_state")
+    }
+  }
+
+  private func handleInboundWebSocketMessage(_ message: WSInboundMessage) async {
+    switch message {
+    case .assistantAudioChunk(let envelope):
+      print("[DEBUG] Received audio chunk: \(envelope.payload.chunkID), bytes: \(envelope.payload.bytesB64.count), sampleRate: \(envelope.payload.sampleRate), isLast: \(envelope.payload.isLast)")
+      do {
+        try playbackEngine.appendChunk(envelope.payload)
+        snapshot.playbackChunkCount += 1
+        snapshot.playbackState = envelope.payload.isLast ? "idle" : "playing"
+        publishSnapshot()
+        print("[DEBUG] Audio chunk processed successfully, playbackChunkCount: \(snapshot.playbackChunkCount)")
+      } catch {
+        print("[DEBUG] Audio chunk error: \(error.localizedDescription)")
+        setError(error.localizedDescription)
+      }
+
+    case .assistantPlaybackControl(let envelope):
+      print("[DEBUG] Received playback control: \(envelope.payload.command.rawValue)")
+      playbackEngine.handlePlaybackControl(envelope.payload)
+      snapshot.playbackState = envelope.payload.command.rawValue
+      publishSnapshot()
+
+    case .error(let envelope):
+      setError(envelope.payload.message)
+
+    case .sessionState(let envelope):
+      snapshot.sessionState = envelope.payload.state
+      publishSnapshot()
+
+    case .healthPong, .unknown:
+      break
+    }
+  }
+
+  private func setError(_ message: String) {
+    snapshot.lastError = message
+    publishSnapshot()
+    Task {
+      await logEvent(name: "error", fields: ["message": .string(message)])
+    }
+  }
+
+  private func publishSnapshot() {
+    onStatusUpdated?(snapshot)
+  }
+
+  private func configurePlaybackEngine() {
+    lastKnownPlaybackRoute = playbackEngine.currentRouteDescription()
+    playbackEngine.onRouteChanged = { [weak self] route in
+      self?.lastKnownPlaybackRoute = route
+    }
+    playbackEngine.onRouteIssue = { [weak self] message in
+      guard let self else { return }
+      self.setError(message)
+      Task {
+        await self.sendOutbound(
+          type: .error,
+          payload: RuntimeErrorPayload(
+            code: "AUDIO_PLAYBACK_ROUTE_ERROR",
+            retriable: true,
+            message: message
+          )
+        )
+      }
+    }
+  }
+
+  private func startHealthLoop() {
+    healthTask?.cancel()
+    healthTask = Task { [weak self] in
+      guard let self else { return }
+      while !Task.isCancelled {
+        await self.emitHealth(reason: "interval")
+        try? await Task.sleep(nanoseconds: healthIntervalMs * 1_000_000)
+      }
+    }
+  }
+
+  private func stopHealthLoop() {
+    healthTask?.cancel()
+    healthTask = nil
+  }
+
+  private func emitHealth(reason: String) async {
+    guard isActivated, activeSessionID != nil else { return }
+
+    await sendOutbound(type: .healthPing, payload: EmptyPayload())
+
+    let photoRate = effectivePhotoUploadRate()
+    let reconnectAttempts = await webSocketClient.reconnectAttemptCount()
+    let statsPayload = HealthStatsPayload(
+      wakeState: snapshot.wakeState,
+      queryState: snapshot.queryState,
+      queriesCompleted: snapshot.queryCount,
+      queryBundlesUploaded: queryBundlesUploaded,
+      queryBundlesFailed: queryBundlesFailed,
+      photoUploadRateEffective: photoRate,
+      photosUploaded: snapshot.photoUploadCount,
+      photosFailed: photosFailed,
+      videoBufferDurationMs: Int(rollingVideoBuffer.bufferedDurationMs),
+      audioBufferDurationMs: dependencies.audioBufferDurationProvider(),
+      wsReconnectAttempts: max(wsReconnectAttempts, reconnectAttempts),
+      playbackRoute: lastKnownPlaybackRoute
+    )
+    await sendOutbound(type: .healthStats, payload: statsPayload)
+    await logEvent(
+      name: "health.stats",
+      fields: [
+        "reason": .string(reason),
+        "runtime_state": .string(runtimeState.rawValue),
+        "photo_upload_rate_effective": .number(photoRate),
+        "photos_uploaded": .number(Double(snapshot.photoUploadCount)),
+        "photos_failed": .number(Double(photosFailed)),
+        "queries_completed": .number(Double(snapshot.queryCount)),
+        "query_bundles_uploaded": .number(Double(queryBundlesUploaded)),
+        "query_bundles_failed": .number(Double(queryBundlesFailed)),
+        "video_buffer_duration_ms": .number(Double(rollingVideoBuffer.bufferedDurationMs)),
+        "audio_buffer_duration_ms": .number(Double(dependencies.audioBufferDurationProvider())),
+        "ws_reconnect_attempts": .number(Double(wsReconnectAttempts)),
+        "playback_route": .string(lastKnownPlaybackRoute)
+      ]
+    )
+  }
+
+  private func effectivePhotoUploadRate() -> Double {
+    let elapsedMs = max(1, RuntimeClock.nowMs() - sessionActivatedAtMs)
+    return (Double(snapshot.photoUploadCount) * 1000.0) / Double(elapsedMs)
+  }
+
+  private static func photoUploadIntervalMs(photoFps: Double) -> Int64 {
+    let clamped = max(0.1, photoFps)
+    return Int64(max(100, (1000.0 / clamped).rounded()))
+  }
+
+  private func sendOutbound<Payload: Codable>(type: WSOutboundType, payload: Payload) async {
+    guard let sessionID = activeSessionID else { return }
+
+    do {
+      try await webSocketClient.send(type: type, sessionID: sessionID, payload: payload)
+    } catch let wsError as SessionWebSocketClientError {
+      // Expected while socket is transitioning/disconnected; avoid spamming
+      // app-level error state with redundant transport noise.
+      if case .notConnected = wsError {
+        return
+      }
+      setError(wsError.localizedDescription)
+    } catch {
+      setError(error.localizedDescription)
+    }
+  }
+
+  private func logEvent(name: String, queryID: String? = nil, fields: [String: JSONValue] = [:]) async {
+    eventLogger.log(
+      name: name,
+      sessionID: activeSessionID ?? "unknown",
+      queryID: queryID,
+      fields: fields
+    )
+  }
+}
