@@ -1,91 +1,199 @@
 # Port:🌍
 
-Open-source framework to plug your AI expertise into the real world through smart glasses.
+Open-source multimodal framework to plug your AI expertise into the real world through smart glasses.
 
-## Executive Summary
+`Port:🌍` combines an iOS glasses client with a FastAPI backend for voice + vision + tool orchestration.  
+You own the domain logic and prompts; Port provides the runtime, transport, and integration surface.
 
-`Port:🌍` lets teams bring existing AI solutions to field operations with native vision + voice pipelines:
+## Highlights
 
-- Voice in: Voxtral (customizable)
-- Vision in: image/video context (base64 + query bundles), Nemotron 12B and other vision models (customizable)
-- Agent orchestration: Strands-compatible routing with optional Weave tracing
-- Voice out: ElevenLabs streaming
+- Voice in with Voxtral-compatible STT.
+- Vision/video understanding with Nemotron-compatible and OpenAI-compatible endpoints.
+- Agent presets + runtime overrides (`runtime_config`) for lean personalization.
+- Live token-to-audio relay (`/v1/pipeline/tts-stream`) with ElevenLabs streaming.
+- iOS app (`PortWorld`) with "test backend" flow for end-to-end smoke testing.
 
-Core idea: you own the domain expertise and agent logic, Port brings the real-world glasses runtime and transport layer.
-Think of it as an open-source "openclaw" for smart-glasses applications.
+## Table Of Contents
 
-## What Port Solves
-
-- Removes hardcoded/legacy setup patterns and versioned branding
-- Provides lean runtime personalization instead of massive `.env` churn
-- Makes agent behavior explicit and pluggable
-- Keeps iOS + backend contracts stable for contributors
-
-## Typical Use Cases
-
-- Guided tours and real-time cultural assistance
-- Accessibility support in mobility or vision-constrained contexts
-- Field operations: plumbing, maintenance, inspection, commercial assistance
+- [Architecture](#architecture)
+- [Repository Layout](#repository-layout)
+- [Quick Start (5 Minutes)](#quick-start-5-minutes)
+- [iOS Setup (Simulator + Real iPhone)](#ios-setup-simulator--real-iphone)
+- [Run End-to-End Test From The App](#run-end-to-end-test-from-the-app)
+- [Backend API Surface](#backend-api-surface)
+- [Troubleshooting](#troubleshooting)
+- [Security Notes](#security-notes)
+- [Additional Docs](#additional-docs)
 
 ## Architecture
 
-1. Glasses + iOS capture audio/video/photo context.
-2. Backend pipeline resolves runtime profile, selected agent, and model/tool routing.
-3. Strands-compatible driver path can orchestrate the agent/tool chain.
-4. Weave/console tracing can observe runs.
-5. TTS streaming returns audio to the client (including live LLM-token relay path).
+1. Glasses + iOS app capture audio/video/photo context.
+2. Backend resolves runtime profile, selected agent, and provider routing.
+3. Main LLM generates response using transcript + visual context + optional tools.
+4. TTS endpoint streams assistant audio back to the client.
 
 ## Repository Layout
 
-- `framework/` - Port:🌍 backend framework (FastAPI, runtime config, pipeline, agents, providers)
-- `IOS/` - Port:🌍 iOS client (`PortWorld`) for Meta Wearables DAT integration
+- `framework/`: backend framework (FastAPI, runtime config, providers, agents, tracing).
+- `IOS/`: iOS client app (`PortWorld`) for Meta Wearables DAT integration.
 
-## Quick Start
+## Quick Start (5 Minutes)
 
-### Backend
+### 1) Clone And Install
 
 ```bash
+git clone https://github.com/armapidus/PortWorld.git
+cd PortWorld
+
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 pip install -r framework/requirements.txt
-cp framework/.env.example .env
-python framework/app.py
 ```
 
-### iOS
+### 2) Configure Backend Environment
+
+```bash
+cp framework/.env.example .env
+```
+
+Update `.env` with your keys (minimum recommended):
+
+- `MAIN_LLM_API_KEY`
+- `VOXTRAL_API_KEY`
+- `NEMOTRON_BASE_URL`
+- `NEMOTRON_API_KEY`
+- `ELEVENLABS_API_KEY`
+- optional: `EDGE_API_KEY`
+
+### 3) Run Backend
+
+```bash
+HOST=0.0.0.0 PORT=8082 python framework/app.py
+```
+
+### 4) Smoke Test Backend
+
+```bash
+curl -sS http://127.0.0.1:8082/healthz | jq
+curl -sS http://127.0.0.1:8082/v1/agents | jq
+curl -sS http://127.0.0.1:8082/v1/config/quickstart-template | jq
+```
+
+## iOS Setup (Simulator + Real iPhone)
+
+### 1) Open Project
 
 ```bash
 open IOS/PortWorld.xcodeproj
 ```
 
-Set minimal iOS runtime config in `IOS/Info.plist`:
+### 2) Configure Backend URL In `Info.plist`
 
-- `SON_BACKEND_BASE_URL`
-- `SON_WS_PATH`
-- `SON_VISION_PATH`
-- `SON_QUERY_PATH`
-- optional: `SON_API_KEY`, `SON_BEARER_TOKEN`
+Edit `SON_BACKEND_BASE_URL` in [`IOS/Info.plist`](IOS/Info.plist):
 
-## API Surface (Backend)
+- iOS Simulator: `http://127.0.0.1:8082`
+- real iPhone: `http://<YOUR_MAC_LAN_IP>:8082`
+
+Get your Mac LAN IP:
+
+```bash
+ipconfig getifaddr en0 || ipconfig getifaddr en1
+```
+
+Keep default paths:
+
+- `SON_WS_PATH=/ws/session`
+- `SON_VISION_PATH=/vision/frame`
+- `SON_QUERY_PATH=/query`
+
+### 3) Signing For Personal Team
+
+If you use a free/personal Apple team:
+
+1. `TARGETS > PortWorld > Signing & Capabilities`
+2. Enable `Automatically manage signing`
+3. Select your `Personal Team`
+4. Use a unique bundle id (for example `com.yourname.PortWorld`)
+5. Remove `Associated Domains` capability for local testing
+6. In `Build Settings`, clear `Code Signing Entitlements` if still pointing to `PortWorld.entitlements`
+
+### 4) Real iPhone Prerequisites
+
+1. Enable iPhone Developer Mode:
+   - `Settings > Privacy & Security > Developer Mode`
+2. Keep iPhone and Mac on the same Wi-Fi.
+3. Allow local network access for PortWorld in iPhone settings.
+
+## Run End-to-End Test From The App
+
+You can validate backend integration without glasses by using the built-in example media flow.
+
+1. Launch the app from Xcode (`Cmd+R`).
+2. Tap `TEST BACKEND (Example Media)`:
+   - available on Home screen
+   - available on Runtime setup screen
+3. App posts to `POST /v1/pipeline/tts-stream` and plays returned audio.
+
+Backend should log a `POST /v1/pipeline/tts-stream` request.
+
+## Backend API Surface
 
 - `GET /healthz`
+- `GET /v1/debug/endpoints`
 - `GET /v1/agents`
 - `GET /v1/config/quickstart-template`
+- `GET /v1/config/runtime-template`
 - `POST /v1/pipeline`
 - `POST /v1/pipeline/tts-stream`
 - `POST /v1/elevenlabs/stream`
+- `POST /v1/debug/ios/simulate`
+- `POST /v1/debug/vision/frame`
 
-## Open Source Personalization Model
+## Troubleshooting
 
-Lean by default:
+### `Connection refused` to `127.0.0.1:8080`
 
-- Keep stable defaults in code/templates
-- Override at runtime only what is needed (`runtime_config`)
-- Add custom agents/tools without editing core pipeline
+Cause: app points to port `8080` while backend runs on `8082`.  
+Fix: set `SON_BACKEND_BASE_URL` to correct host/port.
 
-This keeps onboarding short for teams integrating their own AI solution.
+### `The Internet connection appears to be offline` with `Local network prohibited`
+
+Cause: iOS blocked local network permission.  
+Fix:
+
+1. `Settings > PortWorld > Local Network` -> enable.
+2. Reinstall app if needed to trigger permission prompt again.
+
+### Can open server in Safari but app still fails
+
+Check:
+
+- `SON_BACKEND_BASE_URL` is exactly correct.
+- iPhone and Mac are on same subnet.
+- backend running with `HOST=0.0.0.0`.
+
+### App call works but backend audio does not play
+
+Update to latest code on `main`.  
+`ExampleMediaPipelineTester` now requests `mp3_44100_128` and includes playback fallbacks.
+
+### `Invalid profile 'uRGB'` warnings
+
+Non-blocking image/profile warning in logs. Usually unrelated to network/audio flow.
+
+## Security Notes
+
+- Never commit real API keys to Git.
+- Use `.env` locally and rotate keys if accidentally shared.
+- Use `EDGE_API_KEY` when exposing backend beyond local/private network.
+
+## Additional Docs
+
+- Backend details: [`framework/README.md`](framework/README.md)
+- iOS details: [`IOS/README.md`](IOS/README.md)
+- Mock backend for v4 reliability loops: [`IOS/tools/mock_backend/README.md`](IOS/tools/mock_backend/README.md)
 
 ## License
 
-Recommended for public release: Apache-2.0 (or MIT).
+Recommended for open-source release: Apache-2.0 or MIT.
