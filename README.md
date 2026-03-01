@@ -1,15 +1,26 @@
-# Port:🌍
 
-Open-source multimodal framework to plug your AI expertise into the real world through smart glasses.
+<p> <img width="7173" height="1758" alt="Associer@3x" src="https://github.com/user-attachments/assets/f65cca33-ff43-47fc-bb5f-96af42dd660d" />
 
-`Port:🌍` combines an iOS glasses client with a FastAPI backend for voice + vision + tool orchestration.  
-You own the domain logic and prompts; Port provides the runtime, transport, and integration surface.
+<p align="center">
+  <b>Open-source multimodal framework to plug your AI expertise into the real world through smart glasses.</b>
+</p>
+
+<p align="center">
+  <b>Port:World🌍 has been built during Mistral Worlwide Hackathon 2026 with the (huge) help of Mistral Vibe 🥖🇫🇷</b>
+</p>
+
+<p align="center">
+  <b> It combines an iOS glasses client with a FastAPI backend for voice + vision + tool orchestration. You own the domain logic and prompts; Port provides the runtime, transport, and integration surface.</b>
+</p>
+
+
+
 
 ## Highlights
 
 - Voice in with Voxtral-compatible STT.
-- Vision/video understanding with Nemotron-compatible and OpenAI-compatible endpoints.
-- Agent presets + runtime overrides (`runtime_config`) for lean personalization.
+- Vision/video understanding with Nemotron-compatible endpoints (NVIDIA GPU BREV Deployments and OpenAI API Compatible.
+- Agent presets + runtime overrides
 - Live token-to-audio relay (`/v1/pipeline/tts-stream`) with ElevenLabs streaming.
 - iOS app (`PortWorld`) with "test backend" flow for end-to-end smoke testing.
 
@@ -31,6 +42,10 @@ You own the domain logic and prompts; Port provides the runtime, transport, and 
 2. Backend resolves runtime profile, selected agent, and provider routing.
 3. Main LLM generates response using transcript + visual context + optional tools.
 4. TTS endpoint streams assistant audio back to the client.
+
+### MistralAI Worldwide Hackathon Architecture Example
+
+<img width="2600" height="1200" alt="image" src="https://github.com/user-attachments/assets/b025ab6a-47a9-420f-ae9e-288207df02d7" />
 
 ## Repository Layout
 
@@ -59,12 +74,12 @@ cp framework/.env.example .env
 
 Update `.env` with your keys (minimum recommended):
 
-- `MAIN_LLM_API_KEY`
-- `VOXTRAL_API_KEY`
-- `NEMOTRON_BASE_URL`
+- `MAIN_LLM_API_KEY` (agents other STT)
+- `VOXTRAL_API_KEY` (or other STT)
+- `NEMOTRON_BASE_URL` (or other VTT)
 - `NEMOTRON_API_KEY`
-- `ELEVENLABS_API_KEY`
-- optional: `EDGE_API_KEY`
+- `ELEVENLABS_API_KEY` 
+- optional: `EDGE_API_KEY` (for BREV NVIDIA token deployment - for Mistral Worlwide Hackathon)
 
 ### 3) Run Backend
 
@@ -192,7 +207,6 @@ Non-blocking image/profile warning in logs. Usually unrelated to network/audio f
 
 - Backend details: [`framework/README.md`](framework/README.md)
 - iOS details: [`IOS/README.md`](IOS/README.md)
-- Mock backend for v4 reliability loops: [`IOS/tools/mock_backend/README.md`](IOS/tools/mock_backend/README.md)
 
 ## License
 
