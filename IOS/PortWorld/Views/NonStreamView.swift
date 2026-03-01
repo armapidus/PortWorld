@@ -23,89 +23,23 @@ struct NonStreamView: View {
 
   var body: some View {
     ZStack {
-      Color.black.edgesIgnoringSafeArea(.all)
+      BackgroundGradientView()
 
-      VStack {
-        HStack {
-          Spacer()
-          Menu {
-            Button("Disconnect", role: .destructive) {
-              wearablesVM.disconnectGlasses()
-            }
-            .disabled(wearablesVM.registrationState != .registered)
-          } label: {
-            Image(systemName: "gearshape")
-              .resizable()
-              .aspectRatio(contentMode: .fit)
-              .foregroundColor(.white)
-              .frame(width: 24, height: 24)
-          }
+      ScrollView(showsIndicators: false) {
+        VStack(spacing: 18) {
+          topBar
+          heroCard
+          connectionCard
+          RuntimeStatusPanelView(viewModel: viewModel)
+            .padding(.top, 2)
         }
-
-        Spacer()
-
-        VStack(spacing: 12) {
-          Image(.cameraAccessIcon)
-            .resizable()
-            .renderingMode(.template)
-            .foregroundColor(.white)
-            .aspectRatio(contentMode: .fit)
-            .frame(width: 120)
-
-          Text("Activate Assistant Runtime")
-            .font(.system(size: 20, weight: .semibold))
-            .foregroundColor(.white)
-
-          Text("One tap starts session streaming, rolling capture hooks, and runtime telemetry. On-device wake is preferred; manual wake remains available as fallback.")
-            .font(.system(size: 15))
-            .multilineTextAlignment(.center)
-            .foregroundColor(.white)
-        }
-        .padding(.horizontal, 12)
-
-        Spacer()
-
-        HStack(spacing: 8) {
-          Image(systemName: "hourglass")
-            .resizable()
-            .aspectRatio(contentMode: .fit)
-            .foregroundColor(.white.opacity(0.7))
-            .frame(width: 16, height: 16)
-
-          Text("Waiting for an active device")
-            .font(.system(size: 14))
-            .foregroundColor(.white.opacity(0.7))
-        }
-        .padding(.bottom, 12)
-        .opacity(viewModel.hasActiveDevice ? 0 : 1)
-
-        CustomButton(
-          title: activateButtonTitle,
-          style: .primary,
-          isDisabled: !viewModel.canActivateAssistantRuntime
-        ) {
-          Task {
-            await viewModel.activateAssistantRuntime()
-          }
-        }
-
-        CustomButton(
-          title: exampleTestButtonTitle,
-          style: .primary,
-          isDisabled: viewModel.isRunningExampleTest,
-          minHeight: 44,
-          cornerRadius: 20
-        ) {
-          Task {
-            await viewModel.runExampleMediaPipelineTest()
-          }
-        }
-        .padding(.top, 8)
-
-        RuntimeStatusPanelView(viewModel: viewModel)
-          .padding(.top, 12)
+        .padding(.horizontal, 20)
+        .padding(.top, 18)
+        .padding(.bottom, 190)
       }
-      .padding(.all, 24)
+    }
+    .safeAreaInset(edge: .bottom) {
+      bottomActionBar
     }
     .sheet(isPresented: $wearablesVM.showGettingStartedSheet) {
       if #available(iOS 16.0, *) {
@@ -118,6 +52,176 @@ struct NonStreamView: View {
     }
     .task {
       await viewModel.preflightWakeAuthorization()
+    }
+  }
+
+  private var topBar: some View {
+    HStack {
+      VStack(alignment: .leading, spacing: 4) {
+        Text("PortWorld Runtime")
+          .font(.system(.title2, design: .rounded).weight(.bold))
+          .foregroundColor(.white)
+
+        Text("Assistant setup and backend validation")
+          .font(.system(.subheadline, design: .rounded).weight(.medium))
+          .foregroundColor(.white.opacity(0.72))
+      }
+
+      Spacer()
+
+      Menu {
+        Button("Disconnect", role: .destructive) {
+          wearablesVM.disconnectGlasses()
+        }
+        .disabled(wearablesVM.registrationState != .registered)
+      } label: {
+        Image(systemName: "slider.horizontal.3")
+          .font(.system(size: 17, weight: .bold))
+          .foregroundColor(.white)
+          .frame(width: 42, height: 42)
+          .background(Color.white.opacity(0.14))
+          .clipShape(Circle())
+          .overlay(
+            Circle().stroke(Color.white.opacity(0.2), lineWidth: 1)
+          )
+      }
+    }
+  }
+
+  private var heroCard: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      HStack(alignment: .top, spacing: 12) {
+        Image(.cameraAccessIcon)
+          .resizable()
+          .renderingMode(.template)
+          .foregroundColor(.white)
+          .aspectRatio(contentMode: .fit)
+          .frame(width: 52, height: 52)
+          .padding(8)
+          .background(Color.white.opacity(0.14))
+          .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+        VStack(alignment: .leading, spacing: 4) {
+          Text("Activate Assistant")
+            .font(.system(.title3, design: .rounded).weight(.semibold))
+            .foregroundColor(.white)
+
+          Text("Start session streaming, wake detection hooks, and runtime telemetry in one flow.")
+            .font(.system(.subheadline, design: .rounded).weight(.medium))
+            .foregroundColor(.white.opacity(0.82))
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+
+      HStack(spacing: 10) {
+        StatusChip(
+          icon: "antenna.radiowaves.left.and.right",
+          label: "Backend",
+          value: "Configured"
+        )
+        StatusChip(
+          icon: "waveform.and.mic",
+          label: "Wake mode",
+          value: viewModel.runtimeWakeEngineText.capitalized
+        )
+      }
+    }
+    .padding(16)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(
+      LinearGradient(
+        colors: [Color(red: 0.18, green: 0.26, blue: 0.42), Color(red: 0.08, green: 0.12, blue: 0.22)],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+      )
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: 24, style: .continuous)
+        .stroke(Color.white.opacity(0.18), lineWidth: 1)
+    )
+    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+    .shadow(color: .black.opacity(0.25), radius: 14, x: 0, y: 8)
+  }
+
+  private var connectionCard: some View {
+    HStack(spacing: 10) {
+      Image(systemName: viewModel.hasActiveDevice ? "checkmark.circle.fill" : "hourglass")
+        .font(.system(size: 16, weight: .semibold))
+        .foregroundColor(viewModel.hasActiveDevice ? Color.green.opacity(0.85) : Color.orange.opacity(0.9))
+
+      Text(viewModel.hasActiveDevice ? "Active device detected. You can launch runtime now." : "No active device detected yet.")
+        .font(.system(.subheadline, design: .rounded).weight(.semibold))
+        .foregroundColor(.white.opacity(0.9))
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .padding(.horizontal, 14)
+    .padding(.vertical, 12)
+    .background(Color.white.opacity(0.11))
+    .overlay(
+      RoundedRectangle(cornerRadius: 16, style: .continuous)
+        .stroke(Color.white.opacity(0.18), lineWidth: 1)
+    )
+    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+  }
+
+  private var bottomActionBar: some View {
+    VStack(spacing: 10) {
+      Button {
+        Task {
+          await viewModel.activateAssistantRuntime()
+        }
+      } label: {
+        HStack(spacing: 10) {
+          Image(systemName: "bolt.fill")
+            .font(.system(size: 15, weight: .bold))
+          Text(activateButtonTitle)
+            .font(.system(.headline, design: .rounded).weight(.semibold))
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 54)
+      }
+      .buttonStyle(.plain)
+      .foregroundColor(.white)
+      .background(viewModel.canActivateAssistantRuntime ? Color.appPrimary : Color.gray.opacity(0.5))
+      .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+      .disabled(!viewModel.canActivateAssistantRuntime)
+
+      Button {
+        Task {
+          await viewModel.runExampleMediaPipelineTest()
+        }
+      } label: {
+        HStack(spacing: 10) {
+          Image(systemName: viewModel.isRunningExampleTest ? "hourglass" : "sparkles")
+            .font(.system(size: 15, weight: .semibold))
+          Text(exampleTestButtonTitle)
+            .font(.system(.subheadline, design: .rounded).weight(.semibold))
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 48)
+      }
+      .buttonStyle(.plain)
+      .foregroundColor(.white)
+      .background(Color.white.opacity(0.16))
+      .overlay(
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+          .stroke(Color.white.opacity(0.24), lineWidth: 1)
+      )
+      .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+      .disabled(viewModel.isRunningExampleTest)
+
+      Text("Test button sends bundled image + audio + video example media to backend.")
+        .font(.system(.caption, design: .rounded).weight(.medium))
+        .foregroundColor(.white.opacity(0.72))
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .padding(.horizontal, 16)
+    .padding(.top, 12)
+    .padding(.bottom, 12)
+    .background(Color.black.opacity(0.58))
+    .overlay(alignment: .top) {
+      Divider()
+        .overlay(Color.white.opacity(0.12))
     }
   }
 
@@ -135,68 +239,165 @@ struct NonStreamView: View {
   private var exampleTestButtonTitle: String {
     switch viewModel.exampleTestStateText {
     case "sending":
-      return "Envoi des medias exemple..."
+      return "Sending example media..."
     case "playing":
-      return "Lecture audio sur iPhone..."
+      return "Playing audio on iPhone..."
     default:
-      return "Tester backend (media exemple)"
+      return "Run backend test (example media)"
     }
   }
 }
 
 private struct RuntimeStatusPanelView: View {
   @ObservedObject var viewModel: StreamSessionViewModel
+  @State private var showDiagnostics = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      Text("Runtime Status")
-        .font(.system(size: 16, weight: .semibold))
-        .foregroundColor(.white)
-
-      Text("Session: \(viewModel.runtimeSessionStateText)")
-      Text("Wake: \(viewModel.runtimeWakeStateText)  Count: \(viewModel.runtimeWakeCount)")
-      Text("Wake Engine: \(viewModel.runtimeWakeEngineText)")
-      Text("Wake Runtime: \(viewModel.runtimeWakeRuntimeText)")
-      Text("Speech Auth: \(viewModel.runtimeSpeechAuthorizationText)")
-      Text("Manual Fallback: \(viewModel.runtimeManualWakeFallbackText)")
-      Text("Query: \(viewModel.runtimeQueryStateText)  Count: \(viewModel.runtimeQueryCount)")
-      Text("Photo: \(viewModel.runtimePhotoStateText)  Uploaded: \(viewModel.runtimePhotoUploadCount)")
-      Text("Playback: \(viewModel.runtimePlaybackStateText)  Chunks: \(viewModel.runtimePlaybackChunkCount)")
-      Text("Backend: \(viewModel.runtimeBackendText)")
-        .lineLimit(2)
-      Text("Session ID: \(viewModel.runtimeSessionIdText)")
-      Text("Query ID: \(viewModel.runtimeQueryIdText)")
-      Text("Video Frames Routed: \(viewModel.runtimeVideoFrameCount)")
-
-      Divider().background(Color.white.opacity(0.2))
-
-      Text("Audio State: \(viewModel.audioStateText)")
-      Text("Audio Chunks: \(viewModel.audioChunkCount)  Bytes: \(viewModel.audioByteCount)")
-      Text("Audio Session Dir: \(viewModel.audioSessionPath)")
-        .lineLimit(2)
-
-      Divider().background(Color.white.opacity(0.2))
-
-      Text("Example Test: \(viewModel.exampleTestStateText)")
-      Text("Example Detail: \(viewModel.exampleTestDetailText)")
-        .lineLimit(3)
-
-      if !viewModel.runtimeErrorText.isEmpty {
-        Text("Runtime Error: \(viewModel.runtimeErrorText)")
-          .foregroundColor(.red)
+    VStack(alignment: .leading, spacing: 12) {
+      HStack {
+        Text("Runtime Snapshot")
+          .font(.system(.headline, design: .rounded).weight(.semibold))
+          .foregroundColor(.white)
+        Spacer()
+        Text(viewModel.runtimeSessionStateText.uppercased())
+          .font(.system(.caption2, design: .rounded).weight(.bold))
+          .foregroundColor(.white.opacity(0.9))
+          .padding(.horizontal, 10)
+          .padding(.vertical, 5)
+          .background(Color.white.opacity(0.14))
+          .clipShape(Capsule())
       }
 
-      if !viewModel.audioLastError.isEmpty {
-        Text("Audio Error: \(viewModel.audioLastError)")
-          .foregroundColor(.red)
+      RuntimeMetricRow(label: "Wake", value: "\(viewModel.runtimeWakeStateText) (\(viewModel.runtimeWakeCount))")
+      RuntimeMetricRow(label: "Query", value: "\(viewModel.runtimeQueryStateText) (\(viewModel.runtimeQueryCount))")
+      RuntimeMetricRow(label: "Photo Uploads", value: "\(viewModel.runtimePhotoUploadCount)")
+      RuntimeMetricRow(label: "Playback Chunks", value: "\(viewModel.runtimePlaybackChunkCount)")
+      RuntimeMetricRow(label: "Video Frames Routed", value: "\(viewModel.runtimeVideoFrameCount)")
+
+      Divider().background(Color.white.opacity(0.2))
+
+      VStack(alignment: .leading, spacing: 4) {
+        Text("Example Test: \(viewModel.exampleTestStateText)")
+          .font(.system(.subheadline, design: .rounded).weight(.semibold))
+          .foregroundColor(.white)
+        Text(viewModel.exampleTestDetailText)
+          .font(.system(.caption, design: .rounded).weight(.medium))
+          .foregroundColor(.white.opacity(0.8))
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(10)
+      .background(Color.white.opacity(0.08))
+      .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+      if !viewModel.runtimeErrorText.isEmpty || !viewModel.audioLastError.isEmpty {
+        VStack(alignment: .leading, spacing: 4) {
+          if !viewModel.runtimeErrorText.isEmpty {
+            Text("Runtime Error: \(viewModel.runtimeErrorText)")
+          }
+          if !viewModel.audioLastError.isEmpty {
+            Text("Audio Error: \(viewModel.audioLastError)")
+          }
+        }
+        .font(.system(.caption, design: .rounded).weight(.semibold))
+        .foregroundColor(.red.opacity(0.95))
+      }
+
+      DisclosureGroup("Advanced telemetry", isExpanded: $showDiagnostics) {
+        VStack(alignment: .leading, spacing: 6) {
+          RuntimeMetricRow(label: "Backend", value: viewModel.runtimeBackendText)
+          RuntimeMetricRow(label: "Session ID", value: viewModel.runtimeSessionIdText)
+          RuntimeMetricRow(label: "Query ID", value: viewModel.runtimeQueryIdText)
+          RuntimeMetricRow(label: "Wake Runtime", value: viewModel.runtimeWakeRuntimeText)
+          RuntimeMetricRow(label: "Speech Auth", value: viewModel.runtimeSpeechAuthorizationText)
+          RuntimeMetricRow(label: "Manual Fallback", value: viewModel.runtimeManualWakeFallbackText)
+          RuntimeMetricRow(label: "Audio State", value: viewModel.audioStateText)
+          RuntimeMetricRow(label: "Audio Stats", value: "chunks \(viewModel.audioChunkCount), bytes \(viewModel.audioByteCount)")
+          RuntimeMetricRow(label: "Audio Session Dir", value: viewModel.audioSessionPath)
+        }
+        .padding(.top, 8)
+      }
+      .font(.system(.subheadline, design: .rounded).weight(.semibold))
+      .foregroundColor(.white.opacity(0.9))
+    }
+    .padding(16)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(Color.white.opacity(0.1))
+    .overlay(
+      RoundedRectangle(cornerRadius: 18, style: .continuous)
+        .stroke(Color.white.opacity(0.18), lineWidth: 1)
+    )
+    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+  }
+}
+
+private struct RuntimeMetricRow: View {
+  let label: String
+  let value: String
+
+  var body: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 10) {
+      Text(label)
+        .font(.system(.caption, design: .rounded).weight(.semibold))
+        .foregroundColor(.white.opacity(0.72))
+
+      Text(value)
+        .font(.system(.caption, design: .rounded).weight(.bold))
+        .foregroundColor(.white)
+        .lineLimit(2)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+  }
+}
+
+private struct StatusChip: View {
+  let icon: String
+  let label: String
+  let value: String
+
+  var body: some View {
+    HStack(spacing: 8) {
+      Image(systemName: icon)
+        .font(.system(size: 12, weight: .semibold))
+        .foregroundColor(.white.opacity(0.85))
+
+      VStack(alignment: .leading, spacing: 1) {
+        Text(label)
+          .font(.system(.caption2, design: .rounded).weight(.semibold))
+          .foregroundColor(.white.opacity(0.66))
+        Text(value)
+          .font(.system(.caption, design: .rounded).weight(.bold))
+          .foregroundColor(.white)
       }
     }
-    .font(.system(size: 12))
-    .foregroundColor(.white.opacity(0.9))
-    .padding(12)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .background(Color.white.opacity(0.08))
-    .cornerRadius(12)
+    .padding(.horizontal, 10)
+    .padding(.vertical, 8)
+    .background(Color.white.opacity(0.12))
+    .clipShape(Capsule())
+  }
+}
+
+private struct BackgroundGradientView: View {
+  var body: some View {
+    ZStack {
+      LinearGradient(
+        colors: [Color(red: 0.09, green: 0.12, blue: 0.2), Color(red: 0.03, green: 0.04, blue: 0.1), Color(red: 0.14, green: 0.08, blue: 0.03)],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+      )
+      .ignoresSafeArea()
+
+      Circle()
+        .fill(Color.appPrimary.opacity(0.24))
+        .frame(width: 320, height: 320)
+        .blur(radius: 60)
+        .offset(x: -130, y: -280)
+
+      Circle()
+        .fill(Color(red: 0.19, green: 0.49, blue: 0.9).opacity(0.22))
+        .frame(width: 280, height: 280)
+        .blur(radius: 70)
+        .offset(x: 160, y: -120)
+    }
   }
 }
 
