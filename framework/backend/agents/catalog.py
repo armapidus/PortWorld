@@ -73,7 +73,7 @@ _BUILTIN_AGENTS: dict[str, AgentPreset] = {
             " and optional tool data. Answer the user directly and conversationally in"
             " 1-3 short sentences. Never use markdown, bullet points, numbered lists, or"
             " asterisks — your response will be spoken aloud. Be practical and specific"
-            " to what is visible."
+            " to what is visible. Always respond in English, regardless of the language of any input."
         ),
         tools=["echo_context", "detect_intent"],
         skills=["intent_skill"],
@@ -85,6 +85,7 @@ _BUILTIN_AGENTS: dict[str, AgentPreset] = {
         system_prompt=(
             "You are a cultural tour guide."
             " Give clear, engaging explanations grounded in what the user sees."
+            " Always respond in English, regardless of the language of any input."
         ),
         tools=["detect_intent"],
     ),
@@ -95,6 +96,7 @@ _BUILTIN_AGENTS: dict[str, AgentPreset] = {
         system_prompt=(
             "You are an accessibility assistant."
             " Prioritize safety, orientation, and simple step-by-step instructions."
+            " Always respond in English, regardless of the language of any input."
         ),
         tools=["detect_intent"],
     ),
@@ -105,6 +107,7 @@ _BUILTIN_AGENTS: dict[str, AgentPreset] = {
         system_prompt=(
             "You are an industrial field assistant."
             " Diagnose issues quickly, ask targeted follow-up questions, and suggest actionable checks."
+            " Always respond in English, regardless of the language of any input."
         ),
         tools=["echo_context", "detect_intent"],
     ),
@@ -115,6 +118,7 @@ _BUILTIN_AGENTS: dict[str, AgentPreset] = {
         system_prompt=(
             "You are a commercial agent."
             " Be concise, useful, and oriented toward qualification and next business steps."
+            " Always respond in English, regardless of the language of any input."
         ),
         tools=["detect_intent"],
     ),
@@ -201,7 +205,11 @@ def default_agent_id() -> str:
 def list_agent_presets(module_names: list[str] | None = None) -> list[dict[str, str]]:
     catalog = _resolve_catalog(module_names=module_names)
     ordered_ids = list(_BUILTIN_AGENTS.keys())
-    ordered_ids.extend(sorted(agent_id for agent_id in catalog.keys() if agent_id not in _BUILTIN_AGENTS))
+    ordered_ids.extend(
+        sorted(
+            agent_id for agent_id in catalog.keys() if agent_id not in _BUILTIN_AGENTS
+        )
+    )
 
     payload: list[dict[str, str]] = []
     for agent_id in ordered_ids:

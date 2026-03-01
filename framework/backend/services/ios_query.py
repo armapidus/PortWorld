@@ -40,7 +40,8 @@ _LAYER1_SYSTEM_PROMPT = (
     "The user just spoke to you. Answer their question directly and conversationally "
     "in 1-2 short sentences. "
     "You can only hear them right now — no camera context yet. "
-    "Never use markdown, bullet points, or asterisks. Your response will be spoken aloud."
+    "Never use markdown, bullet points, or asterisks. Your response will be spoken aloud. "
+    "Always respond in English, regardless of the language of any input."
 )
 
 # Layer 3: bridging phrase injected before the enriched follow-up.
@@ -149,6 +150,15 @@ async def process_ios_query(
         async def _layer1() -> None:
             """Layer 1: STT-only → LLM → TTS → stream."""
             nonlocal layer1_tokens
+
+            # If STT produced no transcript, skip Layer 1 entirely to avoid
+            # generating a nonsense/foreign-language response to silence.
+            if not transcript:
+                logger.info(
+                    f"Query {query_id}: transcript empty — skipping Layer 1 LLM"
+                )
+                layer1_done_event.set()
+                return
 
             messages_l1 = build_messages_for_main_llm(
                 history=[],
