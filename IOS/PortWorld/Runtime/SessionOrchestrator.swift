@@ -331,6 +331,9 @@ final class SessionOrchestrator {
     // Cancel any in-flight playback from previous response to avoid queue buildup
     playbackEngine.cancelResponse()
 
+    // Immediate audio feedback: single beep so the user knows wake word was heard
+    playWakeChime()
+
     let queryID = "query_\(UUID().uuidString)"
     activeQueryContext = ActiveQueryContext(
       queryID: queryID,
@@ -377,7 +380,12 @@ final class SessionOrchestrator {
 
     snapshot.queryState = .processingBundle
     snapshot.queryCount += 1
+    snapshot.playbackState = "thinking"
     publishSnapshot()
+
+    // Layer 0: Play chime immediately after capture stops, through the
+    // glasses audio route.  Cleared automatically when start_response arrives.
+    playThinkingChime()
 
     await logEvent(name: "query.ended", queryID: context.queryID)
     await sendOutbound(
@@ -516,6 +524,12 @@ final class SessionOrchestrator {
       snapshot.playbackState = envelope.payload.command.rawValue
       publishSnapshot()
 
+    case .assistantThinking(let envelope):
+      print("[SessionOrchestrator] Thinking received: query=\(envelope.payload.queryID ?? "?")")
+      snapshot.playbackState = "thinking"
+      publishSnapshot()
+      triggerThinkingHaptic()
+
     case .error(let envelope):
       setError(envelope.payload.message)
 
@@ -538,6 +552,90 @@ final class SessionOrchestrator {
 
   private func publishSnapshot() {
     onStatusUpdated?(snapshot)
+  }
+
+  private func triggerThinkingHaptic() {
+    let generator = UIImpactFeedbackGenerator(style: .light)
+    generator.impactOccurred()
+  }
+
+  // MARK: - Thinking Chime
+
+  /// Pre-computed single beep for end-of-recording (880 Hz, 120 ms).
+  /// Higher pitch than wake chime (660 Hz) so the two are distinct.
+  private static let thinkingChimePCM: Data = {
+    let sampleRate = 16000.0
+    let frequency  = 880.0   // A5
+    let duration   = 0.12    // 120 ms
+    let amplitude  = 0.22
+    let count = Int(sampleRate * duration)
+    let fade  = max(1, Int(sampleRate * 0.008))
+
+    var pcm = Data()
+    for i in 0..<count {
+      let t = Double(i) / sampleRate
+      var env: Double = 1.0
+      if i < fade {
+        env = Double(i) / Double(fade)
+      } else if i > count - fade {
+        env = Double(count - i) / Double(fade)
+      }
+      let value = sin(2.0 * .pi * frequency * t) * amplitude * env
+      var sample = Int16(clamping: Int(value * Double(Int16.max)))
+      withUnsafeBytes(of: &sample) { pcm.append(contentsOf: $0) }
+    }
+    return pcm
+  }()
+
+  /// Play the thinking chime through the playback engine (routes to glasses).
+  /// The chime is automatically stopped when `start_response` arrives from
+  /// the backend because `startResponse()` resets the player node.
+  private func playThinkingChime() {
+    let format = AssistantAudioFormat(codec: "pcm_s16le", sampleRate: 16_000, channels: 1)
+    do {
+      // No startResponse() here — the wake chime has long finished by the time
+      // the query ends, and startResponse()'s route update can discard the buffer.
+      try playbackEngine.appendPCMData(Self.thinkingChimePCM, format: format)
+      print("[SessionOrchestrator] Thinking chime scheduled")
+    } catch {
+      print("[SessionOrchestrator] Thinking chime failed: \(error.localizedDescription)")
+    }
+  }
+
+  /// Pre-computed single beep for wake word recognition (660 Hz, 120 ms).
+  private static let wakeChimePCM: Data = {
+    let sampleRate = 16000.0
+    let frequency  = 660.0   // E5 — distinct from thinking chime (880 Hz)
+    let duration   = 0.12    // 120 ms
+    let amplitude  = 0.22
+    let count = Int(sampleRate * duration)
+    let fade  = max(1, Int(sampleRate * 0.008))
+
+    var pcm = Data()
+    for i in 0..<count {
+      let t = Double(i) / sampleRate
+      var env: Double = 1.0
+      if i < fade {
+        env = Double(i) / Double(fade)
+      } else if i > count - fade {
+        env = Double(count - i) / Double(fade)
+      }
+      let value = sin(2.0 * .pi * frequency * t) * amplitude * env
+      var sample = Int16(clamping: Int(value * Double(Int16.max)))
+      withUnsafeBytes(of: &sample) { pcm.append(contentsOf: $0) }
+    }
+    return pcm
+  }()
+
+  /// Play a single beep when wake word is detected.
+  private func playWakeChime() {
+    let format = AssistantAudioFormat(codec: "pcm_s16le", sampleRate: 16_000, channels: 1)
+    do {
+      try playbackEngine.appendPCMData(Self.wakeChimePCM, format: format)
+      print("[SessionOrchestrator] Wake chime scheduled")
+    } catch {
+      print("[SessionOrchestrator] Wake chime failed: \(error.localizedDescription)")
+    }
   }
 
   private func configurePlaybackEngine() {

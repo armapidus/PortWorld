@@ -20,7 +20,7 @@ from backend.providers.elevenlabs import prepare_elevenlabs_live_stream
 from backend.providers.mistral import iter_main_llm_tokens
 from backend.providers.nvidia import summarize_video
 from backend.providers.voxtral import transcribe_audio
-from backend.routers.ws import stream_audio_bytes_to_session
+from backend.routers.ws import send_thinking_to_session, stream_audio_bytes_to_session
 from backend.services.run_log import RUN_LOG, RunLogEntry, _utc_now
 from backend.tools.registry import ToolRunResult, run_requested_tools
 from backend.tracing.manager import TraceManager, build_trace_manager
@@ -54,7 +54,7 @@ async def process_ios_query(
     tracer: TraceManager,
 ) -> None:
     """Process an iOS query bundle through the pipeline and stream audio back.
-    
+
     This function:
     1. Transcribes the audio (STT via Voxtral)
     2. Summarizes the video (via Nemotron)
@@ -62,7 +62,7 @@ async def process_ios_query(
     4. Builds LLM messages and streams tokens
     5. Pipes tokens through ElevenLabs TTS
     6. Streams audio chunks back over WebSocket
-    
+
     Every run is recorded to the persistent run log for offline review.
     """
     run = RunLogEntry(
@@ -81,22 +81,36 @@ async def process_ios_query(
             "video_bytes": len(video_bytes),
         },
     )
-    
+
+    # Layer 0: Instant acknowledgment — let the user know we received their
+    # query before any heavy processing (STT, video, tools) begins.
+    await send_thinking_to_session(session_id, query_id)
+
     try:
-        # 1. Transcribe audio (STT) — tolerate empty transcripts gracefully
+        # 1+2. Transcribe audio and summarize video IN PARALLEL.
+        # Previously sequential (~1.5s STT + ~3s video).  Running them
+        # concurrently saves the full STT duration.  Trade-off: video
+        # no longer gets the transcript as a prompt_hint, but the latency
+        # improvement (~1.5–2s) is worth it.
         transcript: str | None = None
+        video_summary: str | None = None
         run.stt_model = profile.voxtral.model
         run.stt_audio_bytes = len(audio_bytes)
-        if audio_bytes:
+        run.video_model = profile.nemotron.model
+
+        async def _transcribe() -> str | None:
+            if not audio_bytes:
+                return None
             try:
-                transcript = await transcribe_audio(
+                result = await transcribe_audio(
                     profile=profile,
                     tracer=tracer,
                     audio=audio_bytes,
                     content_type="audio/wav",
                     filename="query.wav",
                 )
-                run.stt_transcript = transcript
+                run.stt_transcript = result
+                return result
             except Exception as stt_exc:
                 run.stt_error = str(stt_exc)
                 await tracer.event(
@@ -104,28 +118,46 @@ async def process_ios_query(
                     status="warning",
                     data={"query_id": query_id, "reason": str(stt_exc)},
                 )
-                logger.warning(f"Query {query_id}: STT failed, continuing without transcript: {stt_exc}")
-            logger.info(f"Query {query_id}: transcript = {transcript[:100] if transcript else 'None'}...")
-        
-        # 2. Summarize video
-        video_summary: str | None = None
-        run.video_model = profile.nemotron.model
-        if video_bytes:
+                logger.warning(
+                    f"Query {query_id}: STT failed, continuing without transcript: {stt_exc}"
+                )
+                return None
+
+        async def _summarize_video() -> str | None:
+            if not video_bytes:
+                return None
             video_data_url = to_data_url(video_bytes, "video/mp4")
             try:
-                video_summary = await summarize_video(
+                result = await summarize_video(
                     profile=profile,
                     tracer=tracer,
                     video_data_url=video_data_url,
-                    prompt_hint=transcript or "",
+                    prompt_hint="",  # no transcript yet (running in parallel)
                 )
-                run.video_summary = video_summary
+                run.video_summary = result
+                return result
             except Exception as vid_exc:
                 run.video_error = str(vid_exc)
-                logger.warning(f"Query {query_id}: video summarization failed: {vid_exc}")
-            run.video_prompt_sent = str(profile.prompts.get("nemotron_video_prompt", ""))
-            logger.info(f"Query {query_id}: video_summary = {video_summary[:100] if video_summary else 'None'}...")
-        
+                logger.warning(
+                    f"Query {query_id}: video summarization failed: {vid_exc}"
+                )
+                return None
+            finally:
+                run.video_prompt_sent = str(
+                    profile.prompts.get("nemotron_video_prompt", "")
+                )
+
+        transcript, video_summary = await asyncio.gather(
+            _transcribe(), _summarize_video()
+        )
+
+        logger.info(
+            f"Query {query_id}: transcript = {transcript[:100] if transcript else 'None'}..."
+        )
+        logger.info(
+            f"Query {query_id}: video_summary = {video_summary[:100] if video_summary else 'None'}..."
+        )
+
         # 3. Run tools/skills
         tool_input = {
             "prompt": transcript or "",
@@ -143,7 +175,7 @@ async def process_ios_query(
             {"tool": item.name, "status": item.status, "output": item.output}
             for item in tool_runs
         ]
-        
+
         # 4. Build LLM messages — each source is labelled for the main LLM
         tool_context = _build_tools_context(tool_runs)
         messages = build_messages_for_main_llm(
@@ -155,7 +187,7 @@ async def process_ios_query(
             system_prompt=profile.prompts["main_system_prompt"],
             tool_context=tool_context,
         )
-        
+
         model = profile.main_llm.model
         run.main_llm_model = model
         run.main_llm_system_prompt = profile.prompts["main_system_prompt"]
@@ -165,13 +197,17 @@ async def process_ios_query(
         user_msgs = [m for m in messages if m.get("role") == "user"]
         if user_msgs:
             content = user_msgs[-1].get("content", "")
-            run.main_llm_user_content = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)[:2000]
-        
+            run.main_llm_user_content = (
+                content
+                if isinstance(content, str)
+                else json.dumps(content, ensure_ascii=False)[:2000]
+            )
+
         await tracer.event(
             "ios_query.llm_start",
             data={"model": model, "messages_count": len(messages)},
         )
-        
+
         # 5. Stream LLM tokens through TTS — collect tokens for the run log
         collected_tokens: list[str] = []
 
@@ -198,12 +234,14 @@ async def process_ios_query(
             speed=None,
             output_format="pcm_16000",
         )
-        
-        logger.info(f"Query {query_id}: streaming audio to session {session_id} (format={used_format})")
-        
+
+        logger.info(
+            f"Query {query_id}: streaming audio to session {session_id} (format={used_format})"
+        )
+
         # 7. Stream audio back over WebSocket
         total_audio_bytes = 0
-        
+
         async def _counting_audio_stream():
             nonlocal total_audio_bytes
             async for chunk in audio_stream:
@@ -234,8 +272,10 @@ async def process_ios_query(
                 status="error",
                 data={"query_id": query_id, "session_id": session_id},
             )
-            logger.warning(f"Query {query_id}: no WebSocket connection for session {session_id}")
-    
+            logger.warning(
+                f"Query {query_id}: no WebSocket connection for session {session_id}"
+            )
+
     except Exception as exc:
         run.status = "error"
         run.error = str(exc)
@@ -259,14 +299,16 @@ async def process_ios_query(
 
 def create_mock_request():
     """Create a mock Request object for profile resolution.
-    
+
     This is needed because resolve_runtime_profile expects a FastAPI Request
     to read optional API key headers, but for background processing we don't
     have a request context.
     """
+
     class MockRequest:
         def __init__(self):
             self.headers = {}
+
     return MockRequest()
 
 
@@ -279,21 +321,21 @@ async def process_ios_query_background(
     runtime_config_json: str | None = None,
 ) -> None:
     """Background task wrapper for iOS query processing.
-    
+
     This function handles profile resolution and tracer setup, then delegates
     to process_ios_query.
     """
     try:
         # Parse runtime config if provided
         runtime = parse_runtime_config(runtime_config_json)
-        
+
         # Create mock request for profile resolution
         mock_request = create_mock_request()
         profile = resolve_runtime_profile(mock_request, runtime)
-        
+
         # Build tracer
         tracer = build_trace_manager(profile.trace)
-        
+
         # Process the query
         await process_ios_query(
             session_id=session_id,
@@ -304,6 +346,6 @@ async def process_ios_query_background(
             profile=profile,
             tracer=tracer,
         )
-    
+
     except Exception as exc:
         logger.exception(f"Background processing failed for query {query_id}: {exc}")

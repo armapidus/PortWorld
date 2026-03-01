@@ -184,6 +184,21 @@ public struct PlaybackControlPayload: Codable {
   }
 }
 
+public struct AssistantThinkingPayload: Codable {
+  public let status: String
+  public let queryID: String?
+
+  public init(status: String, queryID: String? = nil) {
+    self.status = status
+    self.queryID = queryID
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case status
+    case queryID = "query_id"
+  }
+}
+
 public struct AppEvent: Codable {
   public let name: String
   public let sessionID: String
@@ -371,6 +386,7 @@ public enum WSInboundType: String, Codable {
   case healthPong = "health.pong"
   case assistantAudioChunk = "assistant.audio_chunk"
   case assistantPlaybackControl = "assistant.playback.control"
+  case assistantThinking = "assistant.thinking"
   case error
 }
 
@@ -379,6 +395,7 @@ public enum WSInboundMessage {
   case healthPong(WSMessageEnvelope<JSONValue>)
   case assistantAudioChunk(WSMessageEnvelope<AssistantAudioChunkPayload>)
   case assistantPlaybackControl(WSMessageEnvelope<PlaybackControlPayload>)
+  case assistantThinking(WSMessageEnvelope<AssistantThinkingPayload>)
   case error(WSMessageEnvelope<RuntimeErrorPayload>)
   case unknown(WSRawMessageEnvelope)
 }
@@ -396,6 +413,8 @@ public enum WSMessageCodec {
       return .assistantAudioChunk(try decoder.decode(WSMessageEnvelope<AssistantAudioChunkPayload>.self, from: data))
     case WSInboundType.assistantPlaybackControl.rawValue:
       return .assistantPlaybackControl(try decoder.decode(WSMessageEnvelope<PlaybackControlPayload>.self, from: data))
+    case WSInboundType.assistantThinking.rawValue:
+      return .assistantThinking(try decoder.decode(WSMessageEnvelope<AssistantThinkingPayload>.self, from: data))
     case WSInboundType.error.rawValue:
       return .error(try decoder.decode(WSMessageEnvelope<RuntimeErrorPayload>.self, from: data))
     default:
@@ -416,7 +435,7 @@ public enum WSMessageCodec {
 }
 
 public enum RuntimeClock {
-  nonisolated(unsafe) public static func nowMs() -> Int64 {
+  nonisolated public static func nowMs() -> Int64 {
     Int64((Date().timeIntervalSince1970 * 1000.0).rounded())
   }
 }

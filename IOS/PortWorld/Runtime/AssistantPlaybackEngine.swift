@@ -343,19 +343,23 @@ public final class AssistantPlaybackEngine {
   }
 
   public func startResponse() {
-    // Reset cancels all scheduled buffers without stopping the render thread.
-    // Using stop() here would trigger a spurious route-change notification cycle that
-    // temporarily disconnects the player node, causing the first scheduled buffer to
-    // be lost and inflate pendingBufferCount by 1 on every response.
-    playerNode.reset()
+    // IMPORTANT: Do NOT call playerNode.reset() or publishRouteUpdate() here.
+    //
+    // The original implementation used reset() + publishRouteUpdate(), but
+    // publishRouteUpdate() can trigger reconnectPlayerNode() which calls
+    // audioEngine.connect().  That reconnection drops the first scheduled
+    // buffer — the comment on the old code warned about this very issue.
+    //
+    // By the time the backend sends `start_response`, the wake word handler
+    // has already called cancelResponse() to clear any previous audio, and
+    // the thinking chime has naturally finished.  All we need to do here is
+    // reset the bookkeeping so backpressure tracking starts fresh.
     pendingBufferCount = 0
     pendingBufferDurationMs = 0
     consecutiveStuckChecks = 0
     lastBufferScheduledAtMs = 0
-    lastBufferDrainedAtMs = Self.nowMs()  // Reset to avoid false stuck detection
-    print("[AssistantPlaybackEngine] startResponse: flushed playback queue")
-    logAudioPipelineState(context: "startResponse")
-    publishRouteUpdate()
+    lastBufferDrainedAtMs = Self.nowMs()
+    print("[AssistantPlaybackEngine] startResponse: counters reset, player node untouched")
   }
 
   public func stopResponse() {

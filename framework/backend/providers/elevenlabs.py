@@ -43,11 +43,21 @@ def _resolve_elevenlabs_options(
 ) -> tuple[str, str, str, str, float]:
     api_key = (profile.elevenlabs.api_key or "").strip()
     if not api_key:
-        raise HTTPException(status_code=500, detail="ELEVENLABS_API_KEY is not configured.")
+        raise HTTPException(
+            status_code=500, detail="ELEVENLABS_API_KEY is not configured."
+        )
 
-    default_voice = str(profile.options.get("elevenlabs_voice_id") or SETTINGS.default_elevenlabs_voice_id)
-    default_format = str(profile.options.get("elevenlabs_output_format") or SETTINGS.default_elevenlabs_output_format)
-    default_speed = float(profile.options.get("elevenlabs_speed") or SETTINGS.default_elevenlabs_speed)
+    default_voice = str(
+        profile.options.get("elevenlabs_voice_id")
+        or SETTINGS.default_elevenlabs_voice_id
+    )
+    default_format = str(
+        profile.options.get("elevenlabs_output_format")
+        or SETTINGS.default_elevenlabs_output_format
+    )
+    default_speed = float(
+        profile.options.get("elevenlabs_speed") or SETTINGS.default_elevenlabs_speed
+    )
 
     used_voice_id = (voice_id or default_voice).strip()
     used_model_id = (model_id or profile.elevenlabs.model).strip()
@@ -55,11 +65,17 @@ def _resolve_elevenlabs_options(
     used_speed = speed if speed is not None else default_speed
 
     if not used_voice_id:
-        raise HTTPException(status_code=400, detail="ElevenLabs voice_id cannot be empty.")
+        raise HTTPException(
+            status_code=400, detail="ElevenLabs voice_id cannot be empty."
+        )
     if not used_model_id:
-        raise HTTPException(status_code=400, detail="ElevenLabs model_id cannot be empty.")
+        raise HTTPException(
+            status_code=400, detail="ElevenLabs model_id cannot be empty."
+        )
     if not used_output_format:
-        raise HTTPException(status_code=400, detail="ElevenLabs output_format cannot be empty.")
+        raise HTTPException(
+            status_code=400, detail="ElevenLabs output_format cannot be empty."
+        )
 
     return api_key, used_voice_id, used_model_id, used_output_format, float(used_speed)
 
@@ -92,12 +108,14 @@ async def prepare_elevenlabs_stream(
     output_format: str | None,
     debug_capture: dict[str, Any] | None = None,
 ) -> tuple[httpx.AsyncClient, httpx.Response, str]:
-    api_key, used_voice_id, used_model_id, used_output_format, used_speed = _resolve_elevenlabs_options(
-        profile=profile,
-        voice_id=voice_id,
-        model_id=model_id,
-        speed=speed,
-        output_format=output_format,
+    api_key, used_voice_id, used_model_id, used_output_format, used_speed = (
+        _resolve_elevenlabs_options(
+            profile=profile,
+            voice_id=voice_id,
+            model_id=model_id,
+            speed=speed,
+            output_format=output_format,
+        )
     )
 
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{used_voice_id}/stream"
@@ -145,8 +163,12 @@ async def prepare_elevenlabs_stream(
         await client.aclose()
         if debug_capture is not None:
             debug_capture["error"] = str(exc)
-        await tracer.event("elevenlabs.error", status="error", data={"message": str(exc)})
-        raise HTTPException(status_code=502, detail=f"ElevenLabs request failed: {exc}") from exc
+        await tracer.event(
+            "elevenlabs.error", status="error", data={"message": str(exc)}
+        )
+        raise HTTPException(
+            status_code=502, detail=f"ElevenLabs request failed: {exc}"
+        ) from exc
 
     if response.status_code >= 400:
         body = (await response.aread())[:400].decode("utf-8", errors="replace")
@@ -158,7 +180,10 @@ async def prepare_elevenlabs_stream(
         await tracer.event(
             "elevenlabs.upstream_error",
             status="error",
-            data={"status_code": response.status_code, "text": truncate_debug_text(body, max_chars=600)},
+            data={
+                "status_code": response.status_code,
+                "text": truncate_debug_text(body, max_chars=600),
+            },
         )
         await response.aclose()
         await client.aclose()
@@ -185,12 +210,14 @@ async def prepare_elevenlabs_live_stream(
     output_format: str | None,
     debug_capture: dict[str, Any] | None = None,
 ) -> tuple[AsyncIterator[bytes], str]:
-    api_key, used_voice_id, used_model_id, used_output_format, used_speed = _resolve_elevenlabs_options(
-        profile=profile,
-        voice_id=voice_id,
-        model_id=model_id,
-        speed=speed,
-        output_format=output_format,
+    api_key, used_voice_id, used_model_id, used_output_format, used_speed = (
+        _resolve_elevenlabs_options(
+            profile=profile,
+            voice_id=voice_id,
+            model_id=model_id,
+            speed=speed,
+            output_format=output_format,
+        )
     )
 
     query = urlencode(
@@ -225,7 +252,10 @@ async def prepare_elevenlabs_live_stream(
         try:
             import websockets
         except Exception as exc:
-            raise HTTPException(status_code=500, detail="websockets package is required for live TTS streaming.") from exc
+            raise HTTPException(
+                status_code=500,
+                detail="websockets package is required for live TTS streaming.",
+            ) from exc
 
         queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=48)
         sender_error: Exception | None = None
@@ -247,7 +277,7 @@ async def prepare_elevenlabs_live_stream(
                 "text": " ",
                 "xi_api_key": api_key,
                 "voice_settings": {"speed": used_speed},
-                "generation_config": {"chunk_length_schedule": [120, 160, 220, 290]},
+                "generation_config": {"chunk_length_schedule": [50, 120, 160, 250]},
             }
             await ws.send(json.dumps(init_payload))
             await tracer.event("elevenlabs.live.open", data={"voice_id": used_voice_id})
@@ -261,12 +291,23 @@ async def prepare_elevenlabs_live_stream(
                             continue
                         tokens_sent += 1
                         buffer += token
-                        ready, buffer = _chunk_tts_buffer(buffer, target_chars=80)
+                        ready, buffer = _chunk_tts_buffer(buffer, target_chars=40)
                         for piece in ready:
-                            await ws.send(json.dumps({"text": piece + " ", "try_trigger_generation": True}))
+                            await ws.send(
+                                json.dumps(
+                                    {
+                                        "text": piece + " ",
+                                        "try_trigger_generation": True,
+                                    }
+                                )
+                            )
                     trailing = buffer.strip()
                     if trailing:
-                        await ws.send(json.dumps({"text": trailing + " ", "try_trigger_generation": True}))
+                        await ws.send(
+                            json.dumps(
+                                {"text": trailing + " ", "try_trigger_generation": True}
+                            )
+                        )
                     await ws.send(json.dumps({"text": ""}))
                 except websockets.exceptions.ConnectionClosedOK:
                     return
@@ -344,16 +385,32 @@ async def prepare_elevenlabs_live_stream(
                 debug_capture["receiver_error"] = str(receiver_error)
 
         if sender_error is not None:
-            await tracer.event("elevenlabs.live.sender_error", status="error", data={"message": str(sender_error)})
-            raise HTTPException(status_code=502, detail=f"Live relay sender failed: {sender_error}") from sender_error
+            await tracer.event(
+                "elevenlabs.live.sender_error",
+                status="error",
+                data={"message": str(sender_error)},
+            )
+            raise HTTPException(
+                status_code=502, detail=f"Live relay sender failed: {sender_error}"
+            ) from sender_error
 
         if receiver_error is not None:
-            await tracer.event("elevenlabs.live.receiver_error", status="error", data={"message": str(receiver_error)})
-            raise HTTPException(status_code=502, detail=f"Live relay receiver failed: {receiver_error}") from receiver_error
+            await tracer.event(
+                "elevenlabs.live.receiver_error",
+                status="error",
+                data={"message": str(receiver_error)},
+            )
+            raise HTTPException(
+                status_code=502, detail=f"Live relay receiver failed: {receiver_error}"
+            ) from receiver_error
 
         await tracer.event(
             "elevenlabs.live.done",
-            data={"tokens_forwarded": tokens_sent, "audio_chunks": audio_chunks_sent, "audio_bytes": audio_bytes_sent},
+            data={
+                "tokens_forwarded": tokens_sent,
+                "audio_chunks": audio_chunks_sent,
+                "audio_bytes": audio_bytes_sent,
+            },
         )
 
     return audio_chunks(), used_output_format
@@ -387,7 +444,9 @@ async def capture_elevenlabs_stream_debug(
                 {
                     "chunk_index": total_chunks,
                     "bytes": chunk_size,
-                    "audio_base64_preview": base64.b64encode(chunk).decode("ascii")[:preview_b64_chars],
+                    "audio_base64_preview": base64.b64encode(chunk).decode("ascii")[
+                        :preview_b64_chars
+                    ],
                 }
             )
 

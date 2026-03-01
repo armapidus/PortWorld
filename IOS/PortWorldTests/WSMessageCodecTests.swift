@@ -309,6 +309,34 @@ final class WSMessageCodecTests: XCTestCase {
     XCTAssertThrowsError(try WSMessageCodec.decodeInbound(from: data))
   }
 
+  func testDecodeAssistantThinking() throws {
+    let json = """
+    {
+      "type": "assistant.thinking",
+      "session_id": "sess_1",
+      "seq": 11,
+      "ts_ms": 8000,
+      "payload": {
+        "status": "received",
+        "query_id": "query_abc"
+      }
+    }
+    """.data(using: .utf8)!
+
+    let message = try WSMessageCodec.decodeInbound(from: json)
+
+    guard case .assistantThinking(let envelope) = message else {
+      XCTFail("Expected assistantThinking, got \(message)")
+      return
+    }
+
+    XCTAssertEqual(envelope.sessionID, "sess_1")
+    XCTAssertEqual(envelope.seq, 11)
+    XCTAssertEqual(envelope.tsMs, 8000)
+    XCTAssertEqual(envelope.payload.status, "received")
+    XCTAssertEqual(envelope.payload.queryID, "query_abc")
+  }
+
   func testDecodeMissingRequiredFieldThrows() {
     // Missing session_id
     let json = """
