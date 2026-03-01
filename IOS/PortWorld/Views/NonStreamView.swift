@@ -243,7 +243,7 @@ struct NonStreamView: View {
     case "playing":
       return "Playing audio on iPhone..."
     default:
-      return "Run backend test (example media)"
+      return "TEST BACKEND (Example Media)"
     }
   }
 }

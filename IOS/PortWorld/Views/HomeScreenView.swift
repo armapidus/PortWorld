@@ -18,6 +18,10 @@ import SwiftUI
 
 struct HomeScreenView: View {
   @ObservedObject var viewModel: WearablesViewModel
+  @State private var isRunningExampleTest = false
+  @State private var exampleTestStateText = "idle"
+  @State private var exampleTestDetailText = "Backend test not started yet."
+  @State private var exampleTester = ExampleMediaPipelineTester(runtimeConfig: RuntimeConfig.load())
 
   var body: some View {
     ZStack {
@@ -115,6 +119,35 @@ struct HomeScreenView: View {
         .background(viewModel.registrationState == .registering ? Color.gray.opacity(0.5) : Color.appPrimary)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .disabled(viewModel.registrationState == .registering)
+
+        Button {
+          Task {
+            await runHomeExampleMediaPipelineTest()
+          }
+        } label: {
+          HStack(spacing: 10) {
+            Image(systemName: isRunningExampleTest ? "hourglass" : "sparkles")
+            Text(isRunningExampleTest ? "Running backend test..." : "TEST BACKEND (Example Media)")
+          }
+          .font(.system(.subheadline, design: .rounded).weight(.semibold))
+          .foregroundColor(.black.opacity(0.85))
+          .frame(maxWidth: .infinity)
+          .frame(height: 46)
+        }
+        .buttonStyle(.plain)
+        .background(Color.white)
+        .overlay(
+          RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .stroke(Color.black.opacity(0.15), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .disabled(isRunningExampleTest)
+
+        Text("Backend test: \(exampleTestStateText) - \(exampleTestDetailText)")
+          .font(.system(.caption2, design: .rounded).weight(.medium))
+          .foregroundColor(.black.opacity(0.62))
+          .lineLimit(2)
+          .frame(maxWidth: .infinity, alignment: .leading)
       }
       .padding(.horizontal, 16)
       .padding(.top, 12)
@@ -124,6 +157,26 @@ struct HomeScreenView: View {
         Divider()
       }
     }
+  }
+
+  @MainActor
+  private func runHomeExampleMediaPipelineTest() async {
+    guard !isRunningExampleTest else { return }
+
+    isRunningExampleTest = true
+    exampleTestStateText = "sending"
+    exampleTestDetailText = "Uploading example image, audio, and video..."
+
+    do {
+      let result = try await exampleTester.runExamplePipeline()
+      exampleTestStateText = "done"
+      exampleTestDetailText = "HTTP \(result.statusCode), \(result.responseBytes) bytes, playback \(max(0, result.playbackDurationMs)) ms"
+    } catch {
+      exampleTestStateText = "failed"
+      exampleTestDetailText = error.localizedDescription
+    }
+
+    isRunningExampleTest = false
   }
 
 }
