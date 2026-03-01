@@ -273,23 +273,33 @@ async def process_ios_query(
                 logger.warning(f"Query {query_id}: tools failed: {tool_exc}")
                 return []
 
-        # Launch Layer 1, video, and tools concurrently
-        layer1_task = asyncio.create_task(_layer1())
-        video_task = asyncio.create_task(_layer2_video())
-        tools_task = asyncio.create_task(_layer2_tools())
+        # Launch all three concurrently:
+        #   - Layer 1 streams audio immediately
+        #   - Layer 2 (video + tools) runs in parallel
+        #   - Layer 3 waits for Layer 2, pre-computes its LLM response, then
+        #     streams immediately after Layer 1 finishes (no silence gap)
 
-        # Wait for all to complete
-        layer2_video, layer2_tools, _ = await asyncio.gather(
-            video_task,
-            tools_task,
-            layer1_task,
-            return_exceptions=False,
-        )
+        layer2_ready_event = asyncio.Event()
+        layer2_video: str | None = None
+        layer2_tools: list[ToolRunResult] = []
 
-        # ── Layer 3: enriched follow-up if context changes the answer ─────
-        if layer2_video or layer2_tools:
+        async def _layer2() -> None:
+            """Run video + tools in parallel, then signal Layer 3."""
+            nonlocal layer2_video, layer2_tools
+            video_task = asyncio.create_task(_layer2_video())
+            tools_task = asyncio.create_task(_layer2_tools())
+            layer2_video, layer2_tools = await asyncio.gather(video_task, tools_task)
+            layer2_ready_event.set()
+
+        async def _layer3() -> None:
+            """Wait for Layer 2 data, run LLM immediately, stream after Layer 1."""
+            # Block until deep context is available
+            await layer2_ready_event.wait()
+
+            if not layer2_video and not layer2_tools:
+                return
+
             tool_context = _build_tools_context(layer2_tools)
-
             messages_l3 = build_messages_for_main_llm(
                 history=[],
                 user_prompt=transcript or "",
@@ -305,11 +315,14 @@ async def process_ios_query(
 
             await tracer.event(
                 "ios_query.layer3_llm_start",
-                data={"model": model, "messages_count": len(messages_l3)},
+                data={
+                    "model": model,
+                    "has_video": bool(layer2_video),
+                    "has_tools": bool(layer2_tools),
+                },
             )
 
             async def _l3_token_stream():
-                # Emit the bridging phrase first so the follow-up sounds natural
                 yield _LAYER3_BRIDGE
                 async for token in iter_main_llm_tokens(
                     profile=profile,
@@ -321,6 +334,9 @@ async def process_ios_query(
                     layer3_tokens.append(token)
                     yield token
 
+            # Pre-warm ElevenLabs WebSocket and start generating audio while
+            # Layer 1 is still playing.  The audio is buffered inside the
+            # ElevenLabs connection until we consume the stream below.
             audio_stream_l3, _ = await prepare_elevenlabs_live_stream(
                 profile=profile,
                 tracer=tracer,
@@ -331,11 +347,16 @@ async def process_ios_query(
                 output_format="pcm_16000",
             )
 
+            # Wait for Layer 1 to finish before we start sending — this avoids
+            # audio interleaving while still eliminating the silence gap.
+            await layer1_done_event.wait()
+
             layer3_text = "".join(layer3_tokens).strip()
 
             if _responses_differ("".join(layer1_tokens), layer3_text):
                 logger.info(
-                    f"Query {query_id}: Layer 3 enrichment differs — streaming follow-up"
+                    f"Query {query_id}: Layer 3 streaming enriched follow-up "
+                    f"({len(layer3_tokens)} tokens)"
                 )
                 await stream_audio_bytes_to_session(
                     session_id=session_id,
@@ -343,14 +364,17 @@ async def process_ios_query(
                     audio_stream=audio_stream_l3,
                     chunk_size=6400,
                 )
-                logger.info(
-                    f"Query {query_id}: Layer 3 complete — {len(layer3_tokens)} tokens"
-                )
+                logger.info(f"Query {query_id}: Layer 3 complete")
             else:
-                # Drain the generator so the ElevenLabs WebSocket closes cleanly
                 async for _ in audio_stream_l3:
                     pass
                 logger.info(f"Query {query_id}: Layer 3 skipped — response unchanged")
+
+        layer1_task = asyncio.create_task(_layer1())
+        layer2_task = asyncio.create_task(_layer2())
+        layer3_task = asyncio.create_task(_layer3())
+
+        await asyncio.gather(layer1_task, layer2_task, layer3_task)
 
         await tracer.event("ios_query.complete", data={"query_id": query_id})
         logger.info(f"Query {query_id}: processing complete")
