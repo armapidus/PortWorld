@@ -1,13 +1,11 @@
 
 <p> <img width="7173" height="1758" alt="Associer@3x" src="https://github.com/user-attachments/assets/f65cca33-ff43-47fc-bb5f-96af42dd660d" />
-
-  <h1 align="center">Port:World🌍</h1>
   
   Open-source multimodal framework to plug your AI expertise into the real world through smart glasses.
 </p>
 
 <p align="center">
-  <b>Build during Mistral Worlwide Hackathon 2026</b>
+  <b>Port:World🌍 has been built during Mistral Worlwide Hackathon 2026 🥖🇫🇷</b>
 </p>
 
 <p align="center">
