@@ -355,11 +355,13 @@ async def stream_audio_bytes_to_session(
             payload={"command": "start_response", "response_id": response_id},
         )
 
-        # Send a silent preamble to warm up the iOS audio graph.
-        # After start_response, the iOS side resets the player node and may
-        # reconnect the AVAudioEngine graph.  The first real buffer scheduled
-        # immediately after can be partially dropped during this stabilization.
-        # 150ms of silence absorbs that instability so the real audio starts clean.
+        # Send a short silent preamble before the first real audio chunk.
+        # Historically this was needed because the iOS client reset the player
+        # node and reconfigured the AVAudioEngine graph on `start_response`,
+        # which could cause the first buffer to be partially dropped. The
+        # current iOS implementation no longer calls `playerNode.reset()`, so
+        # this 150ms of silence mainly adds a small fixed latency/byte overhead
+        # but is kept for now as a conservative, backwards-compatible buffer.
         preamble_samples = int(16000 * 0.15)  # 150ms @ 16 kHz
         preamble_bytes = bytes(preamble_samples * 2)  # 16-bit zeros = silence
         await send_envelope(
