@@ -2,15 +2,15 @@
   <img src="Port World logo.png" width="100%" alt="Port:World Logo">
 </p>
 
-What if AI could see the world the way we do?
+**What if AI could see the world the way we do?**
 
-Port:World is an open source framework that turns smart glasses into a live interface between human perception and AI reasoning.
+**Port:World is an open source framework that turns smart glasses into a live interface between human perception and AI reasoning.**
 
-Built during the Mistral Worldwide Hackathon 2026 by Pierre Haas, Vassili de Rosen, Arman Artola.
+**Built during the Mistral Worldwide Hackathon 2026 by Pierre Haas, Vassili de Rosen, Arman Artola.**
 
-It combines an iOS glasses client with a FastAPI backend for voice + vision + tool orchestration. You own the domain logic and prompts; Port provides the runtime, transport, and integration surface.
+**It combines an iOS glasses client with a FastAPI backend for voice + vision + tool orchestration. You own the domain logic and prompts; Port provides the runtime, transport, and integration surface.**
 
-The uses cases are infinite, connect your AI agents, customize them, prompt them, link your MCP, connect your Openclaw...
+**The uses cases are infinite, connect your AI agents, customize them, prompt them, link your MCP, connect your Openclaw...**
 
 
 
