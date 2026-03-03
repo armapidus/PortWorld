@@ -19,8 +19,9 @@ This file defines the minimum documentation context and tooling that coding agen
 
 The codebase is a **hackathon MVP (v4) being refactored to a consumer-quality v1.0**.
 
-- The runtime pipeline (WebSocket, audio capture, query bundle, playback) is fully implemented.
-- The refactor is tracked in phases in `IOS/docs/IMPLEMENTATION_PLAN.md`.
+- The **current** runtime pipeline is half-duplex batch: wake word → record → silence timeout → WAV+MP4 upload (`POST /query`) → receive PCM response. This is the code in the repository today.
+- The **target** runtime pipeline (Phase 6) is persistent bidirectional streaming: wake word (on-device SFSpeech) → binary PCM over WebSocket → sleep word closes session. See `ARCHITECTURE.md §14`.
+- The refactor is tracked in phases in `IOS/docs/IMPLEMENTATION_PLAN.md` (Phases 0–6).
 - Do not add features until the phase they belong to is reached.
 - Always leave the app compilable after every change.
 
