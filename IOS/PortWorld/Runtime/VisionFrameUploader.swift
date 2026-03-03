@@ -1,11 +1,12 @@
 import Foundation
 import UIKit
 
-struct VisionFrameUploadResult {
+struct VisionFrameUploadResult: Sendable {
   let frameId: String
   let captureTimestampMs: Int64
   let latencyMs: Int64
   let payloadBytes: Int
+  let frameDropCount: Int
   let httpStatusCode: Int?
   let attemptCount: Int
   let success: Bool
@@ -36,7 +37,7 @@ enum VisionFrameUploadErrorCode: String {
   case unknown = "PHOTO_UPLOAD_UNKNOWN_ERROR"
 }
 
-final class VisionFrameUploader: VisionFrameUploaderProtocol {
+actor VisionFrameUploader: VisionFrameUploaderProtocol {
   typealias UploadResultHandler = (VisionFrameUploadResult) -> Void
 
   private var onUploadResult: UploadResultHandler?
@@ -56,14 +57,13 @@ final class VisionFrameUploader: VisionFrameUploaderProtocol {
   private let baseRetryDelayMs: Int64
   private let maxRetryDelayMs: Int64
   private let urlSession: URLSession
-  private let queue = DispatchQueue(label: "Runtime.VisionFrameUploader")
-  private let queueKey = DispatchSpecificKey<Void>()
-  private let callbackQueue: DispatchQueue
 
-  private var timer: DispatchSourceTimer?
+  private var loopTask: Task<Void, Never>?
   private var latestFrame: PendingFrame?
   private var isRunning = false
   private var uploadInFlight = false
+  private var frameDropCount = 0
+  private var frameDropCountSinceLastRead = 0
 
   init(
     endpointURL: URL,
@@ -75,8 +75,7 @@ final class VisionFrameUploader: VisionFrameUploaderProtocol {
     maxRetryCount: Int = 2,
     baseRetryDelayMs: Int64 = 250,
     maxRetryDelayMs: Int64 = 2_000,
-    urlSession: URLSession = .shared,
-    callbackQueue: DispatchQueue = .main
+    urlSession: URLSession = .shared
   ) {
     self.endpointURL = endpointURL
     self.defaultHeaders = defaultHeaders
@@ -88,74 +87,74 @@ final class VisionFrameUploader: VisionFrameUploaderProtocol {
     self.baseRetryDelayMs = max(100, baseRetryDelayMs)
     self.maxRetryDelayMs = max(self.baseRetryDelayMs, maxRetryDelayMs)
     self.urlSession = urlSession
-    self.callbackQueue = callbackQueue
-    self.queue.setSpecific(key: queueKey, value: ())
   }
 
   deinit {
-    if DispatchQueue.getSpecific(key: queueKey) != nil {
-      stopLocked()
-    } else {
-      queue.sync {
-        stopLocked()
-      }
-    }
+    loopTask?.cancel()
   }
 
   func start() {
-    queue.async {
-      guard !self.isRunning else {
-        return
+    guard !isRunning else {
+      return
+    }
+    isRunning = true
+    if loopTask == nil {
+      loopTask = Task { [weak self] in
+        await self?.runLoop()
       }
-      self.isRunning = true
-      self.startTimerLocked()
     }
   }
 
   func stop() {
-    queue.async {
-      self.stopLocked()
-    }
+    isRunning = false
+    loopTask?.cancel()
+    loopTask = nil
+    latestFrame = nil
+    frameDropCount = 0
+    frameDropCountSinceLastRead = 0
   }
 
-  func submitLatestFrame(_ image: UIImage, captureTimestampMs: Int64 = Clocks.nowMs()) {
-    queue.async {
-      self.latestFrame = PendingFrame(image: image, captureTimestampMs: captureTimestampMs)
+  /// Returns frame drops since last call, then resets the delta.
+  func consumeFrameDropCount() -> Int {
+    let count = frameDropCountSinceLastRead
+    frameDropCountSinceLastRead = 0
+    return count
+  }
+
+  func submitLatestFrame(_ image: UIImage, captureTimestampMs: Int64) {
+    if latestFrame != nil {
+      frameDropCount += 1
+      frameDropCountSinceLastRead += 1
+    } else if uploadInFlight {
+      frameDropCount += 1
+      frameDropCountSinceLastRead += 1
     }
+    latestFrame = PendingFrame(image: image, captureTimestampMs: captureTimestampMs)
   }
 
   func bindHandlers(
     sessionIDProvider: @escaping VisionFrameSessionIDProvider,
     onUploadResult: UploadResultHandler?
   ) {
-    queue.async {
-      self.sessionIDProvider = sessionIDProvider
-      self.onUploadResult = onUploadResult
+    self.sessionIDProvider = sessionIDProvider
+    self.onUploadResult = onUploadResult
+  }
+
+  private func runLoop() async {
+    while !Task.isCancelled {
+      await tick()
+
+      do {
+        try await Task.sleep(nanoseconds: UInt64(uploadIntervalMs) * 1_000_000)
+      } catch {
+        break
+      }
     }
+
+    loopTask = nil
   }
 
-  private func startTimerLocked() {
-    let timer = DispatchSource.makeTimerSource(queue: queue)
-    timer.schedule(
-      deadline: .now() + .milliseconds(Int(uploadIntervalMs)),
-      repeating: .milliseconds(Int(uploadIntervalMs))
-    )
-    timer.setEventHandler { [weak self] in
-      self?.tickLocked()
-    }
-    self.timer = timer
-    timer.resume()
-  }
-
-  private func stopLocked() {
-    isRunning = false
-    timer?.setEventHandler {}
-    timer?.cancel()
-    timer = nil
-    latestFrame = nil
-  }
-
-  private func tickLocked() {
+  private func tick() async {
     guard isRunning else {
       return
     }
@@ -172,8 +171,8 @@ final class VisionFrameUploader: VisionFrameUploaderProtocol {
     uploadInFlight = true
 
     do {
-      let requestPayload = try makeRequestPayload(pending)
-      upload(payload: requestPayload, captureTimestampMs: pending.captureTimestampMs, attempt: 1)
+      let requestPayload = try await makeRequestPayload(pending)
+      await upload(payload: requestPayload, captureTimestampMs: pending.captureTimestampMs, attempt: 1)
     } catch {
       uploadInFlight = false
       let frameId = "frame_\(pending.captureTimestampMs)"
@@ -186,6 +185,7 @@ final class VisionFrameUploader: VisionFrameUploaderProtocol {
           captureTimestampMs: pending.captureTimestampMs,
           latencyMs: 0,
           payloadBytes: 0,
+          frameDropCount: self.frameDropCount,
           httpStatusCode: nil,
           attemptCount: 1,
           success: false,
@@ -196,33 +196,38 @@ final class VisionFrameUploader: VisionFrameUploaderProtocol {
     }
   }
 
-  private func makeRequestPayload(_ pending: PendingFrame) throws -> (frameId: String, data: Data) {
+  private func makeRequestPayload(_ pending: PendingFrame) async throws -> (frameId: String, data: Data) {
     guard let sessionID = sessionIDProvider(), !sessionID.isEmpty else {
       throw VisionFrameUploaderError.noSessionID
     }
 
-    guard let jpegData = pending.image.jpegData(compressionQuality: jpegCompression) else {
+    let jpegData: Data
+    if let encoded = await MainActor.run(body: { pending.image.jpegData(compressionQuality: jpegCompression) }) {
+      jpegData = encoded
+    } else {
       throw VisionFrameUploaderError.imageEncodingFailed
     }
 
     let now = Clocks.nowMs()
     let frameId = "frame_\(now)"
-    let dimensions = pending.image.normalizedPixelSize
+    let payloadData = try await MainActor.run { () throws -> Data in
+      let dimensions = pending.image.normalizedPixelSize
+      let body = VisionFrameRequest(
+        sessionID: sessionID,
+        tsMs: now,
+        frameID: frameId,
+        captureTsMs: pending.captureTimestampMs,
+        width: dimensions.width,
+        height: dimensions.height,
+        frameB64: jpegData.base64EncodedString()
+      )
+      return try JSONEncoder().encode(body)
+    }
 
-    let body = VisionFrameRequest(
-      sessionID: sessionID,
-      tsMs: now,
-      frameID: frameId,
-      captureTsMs: pending.captureTimestampMs,
-      width: dimensions.width,
-      height: dimensions.height,
-      frameB64: jpegData.base64EncodedString()
-    )
-
-    return (frameId, try JSONEncoder().encode(body))
+    return (frameId, payloadData)
   }
 
-  private func upload(payload: (frameId: String, data: Data), captureTimestampMs: Int64, attempt: Int) {
+  private func upload(payload: (frameId: String, data: Data), captureTimestampMs: Int64, attempt: Int) async {
     var request = URLRequest(url: endpointURL)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -233,64 +238,77 @@ final class VisionFrameUploader: VisionFrameUploaderProtocol {
     request.timeoutInterval = TimeInterval(requestTimeoutMs) / 1000.0
 
     let startedAt = Date()
-    urlSession.dataTask(with: request) { [weak self] _, response, error in
-      guard let self else {
+
+    let response: URLResponse?
+    let error: Error?
+    do {
+      let (_, urlResponse) = try await urlSession.data(for: request)
+      response = urlResponse
+      error = nil
+    } catch let requestError {
+      response = nil
+      error = requestError
+    }
+
+    let latencyMs = Int64(Date().timeIntervalSince(startedAt) * 1000)
+    let statusCode = (response as? HTTPURLResponse)?.statusCode
+    let success = error == nil && (statusCode.map { 200..<300 ~= $0 } ?? false)
+    let errorCode = classifyError(error: error, statusCode: statusCode)
+    let shouldRetry = shouldRetry(error: error, statusCode: statusCode, attempt: attempt)
+
+    if success {
+      uploadInFlight = false
+      publishResult(
+        VisionFrameUploadResult(
+          frameId: payload.frameId,
+          captureTimestampMs: captureTimestampMs,
+          latencyMs: latencyMs,
+          payloadBytes: payload.data.count,
+          frameDropCount: self.frameDropCount,
+          httpStatusCode: statusCode,
+          attemptCount: attempt,
+          success: true,
+          errorCode: nil,
+          errorDescription: nil
+        )
+      )
+      return
+    }
+
+    if shouldRetry {
+      let delayMs = retryDelayMs(forAttempt: attempt)
+
+      do {
+        try await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000)
+      } catch {
+        uploadInFlight = false
         return
       }
 
-      let latencyMs = Int64(Date().timeIntervalSince(startedAt) * 1000)
-      let statusCode = (response as? HTTPURLResponse)?.statusCode
-      let success = error == nil && (statusCode.map { 200..<300 ~= $0 } ?? false)
-      let errorCode = self.classifyError(error: error, statusCode: statusCode)
-      let shouldRetry = self.shouldRetry(error: error, statusCode: statusCode, attempt: attempt)
-
-      self.queue.async {
-        if success {
-          self.uploadInFlight = false
-          self.publishResult(
-            VisionFrameUploadResult(
-              frameId: payload.frameId,
-              captureTimestampMs: captureTimestampMs,
-              latencyMs: latencyMs,
-              payloadBytes: payload.data.count,
-              httpStatusCode: statusCode,
-              attemptCount: attempt,
-              success: true,
-              errorCode: nil,
-              errorDescription: nil
-            )
-          )
-          return
-        }
-
-        if shouldRetry {
-          let delayMs = self.retryDelayMs(forAttempt: attempt)
-          self.queue.asyncAfter(deadline: .now() + .milliseconds(Int(delayMs))) { [weak self] in
-            guard let self, self.isRunning else {
-              self?.uploadInFlight = false
-              return
-            }
-            self.upload(payload: payload, captureTimestampMs: captureTimestampMs, attempt: attempt + 1)
-          }
-          return
-        }
-
-        self.uploadInFlight = false
-        self.publishResult(
-          VisionFrameUploadResult(
-            frameId: payload.frameId,
-            captureTimestampMs: captureTimestampMs,
-            latencyMs: latencyMs,
-            payloadBytes: payload.data.count,
-            httpStatusCode: statusCode,
-            attemptCount: attempt,
-            success: false,
-            errorCode: errorCode.rawValue,
-            errorDescription: error?.localizedDescription ?? "HTTP \(statusCode ?? -1)"
-          )
-        )
+      guard isRunning else {
+        uploadInFlight = false
+        return
       }
-    }.resume()
+
+      await upload(payload: payload, captureTimestampMs: captureTimestampMs, attempt: attempt + 1)
+      return
+    }
+
+    uploadInFlight = false
+    publishResult(
+      VisionFrameUploadResult(
+        frameId: payload.frameId,
+        captureTimestampMs: captureTimestampMs,
+        latencyMs: latencyMs,
+        payloadBytes: payload.data.count,
+        frameDropCount: self.frameDropCount,
+        httpStatusCode: statusCode,
+        attemptCount: attempt,
+        success: false,
+        errorCode: errorCode.rawValue,
+        errorDescription: error?.localizedDescription ?? "HTTP \(statusCode ?? -1)"
+      )
+    )
   }
 
   private func shouldRetry(error: Error?, statusCode: Int?, attempt: Int) -> Bool {
@@ -333,14 +351,15 @@ final class VisionFrameUploader: VisionFrameUploaderProtocol {
   }
 
   private func publishResult(_ result: VisionFrameUploadResult) {
-    callbackQueue.async {
-      self.onUploadResult?(result)
+    let handler = onUploadResult
+    Task { @MainActor in
+      handler?(result)
     }
   }
 }
 
 private extension UIImage {
-  var normalizedPixelSize: (width: Int, height: Int) {
+  nonisolated var normalizedPixelSize: (width: Int, height: Int) {
     if let cgImage {
       return (cgImage.width, cgImage.height)
     }
