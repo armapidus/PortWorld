@@ -22,9 +22,23 @@ final class RuntimeCoordinator {
       speechActivityDebounceMs: runtimeConfig.speechActivityDebounceMs
     )
     let audioManager = self.audioCollectionManager
+    let audioSessionLeaseManager = AudioSessionLeaseManager(arbiter: AudioSessionArbiter())
 
     let dependencies = SessionOrchestrator.Dependencies(
       startStream: {
+        do {
+          try await audioSessionLeaseManager.acquire(configuration: .playAndRecordHFP)
+        } catch {
+          let message = RuntimeCoordinator.audioLeaseErrorMessage(prefix: "Failed to acquire audio session lease", error: error)
+          store.audioLastError = message
+          store.runtimeErrorText = message
+          if store.assistantRuntimeState == .activating || store.assistantRuntimeState == .active {
+            store.assistantRuntimeState = .failed
+            store.runtimeSessionStateText = "failed"
+          }
+          return
+        }
+
         await audioManager.prepareAudioSession()
         if audioManager.isAudioSessionReady {
           await audioManager.start()
@@ -34,6 +48,13 @@ final class RuntimeCoordinator {
       stopStream: {
         await audioManager.stop()
         await deviceSessionCoordinator.stopSession()
+        do {
+          try await audioSessionLeaseManager.releaseIfNeeded()
+        } catch {
+          let message = RuntimeCoordinator.audioLeaseErrorMessage(prefix: "Failed to release audio session lease", error: error)
+          store.audioLastError = message
+          store.runtimeErrorText = message
+        }
       },
       exportAudioClip: { window in
         try audioManager.exportWAVClip(window: window)
@@ -56,6 +77,9 @@ final class RuntimeCoordinator {
     )
 
     self.runtimeOrchestrator = SessionOrchestrator(config: runtimeConfig, dependencies: dependencies)
+    self.audioCollectionManager.isPlaybackPendingProvider = { [weak self] in
+      self?.runtimeOrchestrator.hasPendingPlayback() ?? false
+    }
     bindDeviceSession()
     bindRuntimeState()
     bindAudioState()
@@ -271,5 +295,9 @@ final class RuntimeCoordinator {
       store.assistantRuntimeState = .failed
       store.runtimeSessionStateText = "failed"
     }
+  }
+
+  private static func audioLeaseErrorMessage(prefix: String, error: Error) -> String {
+    "\(prefix): \(error.localizedDescription)"
   }
 }
