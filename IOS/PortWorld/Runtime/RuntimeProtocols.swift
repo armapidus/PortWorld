@@ -25,9 +25,8 @@ protocol SessionWebSocketClientProtocol: Actor {
   func send<Payload: Codable>(type: WSOutboundType, sessionID: String, payload: Payload) async throws
 }
 
-/// Queue-isolated photo uploader contract.
-/// Implementations should perform network work off-main and surface results via callback.
-protocol VisionFrameUploaderProtocol: AnyObject {
+/// Actor-isolated photo uploader contract.
+protocol VisionFrameUploaderProtocol: Actor {
   func bindHandlers(
     sessionIDProvider: @escaping VisionFrameSessionIDProvider,
     onUploadResult: VisionFrameUploadResultHandler?
@@ -37,8 +36,8 @@ protocol VisionFrameUploaderProtocol: AnyObject {
   func submitLatestFrame(_ image: UIImage, captureTimestampMs: Int64)
 }
 
-/// Video buffer implementations stay thread-isolated off-main.
-protocol RollingVideoBufferProtocol: AnyObject {
+/// Actor-isolated video buffer contract.
+protocol RollingVideoBufferProtocol: Actor {
   var bufferedDurationMs: Int64 { get }
   func append(frame: UIImage, timestampMs: Int64)
   func clear()
@@ -104,6 +103,7 @@ protocol AssistantPlaybackEngineProtocol: AnyObject {
   var pendingBufferCount: Int { get }
   var pendingBufferDurationMs: Double { get }
   var isBackpressured: Bool { get }
+  func hasActivePendingPlayback() -> Bool
 
   func appendChunk(_ payload: AssistantAudioChunkPayload) throws
   func appendPCMData(_ pcmData: Data, format incomingFormat: AssistantAudioFormat) throws

@@ -1,8 +1,13 @@
 import Foundation
+import OSLog
 
 @MainActor
 public final class EventLogger: EventLoggerProtocol {
   public typealias Sink = (_ line: String) -> Void
+  private static let fallbackLogger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "PortWorld",
+    category: "EventLogger"
+  )
 
   private let maxRetainedEvents: Int
   private let sink: Sink?
@@ -23,9 +28,14 @@ public final class EventLogger: EventLoggerProtocol {
     }
 
     let line: String
-    if let data = try? encoder.encode(event), let serialized = String(data: data, encoding: .utf8) {
-      line = serialized
-    } else {
+    do {
+      let data = try encoder.encode(event)
+      if let serialized = String(data: data, encoding: .utf8) {
+        line = serialized
+      } else {
+        line = #"{"name":"\#(event.name)","session_id":"\#(event.sessionID)","ts_ms":\#(event.tsMs)}"#
+      }
+    } catch {
       line = #"{"name":"\#(event.name)","session_id":"\#(event.sessionID)","ts_ms":\#(event.tsMs)}"#
     }
 
@@ -33,7 +43,9 @@ public final class EventLogger: EventLoggerProtocol {
       sink(line)
     } else {
 #if DEBUG
-      print(line)
+      Self.fallbackLogger.debug("\(line, privacy: .public)")
+#else
+      Self.fallbackLogger.debug("\(line, privacy: .private)")
 #endif
     }
   }

@@ -45,7 +45,7 @@ public enum RuntimeState: String, Codable {
   case resumed
 }
 
-public struct VisionFrameRequest: Codable {
+@preconcurrency public struct VisionFrameRequest: Codable {
   public let sessionID: String
   public let tsMs: Int64
   public let frameID: String
