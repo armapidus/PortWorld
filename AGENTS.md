@@ -1,182 +1,96 @@
 # AGENTS.md
 
-## Purpose
-
-This file defines the minimum documentation context and tooling that coding agents must load before proposing architecture, writing code, or reviewing changes in this repository.
+> Heavy iOS-specific guidance lives in `IOS/AGENTS.md`.
+> This root file contains only stable, repo-wide rules that apply to every task.
 
 ---
 
-## Platform Scope (Mandatory)
+## Platform Scope
 
-- Primary platform: **iOS**
-- Minimum deployment target: **iOS 17.0**
+- Primary platform: **iOS 17.0+**
 - Target device: iPhone + Meta Ray-Ban Gen 2 smart glasses
-- Assume iOS-first decisions unless a task explicitly asks for Android.
+- Assume iOS-first decisions unless a task explicitly asks for another platform.
 
 ---
 
-## Current State
+## Codebase State
 
-The codebase is a **hackathon MVP (v4) being refactored to a consumer-quality v1.0**.
+The codebase is a **hackathon MVP being refactored to a consumer-quality v1.0** in tracked phases.
 
-- The **current** runtime pipeline is half-duplex batch: wake word → record → silence timeout → WAV+MP4 upload (`POST /query`) → receive PCM response. This is the code in the repository today.
-- The **target** runtime pipeline (Phase 6) is persistent bidirectional streaming: wake word (on-device SFSpeech) → binary PCM over WebSocket → sleep word closes session. See `ARCHITECTURE.md §14`.
-- The refactor is tracked in phases in `IOS/docs/IMPLEMENTATION_PLAN.md` (Phases 0–6).
-- Do not add features until the phase they belong to is reached.
-- Always leave the app compilable after every change.
+- **Current** pipeline: half-duplex batch — wake word → record → silence timeout → WAV+MP4 upload (`POST /query`) → PCM response.
+- **Target** pipeline (Phase 6): persistent bidirectional WebSocket streaming.
+- Phases are tracked in `IOS/docs/IMPLEMENTATION_PLAN.md`.
 
----
+**Golden rules (always enforce):**
 
-## Always-Read Documentation Map
-
-Read these files **in order** before any implementation work:
-
-1. **Architecture:** `IOS/docs/ARCHITECTURE.md` — module map, data flows, concurrency model, design system
-2. **Product requirements:** `IOS/docs/PRD.md` — functional requirements, transport contracts, failure modes
-3. **Implementation plan:** `IOS/docs/IMPLEMENTATION_PLAN.md` — phase-by-phase tasks, per-file instructions
-4. **Test strategy:** `IOS/docs/TESTING.md` — test inventory, manual acceptance tests, release gate
-5. **Meta Wearables SDK:** `IOS/docs/Wearables DAT SDK.md` — DAT SDK integration reference
-
-> **Old docs** in `IOS/PortWorld/docs/` are archived hackathon v4 documents.
-> They are not authoritative. See `IOS/PortWorld/docs/ARCHIVE_NOTICE.md` for the mapping.
+1. Do not add features until the phase they belong to is reached.
+2. Always leave the app compilable after every change.
+3. No secrets (API keys, tokens, IP addresses) in source — use xcconfig injection.
 
 ---
 
-## Available MCP Tools — Use Them
+## Canonical Verification Workflow
 
-### XcodeBuildMCP — iOS build, run, test, UI automation
-
-XcodeBuildMCP is available and **must be used** for all Xcode-related tasks instead of running raw shell commands.
-
-Before any build or test operation:
-
-1. Call `session_show_defaults` to check current configuration.
-2. Call `mcp_xcodebuildmcp_discover_projs` with `workspaceRoot: IOS/` to locate the project.
-3. Call `mcp_xcodebuildmcp_list_schemes` to confirm available schemes.
-
-Use cases:
-
-- **Build:** use XcodeBuildMCP build tools, not `xcodebuild` in terminal.
-- **Test:** use XcodeBuildMCP test tools to run `PortWorldTests`.
-- **Simulator:** use XcodeBuildMCP to boot, install, and launch on simulator.
-- **UI automation:** use snapshot/tap/type tools to verify UI states without manual steps.
-- **Screenshots:** use `mcp_xcodebuildmcp_screenshot` when verifying UI changes.
-
-#### Working session defaults (validated)
-
-Use these defaults when initializing XcodeBuildMCP for this repository:
-
-- `projectPath`: `/Users/pierrehaas/Desktop/Projects/Hackathon/PortWorld/IOS/PortWorld.xcodeproj`
-- `scheme`: `PortWorld`
-- `simulatorName`: `iPhone 17`
-- `simulatorId`: `A1C187E8-B13C-40E7-8C0B-1F05BD6F8543`
-- `simulatorPlatform`: `iOS Simulator`
-
-Recommended setup command:
-
-```json
-session_set_defaults({
-  "projectPath": "/Users/pierrehaas/Desktop/Projects/Hackathon/PortWorld/IOS/PortWorld.xcodeproj",
-  "scheme": "PortWorld",
-  "simulatorName": "iPhone 17",
-  "simulatorId": "A1C187E8-B13C-40E7-8C0B-1F05BD6F8543",
-  "simulatorPlatform": "iOS Simulator"
-})
-```
-
-If this simulator is unavailable, call `mcp_xcodebuildmcp_list_sims` and update defaults to an installed iOS simulator before building.
-
-### Ref MCP — Search up-to-date documentation
-
-Use `mcp_ref_ref_search_documentation` and `mcp_ref_ref_read_url` to look up:
-
-- Third-party library docs (SDKs, Swift packages)
-- Any API where the local docs may be outdated or incomplete
-- Stack Overflow / GitHub issues for specific error messages
-
-Always search before assuming behaviour of an unfamiliar API.
+Run these checks (in order) after any non-trivial change:
 
 ```
-// Example usage pattern:
-mcp_ref_ref_search_documentation(query: "AVAudioSession allowBluetoothHFP iOS 17")
-mcp_ref_ref_read_url(url: "<url from search result>")
+1. Build:       XcodeBuildMCP build — zero errors, zero new warnings
+2. Unit tests:  XcodeBuildMCP run PortWorldTests — all pass
+3. UI smoke:    XcodeBuildMCP boot simulator → install → launch → screenshot
 ```
 
-### Apple Docs MCP — iOS and Swift API reference
-
-Use `mcp_apple-docs_search_apple_docs` for all Apple framework questions:
-
-- `AVFoundation`, `AVAudioEngine`, `AVAudioSession` — audio pipeline
-- `URLSession` async/await — networking
-- `SwiftUI`, `@Observable`, `@MainActor` — UI and concurrency
-- `SFSpeechRecognizer` — wake word detection
-- `NWPathMonitor` — network reachability
-- `AVAssetWriter` — video encoding
-
-Use `mcp_apple-docs_get_platform_compatibility` to verify minimum iOS version before using any API.
-
-Use `mcp_apple-docs_get_related_apis` when exploring alternatives to deprecated APIs.
-
-```
-// Example usage pattern:
-mcp_apple-docs_search_apple_docs(query: "AVAudioPlayerNode scheduleBuffer")
-mcp_apple-docs_get_platform_compatibility(apiUrl: "https://developer.apple.com/documentation/avfoundation/avaudioplayernode")
-```
+For small, localised fixes (single file, no API or concurrency surface change) a build-only check is sufficient.
 
 ---
 
-## Meta Wearables SDK Rules
+## Concurrency Rules (Mandatory — never deviate)
 
-When writing any code that touches the DAT SDK:
-
-1. **State the module explicitly:** `MWDATCore`, `MWDATCamera`, or `MWDATMockDevice`.
-2. **Read the local SDK doc first:** `IOS/docs/Wearables DAT SDK.md`.
-3. **Fetch current API surface** if local doc is insufficient — use `mcp_ref_ref_search_documentation` with the MWDAT SDK endpoint.
-4. **iOS lifecycle constraints to respect:**
-   - DAT camera streams are session-state driven; handle via observed stream/session transitions.
-   - DAT stream quality is Bluetooth-bandwidth constrained; requested quality is not guaranteed.
-   - HFP audio route must be configured before starting any audio workflow.
-   - DAT microphone input is 8kHz mono.
-5. **Never generate SDK usage code** without citing the relevant module and iOS integration constraints from the docs.
-6. **If required SDK details are missing,** stop and fetch the exact MWDAT doc link before continuing.
-
----
-
-## Concurrency Rules (Mandatory)
-
-The project uses a strict two-primitive concurrency model. Do not deviate.
-
-| Where                                                           | Use                                                         |
-| --------------------------------------------------------------- | ----------------------------------------------------------- |
-| UI state, ViewModels, Coordinators, SessionOrchestrator         | `@MainActor`                                                |
-| Thread-isolated services (WebSocket, uploader, buffer, arbiter) | `actor`                                                     |
-| AVAudioEngine tap callback (AVFoundation requirement)           | dedicated `DispatchQueue` — no other use of `DispatchQueue` |
-| All network calls                                               | `async/await` with `URLSession`                             |
+| Where | Primitive |
+|---|---|
+| UI state, ViewModels, Coordinators, SessionOrchestrator | `@MainActor` |
+| Thread-isolated services (WebSocket, uploader, buffer, arbiter) | `actor` |
+| AVAudioEngine tap callback (AVFoundation requirement) | dedicated `DispatchQueue` — no other use |
+| All network calls | `async/await` with `URLSession` |
 
 **Banned patterns:**
 
 - `DispatchQueue.sync` outside the audio engine tap
 - Bare `print()` outside `#if DEBUG`
 - `try?` that silently discards errors on I/O paths
-- `@unchecked Sendable` without a comment explaining the exception
+- `@unchecked Sendable` without an explanatory comment
+
+---
+
+## MCP Tools
+
+Use these tools if available. If a tool is not available, use the closest equivalent and note the substitute in your response.
+
+| Tool | Use for |
+|---|---|
+| **XcodeBuildMCP** | All Xcode build, test, simulator, and UI automation tasks — prefer over raw `xcodebuild` |
+| **Ref MCP** | Third-party library docs, Swift packages, any API where local docs may be outdated |
+| **Apple Docs MCP** | All Apple framework questions (`AVFoundation`, `SwiftUI`, `URLSession`, etc.) |
 
 ---
 
 ## Implementation Policy
 
-- Keep every change aligned with `IOS/docs/PRD.md` + `IOS/docs/ARCHITECTURE.md`.
+- Keep every change aligned with `IOS/docs/PRD.md` and `IOS/docs/ARCHITECTURE.md`.
 - If a proposed change conflicts with either, flag it explicitly before proceeding.
-- Each phase in `IMPLEMENTATION_PLAN.md` has a completion criterion — verify it before moving to the next phase.
-- No secrets (API keys, tokens, IP addresses) in source; use xcconfig injection.
+- Each phase in `IOS/docs/IMPLEMENTATION_PLAN.md` has a completion criterion — verify it before advancing.
 
 ---
 
-## Output Expectations
+## Output Expectations (Non-Trivial Changes)
 
-For each non-trivial code change, state:
+State the following in your response:
 
-1. Which docs were consulted (file paths).
-2. Which MWDAT module was used (if DAT SDK touched) and why.
-3. Which MCP tools were used for research (Apple Docs, Ref, XcodeBuildMCP).
-4. Any iOS lifecycle or integration assumptions made.
-5. Which phase of `IMPLEMENTATION_PLAN.md` the change belongs to.
+1. **Docs consulted** — file paths or URLs.
+2. **MWDAT module touched** (if DAT SDK involved) — `MWDATCore`, `MWDATCamera`, or `MWDATMockDevice`.
+3. **MCP tools used** — which tools provided research and what they returned.
+4. **Assumptions made** — iOS lifecycle, integration, or API behaviour assumptions.
+5. **Phase** — which phase of `IMPLEMENTATION_PLAN.md` this change belongs to.
+
+---
+
+> See `IOS/AGENTS.md` for the full iOS implementation guide: docs map, XcodeBuildMCP workflow, DAT SDK rules, concurrency examples, and pattern reference.
