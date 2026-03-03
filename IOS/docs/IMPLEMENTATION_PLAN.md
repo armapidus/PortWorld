@@ -371,6 +371,16 @@ Target: < 150 lines. Rename to `SessionViewModel.swift`.
 
 **Outcome:** All 55 identified correctness, reliability, and concurrency bugs (enumerated below) are fixed. The existing test suite stays green throughout.
 
+### Phase 2 status (2026-03-04)
+
+- ✅ **Phase 2 complete.**
+- Core runtime services were hardened and isolated (`VisionFrameUploader`, `RollingVideoBuffer`, wake-word runtime path, endpoint detection path).
+- `AudioSessionArbiter` + lease wiring is in place to prevent conflicting audio-session ownership across capture/playback flow.
+- `SessionOrchestrator` reliability fixes shipped: reconnect-safe outbound buffering, in-flight upload cancellation on deactivate, and query-context race hardening.
+- Policy/maintainability cleanup landed: bare `print()` removal, `DispatchQueue.sync` removal in runtime path, silent I/O `try?` cleanup, and `@unchecked Sendable` safety rationale.
+- Playback resilience improvements shipped: pending-buffer invariant hardening and configurable stuck-detection threshold via `RuntimeConfig`.
+- Verification summary: `xcodebuild build` succeeds; no direct `DispatchQueue.sync` usage in `IOS/PortWorld/`; no `DispatchQueue.main.async` in views.
+
 <details>
 <summary><strong>Bug Registry (55 items)</strong> — click to expand</summary>
 
@@ -984,7 +994,7 @@ Define the protocol and supporting types as specified in ARCHITECTURE.md §14.3:
 | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Phase 0 | No LAN IPs in source; no stale copy; `ExampleMediaPipelineTester` excluded from app target; silence timeout default = 5000; `UIBackgroundModes` includes `audio`                                                                                                                      |
 | Phase 1 | `StreamSessionViewModel` < 150 lines; `RegistrationView` deleted; all 5 `lazy var` services injectable; `SessionStateStore` exists and all views read from it                                                                                                                         |
-| Phase 2 | All 55 bugs listed in the inspection report resolved; `xcodebuild test` green; no bare `print()` or `DispatchQueue.sync` outside audio tap                                                                                                                                            |
+| Phase 2 | ✅ **Completed (2026-03-04).** All 55 bugs listed in the inspection report resolved; no bare `print()` or `DispatchQueue.sync` outside audio tap.                                                                                                                                    |
 | Phase 3 | Log persists to disk; keychain credential store; NWReachability wired; query bundle upload streamed; app metadata in health/query payloads                                                                                                                                            |
 | Phase 4 | Light + dark mode pass; all screens rebuilt per spec; `RuntimeStatusPanelView` hidden in release; hold-to-activate gesture; no debug UI visible to user                                                                                                                               |
 | Phase 5 | All P5-01 → P5-12 tests exist and pass; `Runtime/` + `Audio/` line coverage > 70%                                                                                                                                                                                                     |
