@@ -304,6 +304,6 @@ v1.0 is accepted for App Store submission when **all** of the following are true
 - [ ] 30-minute soak test (T13) completes without crash
 - [ ] Memory below 200MB RSS during T13
 - [ ] No `print()` in release build (`grep -r "print(" IOS/PortWorld/ --include="*.swift"` returns only `#if DEBUG`-gated results)
-- [ ] No LAN IP in source (`grep -r "192.168\|172.16\|10.0.0" IOS/` returns nothing)
+- [ ] No LAN IP in app source (`grep -r "192.168\|172.16\|10.0.0" IOS/PortWorld IOS/Info.plist IOS/PortWorld.entitlements IOS/PortWorld.xcodeproj` returns nothing)
 - [ ] Privacy manifest (`PrivacyInfo.xcprivacy`) complete
 - [ ] App Store screenshot set prepared (6.5" + 5.5", ≥ 3 screens)

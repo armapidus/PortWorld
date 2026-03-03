@@ -62,6 +62,30 @@ Use cases:
 - **UI automation:** use snapshot/tap/type tools to verify UI states without manual steps.
 - **Screenshots:** use `mcp_xcodebuildmcp_screenshot` when verifying UI changes.
 
+#### Working session defaults (validated)
+
+Use these defaults when initializing XcodeBuildMCP for this repository:
+
+- `projectPath`: `/Users/pierrehaas/Desktop/Projects/Hackathon/PortWorld/IOS/PortWorld.xcodeproj`
+- `scheme`: `PortWorld`
+- `simulatorName`: `iPhone 17`
+- `simulatorId`: `A1C187E8-B13C-40E7-8C0B-1F05BD6F8543`
+- `simulatorPlatform`: `iOS Simulator`
+
+Recommended setup command:
+
+```json
+session_set_defaults({
+  "projectPath": "/Users/pierrehaas/Desktop/Projects/Hackathon/PortWorld/IOS/PortWorld.xcodeproj",
+  "scheme": "PortWorld",
+  "simulatorName": "iPhone 17",
+  "simulatorId": "A1C187E8-B13C-40E7-8C0B-1F05BD6F8543",
+  "simulatorPlatform": "iOS Simulator"
+})
+```
+
+If this simulator is unavailable, call `mcp_xcodebuildmcp_list_sims` and update defaults to an installed iOS simulator before building.
+
 ### Ref MCP — Search up-to-date documentation
 
 Use `mcp_ref_ref_search_documentation` and `mcp_ref_ref_read_url` to look up:

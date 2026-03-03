@@ -122,6 +122,28 @@ Phases 3, 4, 5 can proceed in parallel once Phase 2 is complete.
 
 **Outcome:** Clean compilable baseline, no LAN IPs, no stale copy, no accidental secrets.
 
+### Phase 0 status (2026-03-03)
+
+- ✅ **P0-01 complete.**
+  - `SON_BACKEND_BASE_URL` now uses `$(BACKEND_BASE_URL)` in `IOS/Info.plist`.
+  - `IOS/Config/Debug.xcconfig`, `IOS/Config/Release.xcconfig`, and `IOS/Config/Config.xcconfig.template` exist and are wired in project build configurations.
+- ✅ **P0-02 complete.**
+  - Removed `com.apple.developer.associated-domains` from `IOS/PortWorld.entitlements`.
+- ✅ **P0-03 complete (open-source adjustment).**
+  - Meta boilerplate headers were removed from app Swift files.
+  - Project copyright line was then removed by decision because the repository is open-source.
+- ✅ **P0-04 complete with approved simplification.**
+  - `ExampleMediaPipelineTester` and `ExampleMedia/` were removed from production code paths and from the codebase.
+  - `PortWorldDev` shared scheme was added for developer workflow continuity.
+- ✅ **P0-05 complete.**
+  - `RuntimeConfig.silenceTimeoutMs` default changed from `2_000` to `5_000`.
+- ✅ **P0-06 complete.**
+  - Replaced stale user-facing copy (`"Camera Access"` → `"Microphone Access"` and removed `"OPEN SOURCE BOOST"`).
+- ✅ **P0-07 complete.**
+  - Added `audio` to `UIBackgroundModes` in `IOS/Info.plist`.
+- ✅ **Build verification complete.**
+  - XcodeBuildMCP simulator build succeeds for `PortWorld` after Phase 0 changes.
+
 ### P0-01 Remove committed LAN IP
 
 **File:** `IOS/Info.plist`  
