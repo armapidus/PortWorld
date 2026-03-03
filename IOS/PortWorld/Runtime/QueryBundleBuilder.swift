@@ -183,13 +183,31 @@ final class QueryBundleBuilder: QueryBundleBuilderProtocol {
 
   private static func loadFileData(at fileURL: URL, invalidFileError: QueryBundleBuilderError) throws -> (Data, Int64) {
     let filePath = fileURL.path
-    guard FileManager.default.fileExists(atPath: filePath),
-          let attributes = try? FileManager.default.attributesOfItem(atPath: filePath),
-          let sizeNumber = attributes[.size] as? NSNumber else {
+    guard FileManager.default.fileExists(atPath: filePath) else {
       throw invalidFileError
     }
 
-    let data = try Data(contentsOf: fileURL)
+    let sizeNumber: NSNumber
+    do {
+      let attributes = try FileManager.default.attributesOfItem(atPath: filePath)
+      guard let extractedSize = attributes[.size] as? NSNumber else {
+        throw invalidFileError
+      }
+      sizeNumber = extractedSize
+    } catch let error as QueryBundleBuilderError {
+      throw error
+    } catch {
+      throw invalidFileError
+    }
+
+    let data: Data
+    do {
+      data = try Data(contentsOf: fileURL)
+    } catch {
+      throw QueryBundleBuilderError.transport(
+        message: "Unable to read file data at \(filePath): \(error.localizedDescription)"
+      )
+    }
     return (data, sizeNumber.int64Value)
   }
 
