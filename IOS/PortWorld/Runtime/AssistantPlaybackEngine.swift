@@ -1,5 +1,6 @@
 import AVFAudio
 import Foundation
+import OSLog
 
 public enum AssistantPlaybackError: Error, LocalizedError {
   case invalidBase64Chunk
@@ -12,6 +13,7 @@ public enum AssistantPlaybackError: Error, LocalizedError {
   case unableToAllocateBuffer
   case outputChannelMismatch(expected: Int, actual: Int)
   case engineStartFailed(String)
+  case invalidAudioSessionCategory(expected: String, actual: String)
 
   public var errorDescription: String? {
     switch self {
@@ -35,6 +37,8 @@ public enum AssistantPlaybackError: Error, LocalizedError {
       return "Playback output channel mismatch. Expected \(expected), got \(actual)."
     case .engineStartFailed(let message):
       return "Failed to start playback engine: \(message)"
+    case .invalidAudioSessionCategory(let expected, let actual):
+      return "Invalid audio session category '\(actual)'. Expected '\(expected)' before assistant playback."
     }
   }
 }
@@ -70,6 +74,10 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
   private var isPlayerNodeAttached = false
   private var isPlayerNodeConnected = false
   private static let graphFormat = AssistantAudioFormat(codec: "pcm_s16le", sampleRate: 16_000, channels: 1)
+  private static let logger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "PortWorld",
+    category: "AssistantPlaybackEngine"
+  )
 
   /// Number of buffers currently scheduled in the player node awaiting playback.
   /// Used for backpressure and observability.
@@ -91,7 +99,7 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
 
   /// Threshold (ms) for detecting stuck playback. If buffers were scheduled
   /// this recently but no drain callback fired, we may be stuck.
-  private static let stuckDetectionThresholdMs: Int64 = 1500
+  private let stuckDetectionThresholdMs: Int64
 
   /// Max consecutive stuck checks before attempting recovery.
   private static let maxStuckChecksBeforeRecovery: Int = 3
@@ -110,6 +118,10 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
     pendingBufferDurationMs > Self.backpressureHighWaterMs
   }
 
+  public func hasActivePendingPlayback() -> Bool {
+    pendingBufferCount > 0
+  }
+
   /// Maximum number of pending buffers before backpressure kicks in.
   /// At ~100ms per buffer chunk, 50 buffers ≈ 5 seconds of queued audio.
   private static let maxPendingBuffers = 50
@@ -122,7 +134,8 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
   public init(
     audioSession: AVAudioSession = .sharedInstance(),
     audioEngine: AVAudioEngine? = nil,
-    playerNode: AVAudioPlayerNode = AVAudioPlayerNode()
+    playerNode: AVAudioPlayerNode = AVAudioPlayerNode(),
+    stuckDetectionThresholdMs: Int64 = 1_500
   ) {
     self.audioSession = audioSession
     if let audioEngine {
@@ -133,6 +146,7 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
       self.ownsEngine = true
     }
     self.playerNode = playerNode
+    self.stuckDetectionThresholdMs = max(250, stuckDetectionThresholdMs)
 
     // Attach once, then connect lazily from the first inbound chunk format.
     // Avoid disconnect/reconnect churn on a shared engine.
@@ -235,6 +249,13 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
       throw AssistantPlaybackError.formatMismatch(expected: currentFormat, received: incomingFormat)
     }
 
+    guard audioSession.category == .playAndRecord else {
+      let expectedCategory = AVAudioSession.Category.playAndRecord.rawValue
+      let actualCategory = audioSession.category.rawValue
+      debugLog("[AssistantPlaybackEngine] appendPCMData aborted: AVAudioSession category is '\(actualCategory)', expected '\(expectedCategory)'")
+      throw AssistantPlaybackError.invalidAudioSessionCategory(expected: expectedCategory, actual: actualCategory)
+    }
+
     // Start the engine if needed before scheduling playback.
     try startEngineIfNeeded()
 
@@ -273,7 +294,7 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
       let timeSinceLastSchedule = nowMs - lastBufferScheduledAtMs
       
       // If we've been scheduling buffers but nothing has drained for a while, we're stuck
-      if timeSinceLastSchedule < 500 && timeSinceLastDrain > Self.stuckDetectionThresholdMs {
+      if timeSinceLastSchedule < 500 && timeSinceLastDrain > stuckDetectionThresholdMs {
         consecutiveStuckChecks += 1
         debugLog("[AssistantPlaybackEngine] Stuck playback detected: pendingCount=\(pendingBufferCount), timeSinceLastDrain=\(timeSinceLastDrain)ms, consecutiveChecks=\(consecutiveStuckChecks)")
         
@@ -281,7 +302,7 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
           debugLog("[AssistantPlaybackEngine] Attempting stuck playback recovery")
           attemptPlaybackRecovery()
         }
-      } else if timeSinceLastDrain < Self.stuckDetectionThresholdMs {
+      } else if timeSinceLastDrain < stuckDetectionThresholdMs {
         consecutiveStuckChecks = 0
       }
     }
@@ -323,8 +344,18 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
     playerNode.scheduleBuffer(buffer) { [weak self, bufferDurationMs] in
       Task { @MainActor [weak self] in
         guard let self else { return }
-        self.pendingBufferCount = max(0, self.pendingBufferCount - 1)
-        self.pendingBufferDurationMs = max(0, self.pendingBufferDurationMs - bufferDurationMs)
+        if self.pendingBufferCount > 0 {
+          self.pendingBufferCount -= 1
+        } else {
+          assertionFailure("[AssistantPlaybackEngine] pendingBufferCount underflow detected in completion callback")
+          self.pendingBufferCount = 0
+        }
+        if self.pendingBufferDurationMs >= bufferDurationMs {
+          self.pendingBufferDurationMs -= bufferDurationMs
+        } else {
+          assertionFailure("[AssistantPlaybackEngine] pendingBufferDurationMs underflow detected in completion callback")
+          self.pendingBufferDurationMs = 0
+        }
         self.lastBufferDrainedAtMs = Clocks.nowMs()
       }
     }
@@ -354,6 +385,12 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
     // has already called cancelResponse() to clear any previous audio, and
     // the thinking chime has naturally finished.  All we need to do here is
     // reset the bookkeeping so backpressure tracking starts fresh.
+    if pendingBufferCount > 0 {
+      debugLog(
+        "[AssistantPlaybackEngine] startResponse: resetting \(pendingBufferCount) pending buffers - possible orphaned completions from chime"
+      )
+    }
+
     pendingBufferCount = 0
     pendingBufferDurationMs = 0
     consecutiveStuckChecks = 0
@@ -676,7 +713,7 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
 
   private func debugLog(_ message: String) {
 #if DEBUG
-    print(message)
+    Self.logger.debug("\(message, privacy: .public)")
 #endif
   }
 }
