@@ -36,10 +36,20 @@ Run these checks (in order) after any non-trivial change:
 ```
 1. Build:       XcodeBuildMCP build — zero errors, zero new warnings
 2. Unit tests:  XcodeBuildMCP run PortWorldTests — all pass
-3. UI smoke:    XcodeBuildMCP boot simulator → install → launch → screenshot
+3. UI smoke:    Manual-only gate (user-requested): one coordinator agent may run
+                XcodeBuildMCP boot simulator → install → launch → screenshot
 ```
 
 For small, localised fixes (single file, no API or concurrency surface change) a build-only check is sufficient.
+
+### Simulator Launch Guard (Mandatory)
+
+To prevent sub-agent fan-out launching multiple simulators:
+
+- Do not boot/install/launch Simulator unless the user explicitly asks for UI smoke validation.
+- Sub-agents must never run simulator launch commands.
+- Only one coordinator agent may run simulator commands when explicitly requested.
+- In parallel work, verification defaults to build + tests only.
 
 ---
 
