@@ -81,7 +81,9 @@ You'll need to configure the following in your build settings:
 
 ## Architecture
 
-The app follows the **MVVM** (Model-View-ViewModel) pattern with SwiftUI and Combine.
+The app follows an iOS-first **MVVM + coordinators** architecture with SwiftUI.
+`SessionViewModel` is intentionally thin: it owns a shared `SessionStateStore` and forwards user commands to two coordinator owners.
+`RuntimeCoordinator` owns assistant runtime + audio runtime wiring, while `DeviceSessionCoordinator` owns DAT stream/photo lifecycle.
 
 ```
 PortWorld/
@@ -89,7 +91,6 @@ PortWorld/
 ├── Views/                          # SwiftUI views
 │   ├── MainAppView.swift          # Root navigation controller
 │   ├── HomeScreenView.swift       # Onboarding & connection
-│   ├── RegistrationView.swift     # Meta OAuth callback handler
 │   ├── StreamSessionView.swift    # Stream state router
 │   ├── StreamView.swift           # Live video feed & controls
 │   ├── NonStreamView.swift        # Pre-stream setup & audio controls
@@ -97,7 +98,11 @@ PortWorld/
 │   └── Components/                # Reusable UI components
 ├── ViewModels/
 │   ├── WearablesViewModel.swift   # DAT SDK & device management
-│   └── StreamSessionViewModel.swift # Streaming & audio state
+│   ├── SessionViewModel.swift     # Thin shell forwarding actions to coordinators
+│   └── SessionStateStore.swift    # Shared observable UI/runtime state
+├── Coordinators/
+│   ├── DeviceSessionCoordinator.swift # Owns DAT stream session + photo/frame hooks
+│   └── RuntimeCoordinator.swift       # Owns SessionOrchestrator + AudioCollectionManager
 ├── Audio/
 │   ├── AudioCollectionManager.swift  # AVAudioEngine capture
 │   ├── AudioCollectionTypes.swift    # State & metadata types
@@ -110,7 +115,10 @@ PortWorld/
 | Component | Responsibility |
 |-----------|----------------|
 | **WearablesViewModel** | Meta DAT SDK integration, device discovery, registration flow |
-| **StreamSessionViewModel** | Video streaming, photo capture, audio collection coordination |
+| **SessionViewModel** | Thin shell: owns `SessionStateStore` and forwards actions only |
+| **SessionStateStore** | Single observable source of session/runtime UI state |
+| **RuntimeCoordinator** | Owns assistant runtime lifecycle and audio/runtime wiring |
+| **DeviceSessionCoordinator** | Owns DAT stream session, frame routing, and photo capture |
 | **AudioCollectionManager** | Bluetooth HFP audio routing, chunk-based recording |
 
 ### Dependencies
@@ -120,10 +128,10 @@ PortWorld/
 ## User Flow
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  HomeScreenView │────▶│  RegistrationView │────▶│  NonStreamView  │
-│   (Onboarding)  │     │  (Meta OAuth)     │     │  (Setup)        │
-└─────────────────┘     └──────────────────┘     └────────┬────────┘
+┌─────────────────┐                           ┌─────────────────┐
+│  HomeScreenView │──────────────────────────▶│  NonStreamView  │
+│   (Onboarding)  │   via MainAppView callback│  (Setup)        │
+└─────────────────┘                           └────────┬────────┘
                                                           │
                                                           ▼
                                                 ┌─────────────────┐
@@ -133,7 +141,7 @@ PortWorld/
 ```
 
 1. **Unregistered** — User sees tips and "Connect my glasses" button
-2. **Registration** — Redirects to Meta AI app, handles callback
+2. **Registration callback** — `MainAppView` handles Meta callback via `.onOpenURL`
 3. **Pre-Stream** — Device detection, audio setup, "Start streaming" button
 4. **Streaming** — Live video feed with photo capture and controls
 

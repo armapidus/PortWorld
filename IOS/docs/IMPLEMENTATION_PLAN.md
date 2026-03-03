@@ -219,6 +219,21 @@ Phases 3, 4, 5 can proceed in parallel once Phase 2 is complete.
 
 **Outcome:** All major services are injectable. The God-ViewModel is split. Each file has one clear ownership. The app compiles and runs identically to Phase 0.
 
+### Phase 1 status (2026-03-03)
+
+- ✅ **Phase 1 complete.**
+- ✅ `SessionOrchestrator.Dependencies` finalized for DI: clock injection, direct `eventLogger`, playback engine factory, and activation-time service construction.
+- ✅ `RuntimeProtocols.swift` and concrete wiring aligned for protocol-based handler binding (no orchestrator concrete-cast dependency for websocket/uploader callbacks).
+- ✅ ViewModel decomposition complete: `SessionStateStore` is the UI state owner, coordinator wiring lives in `RuntimeCoordinator`, and `SessionViewModel` is a thin activation/deactivation shell.
+- ✅ `RegistrationView` removal and root `.onOpenURL` migration to `MainAppView` complete.
+- ✅ SDK init failure path hardened in `PortWorldApp` (no unconditional `Wearables.shared` usage after configure failure).
+- ✅ Intermediary Phase 1 regressions closed: stable `SessionViewModel` lifetime in `StreamSessionView`, protocol-safe runtime wiring, and clock semantics/visibility aligned with plan intent.
+- ✅ **Post-review verification pass complete (2026-03-03):**
+  - Fixed P0 regression: `.deactivating` → `.inactive` state transition was missing, causing stuck UI after deactivation.
+  - Unified timestamp source: `AudioCollectionManager.nowMs()` now delegates to `Clocks.nowMs()`.
+  - Consistency cleanup: `EventLoggerProtocol` visibility aligned to `internal`, `StreamSessionViewModel` typealias removed, bare `print()` wrapped.
+- ✅ Build verification complete via Xcode (zero errors, zero warnings).
+
 ### P1-01 Create `Utilities/Clocks.swift` — single timestamp source
 
 **New file:** `IOS/PortWorld/Utilities/Clocks.swift`
