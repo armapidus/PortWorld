@@ -384,12 +384,22 @@ struct GettingStartedSheetView: View {
     }
     .padding(.all, 24)
     .background(
-      GeometryReader { geo -> Color in
-        DispatchQueue.main.async {
-          height = geo.size.height
-        }
-        return Color.clear
+      GeometryReader { geo in
+        Color.clear
+          .preference(key: GettingStartedSheetHeightPreferenceKey.self, value: geo.size.height)
       }
     )
+    .onPreferenceChange(GettingStartedSheetHeightPreferenceKey.self) { newHeight in
+      guard newHeight > 0 else { return }
+      height = newHeight
+    }
+  }
+}
+
+private struct GettingStartedSheetHeightPreferenceKey: PreferenceKey {
+  static var defaultValue: CGFloat = 0
+
+  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+    value = nextValue()
   }
 }
