@@ -87,11 +87,9 @@ run_logs/
 #  Xcode / iOS
 # ──────────────────────────────────────────────────────────────────────────────
 
-# Build configuration secrets
+# Build configuration secrets (only the committed template is allowed)
 Config/*.xcconfig
 IOS/Config/*.xcconfig
-!IOS/Config/Debug.xcconfig
-!IOS/Config/Release.xcconfig
 !IOS/Config/Config.xcconfig.template
 
 # User-specific Xcode files
