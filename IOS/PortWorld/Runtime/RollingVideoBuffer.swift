@@ -47,13 +47,18 @@ actor RollingVideoBuffer: RollingVideoBufferProtocol {
 
   private let maxDurationMs: Int64
   private let clipsDirectoryURL: URL
+  private let beforeAppendFrameHook: (@Sendable (Int) async throws -> Void)?
   nonisolated private static let logger = Logger(subsystem: "PortWorld", category: "RollingVideoBuffer")
 
   private var frames: [BufferedFrame] = []
   private var managedTempOutputs: Set<URL> = []
 
-  init(maxDurationMs: Int64 = 30_000) {
+  init(
+    maxDurationMs: Int64 = 30_000,
+    beforeAppendFrameHook: (@Sendable (Int) async throws -> Void)? = nil
+  ) {
     self.maxDurationMs = max(1_000, maxDurationMs)
+    self.beforeAppendFrameHook = beforeAppendFrameHook
     self.clipsDirectoryURL = Self.makeClipsDirectoryURL()
     Self.prepareClipsDirectoryAndSweep(at: clipsDirectoryURL)
   }
@@ -113,7 +118,8 @@ actor RollingVideoBuffer: RollingVideoBufferProtocol {
       startTimestampMs: startTimestampMs,
       endTimestampMs: endTimestampMs,
       outputURL: resolvedURL,
-      bitrate: bitrate
+      bitrate: bitrate,
+      beforeAppendFrameHook: beforeAppendFrameHook
     )
   }
 
@@ -130,7 +136,8 @@ actor RollingVideoBuffer: RollingVideoBufferProtocol {
     startTimestampMs: Int64,
     endTimestampMs: Int64,
     outputURL: URL,
-    bitrate: Int
+    bitrate: Int,
+    beforeAppendFrameHook: (@Sendable (Int) async throws -> Void)? = nil
   ) async throws -> RollingVideoExportResult {
     try Task.checkCancellation()
 
@@ -195,89 +202,96 @@ actor RollingVideoBuffer: RollingVideoBufferProtocol {
     }
     writer.startSession(atSourceTime: .zero)
 
-    var lastPresentationTime = CMTime.zero
-    var appendedFrames = 0
+    do {
+      var lastPresentationTime = CMTime.zero
+      var appendedFrames = 0
 
-    for frame in frames {
-      while !input.isReadyForMoreMediaData {
-        try Task.checkCancellation()
-        try await Task.sleep(for: .milliseconds(2))
-      }
-      try Task.checkCancellation()
-
-      guard let pixelBuffer = makePixelBuffer(
-        from: frame.image,
-        width: Int(firstSize.width),
-        height: Int(firstSize.height),
-        pool: adaptor.pixelBufferPool
-      ) else {
-        throw RollingVideoBufferError.unableToCreatePixelBuffer
-      }
-
-      let rawMs = max(0, frame.timestampMs - startTimestampMs)
-      var presentationTime = CMTime(value: rawMs, timescale: 1000)
-      if presentationTime <= lastPresentationTime {
-        presentationTime = CMTimeAdd(lastPresentationTime, CMTime(value: 1, timescale: 1000))
-      }
-
-      guard adaptor.append(pixelBuffer, withPresentationTime: presentationTime) else {
-        let reason = writer.error?.localizedDescription ?? "append returned false"
-        throw RollingVideoBufferError.appendFailed(reason: reason)
-      }
-
-      lastPresentationTime = presentationTime
-      appendedFrames += 1
-    }
-
-    if let lastFrame = frames.last {
-      let targetDurationMs = max(33, endTimestampMs - startTimestampMs)
-      let targetTime = CMTime(value: targetDurationMs, timescale: 1000)
-      if targetTime > lastPresentationTime {
+      for (index, frame) in frames.enumerated() {
+        try await beforeAppendFrameHook?(index)
         while !input.isReadyForMoreMediaData {
           try Task.checkCancellation()
           try await Task.sleep(for: .milliseconds(2))
         }
         try Task.checkCancellation()
 
-        if let pixelBuffer = makePixelBuffer(
-          from: lastFrame.image,
+        guard let pixelBuffer = makePixelBuffer(
+          from: frame.image,
           width: Int(firstSize.width),
           height: Int(firstSize.height),
           pool: adaptor.pixelBufferPool
-        ) {
-          _ = adaptor.append(pixelBuffer, withPresentationTime: targetTime)
-          appendedFrames += 1
+        ) else {
+          throw RollingVideoBufferError.unableToCreatePixelBuffer
+        }
+
+        let rawMs = max(0, frame.timestampMs - startTimestampMs)
+        var presentationTime = CMTime(value: rawMs, timescale: 1000)
+        if presentationTime <= lastPresentationTime {
+          presentationTime = CMTimeAdd(lastPresentationTime, CMTime(value: 1, timescale: 1000))
+        }
+
+        guard adaptor.append(pixelBuffer, withPresentationTime: presentationTime) else {
+          let reason = writer.error?.localizedDescription ?? "append returned false"
+          throw RollingVideoBufferError.appendFailed(reason: reason)
+        }
+
+        lastPresentationTime = presentationTime
+        appendedFrames += 1
+      }
+
+      if let lastFrame = frames.last {
+        let targetDurationMs = max(33, endTimestampMs - startTimestampMs)
+        let targetTime = CMTime(value: targetDurationMs, timescale: 1000)
+        if targetTime > lastPresentationTime {
+          while !input.isReadyForMoreMediaData {
+            try Task.checkCancellation()
+            try await Task.sleep(for: .milliseconds(2))
+          }
+          try Task.checkCancellation()
+
+          if let pixelBuffer = makePixelBuffer(
+            from: lastFrame.image,
+            width: Int(firstSize.width),
+            height: Int(firstSize.height),
+            pool: adaptor.pixelBufferPool
+          ) {
+            _ = adaptor.append(pixelBuffer, withPresentationTime: targetTime)
+            appendedFrames += 1
+          }
         }
       }
-    }
 
-    input.markAsFinished()
-    try Task.checkCancellation()
-    await withCheckedContinuation { continuation in
-      writer.finishWriting {
-        continuation.resume()
+      input.markAsFinished()
+      try Task.checkCancellation()
+      await withCheckedContinuation { continuation in
+        writer.finishWriting {
+          continuation.resume()
+        }
       }
-    }
-    try Task.checkCancellation()
+      try Task.checkCancellation()
 
-    guard writer.status == .completed else {
-      throw RollingVideoBufferError.writerFailed(reason: writer.error?.localizedDescription ?? "finishWriting did not complete")
-    }
+      guard writer.status == .completed else {
+        throw RollingVideoBufferError.writerFailed(reason: writer.error?.localizedDescription ?? "finishWriting did not complete")
+      }
 
-    let bytes: Int64
-    do {
-      let attributes = try FileManager.default.attributesOfItem(atPath: outputURL.path)
-      bytes = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+      let bytes: Int64
+      do {
+        let attributes = try FileManager.default.attributesOfItem(atPath: outputURL.path)
+        bytes = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+      } catch {
+        bytes = 0
+      }
+
+      return RollingVideoExportResult(
+        outputURL: outputURL,
+        frameCount: appendedFrames,
+        durationMs: max(0, endTimestampMs - startTimestampMs),
+        bytesWritten: bytes
+      )
     } catch {
-      bytes = 0
+      writer.cancelWriting()
+      try? FileManager.default.removeItem(at: outputURL)
+      throw error
     }
-
-    return RollingVideoExportResult(
-      outputURL: outputURL,
-      frameCount: appendedFrames,
-      durationMs: max(0, endTimestampMs - startTimestampMs),
-      bytesWritten: bytes
-    )
   }
 
   nonisolated private static func makePixelBuffer(
