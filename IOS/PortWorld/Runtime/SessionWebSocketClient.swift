@@ -32,12 +32,17 @@ public enum SessionWebSocketClientError: Error, LocalizedError {
 }
 
 actor SessionWebSocketClient: SessionWebSocketClientProtocol {
+  typealias WebSocketTaskStateProvider = @Sendable (URLSessionWebSocketTask) -> URLSessionTask.State
+  typealias ReconnectJitterProvider = @Sendable (ClosedRange<Double>) -> Double
+
   private let url: URL
   private let requestHeaders: [String: String]
   private let urlSession: URLSession
   private let baseReconnectDelayMs: UInt64
   private let maxReconnectDelayMs: UInt64
   private let pingIntervalMs: UInt64
+  private let webSocketTaskStateProvider: WebSocketTaskStateProvider
+  private let reconnectJitterProvider: ReconnectJitterProvider
   private var onStateChange: SessionWebSocketStateHandler?
   private var onMessage: SessionWebSocketMessageHandler?
   private var onRawMessage: SessionWebSocketRawMessageHandler?
@@ -62,6 +67,8 @@ actor SessionWebSocketClient: SessionWebSocketClientProtocol {
     baseReconnectDelayMs: UInt64 = 500,
     maxReconnectDelayMs: UInt64 = 30_000,
     pingIntervalMs: UInt64 = 15_000,
+    webSocketTaskStateProvider: @escaping WebSocketTaskStateProvider = { $0.state },
+    reconnectJitterProvider: @escaping ReconnectJitterProvider = { Double.random(in: $0) },
     onStateChange: SessionWebSocketStateHandler? = nil,
     onMessage: SessionWebSocketMessageHandler? = nil,
     onError: SessionWebSocketErrorHandler? = nil,
@@ -73,6 +80,8 @@ actor SessionWebSocketClient: SessionWebSocketClientProtocol {
     self.baseReconnectDelayMs = max(100, baseReconnectDelayMs)
     self.maxReconnectDelayMs = max(maxReconnectDelayMs, baseReconnectDelayMs)
     self.pingIntervalMs = max(1_000, pingIntervalMs)
+    self.webSocketTaskStateProvider = webSocketTaskStateProvider
+    self.reconnectJitterProvider = reconnectJitterProvider
     self.onStateChange = onStateChange
     self.onMessage = onMessage
     self.onError = onError
@@ -106,9 +115,11 @@ actor SessionWebSocketClient: SessionWebSocketClientProtocol {
   }
 
   public func connect() {
-    if let webSocketTask,
-       webSocketTask.state == .canceling || webSocketTask.state == .completed {
-      self.webSocketTask = nil
+    if let webSocketTask {
+      let taskState = webSocketTaskStateProvider(webSocketTask)
+      if taskState == .canceling || taskState == .completed {
+        self.webSocketTask = nil
+      }
     }
     guard webSocketTask == nil, reconnectTask == nil else { return }
 
@@ -382,7 +393,7 @@ actor SessionWebSocketClient: SessionWebSocketClientProtocol {
 
     let scaled = baseReconnectDelayMs.multipliedReportingOverflow(by: multiplier)
     let capped = scaled.overflow ? maxReconnectDelayMs : min(scaled.partialValue, maxReconnectDelayMs)
-    let jitter = Double.random(in: 0.8 ... 1.2)
+    let jitter = reconnectJitterProvider(0.8 ... 1.2)
     return UInt64(Double(capped) * jitter)
   }
 
@@ -456,4 +467,18 @@ actor SessionWebSocketClient: SessionWebSocketClientProtocol {
       )
     }
   }
+
+#if DEBUG
+  func setWebSocketTaskForTesting(_ task: URLSessionWebSocketTask?) {
+    webSocketTask = task
+  }
+
+  func outboundSequenceForTesting() -> Int {
+    outboundSeq
+  }
+
+  func reconnectDelayMsForTesting(attempt: Int) -> UInt64 {
+    reconnectDelayMs(for: attempt)
+  }
+#endif
 }
