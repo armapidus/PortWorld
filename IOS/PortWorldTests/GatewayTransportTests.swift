@@ -72,11 +72,26 @@ final class GatewayTransportTests: XCTestCase {
     let webSocket = MockSessionWebSocketClient()
     let transport = GatewayTransport(webSocketClient: webSocket)
 
+    let connectedExpectation = expectation(description: "transport reaches connected")
+    let eventsTask = Task {
+      for await event in transport.events {
+        guard case .stateChanged(let state) = event, state == .connected else { continue }
+        connectedExpectation.fulfill()
+        break
+      }
+    }
+
+    try await transport.connect(config: Self.makeConfig())
+    await webSocket.emitState(.connected)
+    await fulfillment(of: [connectedExpectation], timeout: 1.0)
+    eventsTask.cancel()
+
     let payload = Data([0x01, 0x02, 0x03, 0x04])
     let timestamp: Int64 = 42
     try await transport.sendAudio(payload, timestampMs: timestamp)
 
-    let sent = try XCTUnwrap(await webSocket.lastSentData())
+    let sentData = await webSocket.lastSentData()
+    let sent = try XCTUnwrap(sentData)
     XCTAssertEqual(sent.first, TransportBinaryFraming.clientAudioTypeByte)
 
     let decoded = try TransportBinaryFrameCodec.decode(sent)
@@ -98,7 +113,8 @@ final class GatewayTransportTests: XCTestCase {
       )
     )
 
-    let sentText = try XCTUnwrap(await webSocket.lastSentText())
+    let lastSentText = await webSocket.lastSentText()
+    let sentText = try XCTUnwrap(lastSentText)
     XCTAssertTrue(sentText.contains(controlType))
 
     let data = try XCTUnwrap(sentText.data(using: .utf8))
