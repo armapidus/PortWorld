@@ -50,7 +50,7 @@ final class ManualWakeWordEngineTests: XCTestCase {
     }
 
     engine.startListening()
-    engine.triggerManualWake()
+    engine.triggerManualWake(timestampMs: 1_000)
 
     XCTAssertNotNil(received)
     XCTAssertEqual(received?.wakePhrase, "hey test")
@@ -66,7 +66,7 @@ final class ManualWakeWordEngineTests: XCTestCase {
     }
 
     engine.startListening()
-    engine.triggerManualWake(wakePhrase: "hey port", confidence: 0.95)
+    engine.triggerManualWake(wakePhrase: "hey port", timestampMs: 1_000, confidence: 0.95)
 
     XCTAssertEqual(received?.wakePhrase, "hey port")
     XCTAssertEqual(received?.confidence, 0.95)
@@ -92,7 +92,7 @@ final class ManualWakeWordEngineTests: XCTestCase {
       receivedError = error
     }
 
-    engine.triggerManualWake()
+    engine.triggerManualWake(timestampMs: 1_000)
 
     XCTAssertNotNil(receivedError)
     XCTAssertTrue(receivedError is WakeWordEngineError)
@@ -104,7 +104,7 @@ final class ManualWakeWordEngineTests: XCTestCase {
     }
     engine.onError = { _ in } // absorb error
 
-    engine.triggerManualWake()
+    engine.triggerManualWake(timestampMs: 1_000)
   }
 
   // MARK: - processPCMFrame (no-op for v4)
@@ -137,7 +137,7 @@ final class ManualWakeWordEngineTests: XCTestCase {
     }
 
     engine.startListening()
-    engine.triggerManualWake(wakePhrase: nil)
+    engine.triggerManualWake(wakePhrase: nil, timestampMs: 1_000)
 
     XCTAssertEqual(received?.wakePhrase, "hey test")
   }
