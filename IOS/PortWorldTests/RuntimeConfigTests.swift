@@ -21,6 +21,55 @@ final class RuntimeConfigTests: XCTestCase {
     XCTAssertFalse(config.wakePhrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
   }
 
+  func testLoadUsesDefaultURLsWhenConfigKeysAreMissing() throws {
+    let defaults = makeIsolatedDefaults()
+    let bundle = try makeBundle(infoPlist: [:])
+
+    let config = RuntimeConfig.load(from: bundle, userDefaults: defaults)
+
+    XCTAssertEqual(config.backendBaseURL.absoluteString, "http://127.0.0.1:8080")
+    XCTAssertEqual(config.webSocketURL.absoluteString, "ws://127.0.0.1:8080/ws/session")
+    XCTAssertEqual(config.visionFrameURL.absoluteString, "http://127.0.0.1:8080/vision/frame")
+    XCTAssertEqual(config.queryURL.absoluteString, "http://127.0.0.1:8080/v1/query")
+  }
+
+  func testLoadDerivesWebSocketURLFromBackendBaseURLScheme() throws {
+    let defaults = makeIsolatedDefaults()
+
+    let httpBundle = try makeBundle(infoPlist: [
+      "SON_BACKEND_BASE_URL": "http://api.example.com:8082",
+      "SON_WS_PATH": "/ws/session",
+    ])
+    let httpConfig = RuntimeConfig.load(from: httpBundle, userDefaults: defaults)
+    XCTAssertEqual(httpConfig.webSocketURL.absoluteString, "ws://api.example.com:8082/ws/session")
+
+    let httpsBundle = try makeBundle(infoPlist: [
+      "SON_BACKEND_BASE_URL": "https://api.example.com",
+      "SON_WS_PATH": "/ws/session",
+    ])
+    let httpsConfig = RuntimeConfig.load(from: httpsBundle, userDefaults: defaults)
+    XCTAssertEqual(httpsConfig.webSocketURL.absoluteString, "wss://api.example.com/ws/session")
+  }
+
+  func testLoadPrefersExplicitEndpointURLsOverDerivedPaths() throws {
+    let defaults = makeIsolatedDefaults()
+    let bundle = try makeBundle(infoPlist: [
+      "SON_BACKEND_BASE_URL": "https://api.example.com",
+      "SON_WS_PATH": "/from-path",
+      "SON_VISION_PATH": "/vision/from-path",
+      "SON_QUERY_PATH": "/query/from-path",
+      "SON_WS_URL": "wss://override.example.com/ws/explicit",
+      "SON_VISION_URL": "https://override.example.com/vision/explicit",
+      "SON_QUERY_URL": "https://override.example.com/query/explicit",
+    ])
+
+    let config = RuntimeConfig.load(from: bundle, userDefaults: defaults)
+
+    XCTAssertEqual(config.webSocketURL.absoluteString, "wss://override.example.com/ws/explicit")
+    XCTAssertEqual(config.visionFrameURL.absoluteString, "https://override.example.com/vision/explicit")
+    XCTAssertEqual(config.queryURL.absoluteString, "https://override.example.com/query/explicit")
+  }
+
   func testLoadUsesUserDefaultsOverridesForSilenceTimeoutAndWakePhrase() {
     let defaults = makeIsolatedDefaults()
     defaults.set("1200", forKey: "portworld.silenceTimeoutMs")
