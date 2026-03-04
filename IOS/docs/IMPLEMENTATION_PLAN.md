@@ -783,7 +783,7 @@ Go through every view after P4-01–P4-07 and:
 
 ## Phase 5 — Test Suite
 
-**Outcome:** > 70% code coverage on `Runtime/` and `Audio/`; all major runtime scenarios have unit tests; snapshot tests lock in the UI.
+**Outcome:** > 70% code coverage on `Runtime/` and `Audio/`; all major runtime scenarios (streaming-first) have unit tests; snapshot tests lock in the UI.
 
 ### P5-01 `RuntimeConfigTests`
 
@@ -828,12 +828,14 @@ Mock `AVAudioEngine` and `AVAudioPlayerNode` via protocols:
 
 ---
 
-### P5-05 `SessionOrchestratorTests`
+### P5-05 `SessionOrchestratorTests` (legacy batch assumptions)
 
 **File:** `PortWorldTests/SessionOrchestratorTests.swift`  
 Use mock implementations from `RuntimeProtocols.swift`:
 
-- Full wake → query → upload flow: verify correct outbound WS messages in order.
+- **Superseded for orchestrator behavior by Phase 6 streaming tests** (`SessionOrchestratorStreamingTests`).
+- Keep legacy batch assertions only while legacy utility components remain in use.
+- Legacy wake → query → upload flow: verify correct outbound WS messages in order.
 - `deactivate()` while upload in flight: verify `Task.cancel()` is called.
 - Outbound buffer: send wake event while WS disconnected; reconnect; verify message drained.
 - `sessionRestartCount` is `0` after first activation; `1` after first deactivation + reactivation.
@@ -1029,5 +1031,5 @@ Define the protocol and supporting types as specified in ARCHITECTURE.md §14.3:
 | Phase 2 | ✅ **Completed (2026-03-04).** All 55 bugs listed in the inspection report resolved; no bare `print()` or `DispatchQueue.sync` outside audio tap.                                                                                                                                    |
 | Phase 3 | ✅ **Completed (2026-03-04).** Log persists to disk; keychain credential store; NWReachability wired; query bundle upload streamed; app metadata in health/query payloads; frame-drop telemetry integrated.                                                                     |
 | Phase 4 | Light + dark mode pass; all screens rebuilt per spec; `RuntimeStatusPanelView` hidden in release; hold-to-activate gesture; no debug UI visible to user                                                                                                                               |
-| Phase 5 | All P5-01 → P5-12 tests exist and pass; `Runtime/` + `Audio/` line coverage > 70%                                                                                                                                                                                                     |
+| Phase 5 | All active P5 suites exist and pass; legacy batch-orchestrator assumptions are marked superseded; `Runtime/` + `Audio/` line coverage > 70%                                                                                                                                           |
 | Phase 6 | ✅ **Completed (2026-03-04).** `RealtimeTransport` protocol and `GatewayTransport` are implemented; wake/sleep streaming lifecycle is wired end-to-end; audio tap forwards realtime PCM; `SessionOrchestrator` consumes transport events for playback/state; focused P6 transport/orchestrator tests were added. |

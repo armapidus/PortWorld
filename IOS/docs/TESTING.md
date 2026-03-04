@@ -21,6 +21,7 @@ Manual tests are run before every release candidate.
 ## 2. Unit Test Inventory
 
 Each file maps to a test file in `PortWorldTests/`. See `IMPLEMENTATION_PLAN.md §Phase 5` for the detailed spec of each.
+Phase 6 is complete and streaming-first behavior is canonical. Batch-orchestrator scenarios are marked as superseded where applicable.
 
 | Test file                                 | Class under test          | Key scenarios                                                  |
 | ----------------------------------------- | ------------------------- | -------------------------------------------------------------- |
@@ -29,16 +30,19 @@ Each file maps to a test file in `PortWorldTests/`. See `IMPLEMENTATION_PLAN.md 
 | `WSMessageCodecTests` _(existing)_        | `WSMessageCodec`          | All inbound/outbound types, snake_case keys, malformed input   |
 | `EventLoggerTests` _(existing)_           | `EventLogger`             | Sink, retention, clear, fields                                 |
 | `ManualWakeWordEngineTests` _(existing)_  | `ManualWakeWordEngine`    | Trigger, listening toggle, PCM no-op                           |
-| `QueryEndpointDetectorTests` _(existing)_ | `QueryEndpointDetector`   | Silence timeout, forceEnd, isActive lifecycle                  |
+| `QueryEndpointDetectorTests` _(existing)_ | `QueryEndpointDetector`   | Legacy utility coverage: silence timeout, forceEnd, isActive lifecycle |
 | `AudioCollectionManagerTests`             | `AudioCollectionManager`  | State machine, error recovery, chunk emission                  |
 | `AssistantPlaybackEngineTests`            | `AssistantPlaybackEngine` | Buffer count, stuck watchdog, cancel                           |
-| `SessionOrchestratorTests`                | `SessionOrchestrator`     | Full wake→query→upload flow, deactivate/cancel, message buffer |
+| `SessionOrchestratorTests`                | `SessionOrchestrator`     | Superseded (legacy batch): wake→query→upload flow, deactivate/cancel, message buffer |
+| `SessionOrchestratorStreamingTests` _(existing)_ | `SessionOrchestrator` | Streaming lifecycle: wake/connect, audio send, sleep/disconnect, transport event handling |
 | `VisionFrameUploaderTests`                | `VisionFrameUploader`     | Rate limiting, drop count, retry, cancel                       |
 | `RollingVideoBufferTests`                 | `RollingVideoBuffer`      | Eviction, MP4 export, temp file cleanup, cancellation          |
-| `QueryBundleBuilderTests`                 | `QueryBundleBuilder`      | Part order, retry, cancel, encoding error                      |
-| `WavFileWriterTests`                      | `WavFileWriter`           | RIFF header correctness                                        |
+| `QueryBundleBuilderTests`                 | `QueryBundleBuilder`      | Legacy utility coverage: part order, retry, cancel, encoding error |
+| `WavFileWriterTests`                      | `WavFileWriter`           | Legacy utility coverage: RIFF header correctness               |
 | `SFSpeechWakeWordEngineTests`             | `SFSpeechWakeWordEngine`  | Circuit-breaker, transcript normalisation, cooldown            |
 | `SessionWebSocketClientTests`             | `SessionWebSocketClient`  | Stale task, sequence number, backoff bounds                    |
+| `TransportFrameCodecTests` _(existing)_   | Transport frame codec     | Binary frame encode/decode for realtime PCM transport          |
+| `GatewayTransportTests` _(existing)_      | `GatewayTransport`        | Transport event mapping and realtime send/receive behavior     |
 
 ### Coverage target
 
