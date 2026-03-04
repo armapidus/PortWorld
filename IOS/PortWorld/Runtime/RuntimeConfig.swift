@@ -6,6 +6,8 @@ public enum WakeWordMode: String, Codable {
 }
 
 public struct RuntimeConfig {
+  static let apiKeyBootstrapMarkerUserDefaultsKey = "portworld.apiKeyBootstrapSeeded"
+
   public let backendBaseURL: URL
   public let webSocketURL: URL
   public let visionFrameURL: URL
@@ -16,6 +18,7 @@ public struct RuntimeConfig {
   public let silenceTimeoutMs: Int
   public let preWakeVideoMs: Int
   public let wakePhrase: String
+  public let sleepPhrase: String
   public let wakeWordMode: WakeWordMode
   public let wakeWordLocaleIdentifier: String
   public let wakeWordRequiresOnDeviceRecognition: Bool
@@ -38,6 +41,7 @@ public struct RuntimeConfig {
     silenceTimeoutMs: Int = 5_000,
     preWakeVideoMs: Int = 5_000,
     wakePhrase: String = "hey mario",
+    sleepPhrase: String = "goodbye mario",
     wakeWordMode: WakeWordMode = .onDevicePreferred,
     wakeWordLocaleIdentifier: String = "en-US",
     wakeWordRequiresOnDeviceRecognition: Bool = true,
@@ -56,6 +60,7 @@ public struct RuntimeConfig {
     self.silenceTimeoutMs = silenceTimeoutMs
     self.preWakeVideoMs = preWakeVideoMs
     self.wakePhrase = wakePhrase
+    self.sleepPhrase = sleepPhrase
     self.wakeWordMode = wakeWordMode
     self.wakeWordLocaleIdentifier = wakeWordLocaleIdentifier
     self.wakeWordRequiresOnDeviceRecognition = wakeWordRequiresOnDeviceRecognition
@@ -83,6 +88,10 @@ public struct RuntimeConfig {
   }
 
   public static func load(from bundle: Bundle = .main) -> RuntimeConfig {
+    load(from: bundle, userDefaults: .standard)
+  }
+
+  public static func load(from bundle: Bundle = .main, userDefaults: UserDefaults) -> RuntimeConfig {
     let backendBaseURL = resolveURL(
       infoPlistKey: "SON_BACKEND_BASE_URL",
       defaultURLString: "http://127.0.0.1:8080",
@@ -114,15 +123,22 @@ public struct RuntimeConfig {
       webSocketURL: explicitWSURL ?? deriveWebSocketURL(baseURL: backendBaseURL, path: wsPath),
       visionFrameURL: explicitVisionURL ?? appendPath(path: visionPath, to: backendBaseURL),
       queryURL: explicitQueryURL ?? appendPath(path: queryPath, to: backendBaseURL),
-      apiKey: resolveString(infoPlistKey: "SON_API_KEY", defaultValue: "", bundle: bundle),
+      apiKey: resolveAPIKey(bundle: bundle, userDefaults: userDefaults),
       bearerToken: resolveString(infoPlistKey: "SON_BEARER_TOKEN", defaultValue: "", bundle: bundle),
       photoFps: resolvePhotoFPS(bundle: bundle),
+      silenceTimeoutMs: resolveSilenceTimeout(bundle: bundle, userDefaults: userDefaults),
+      wakePhrase: resolveWakePhrase(bundle: bundle, userDefaults: userDefaults),
+      sleepPhrase: resolveString(infoPlistKey: "SON_SLEEP_PHRASE", defaultValue: "goodbye mario", bundle: bundle),
       wakeWordMode: resolveWakeWordMode(bundle: bundle),
       wakeWordLocaleIdentifier: resolveWakeLocale(bundle: bundle),
       wakeWordRequiresOnDeviceRecognition: resolveWakeRequiresOnDevice(bundle: bundle),
       wakeWordDetectionCooldownMs: resolveWakeCooldown(bundle: bundle),
       assistantStuckDetectionThresholdMs: resolveAssistantStuckDetectionThreshold(bundle: bundle)
     )
+  }
+
+  static func clearStoredAPIKey() throws {
+    try KeychainCredentialStore.clear()
   }
 
   private static func resolvePhotoFPS(bundle: Bundle) -> Double {
@@ -139,6 +155,42 @@ public struct RuntimeConfig {
     return 1.0
   }
 
+  private static func resolveAPIKey(bundle: Bundle, userDefaults: UserDefaults) -> String {
+    do {
+      if let stored = try KeychainCredentialStore.retrieve() {
+        let trimmedStored = stored.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedStored.isEmpty {
+          return trimmedStored
+        }
+      }
+    } catch {
+      #if DEBUG
+      NSLog("RuntimeConfig: failed to retrieve API key from keychain: \(error)")
+      #endif
+    }
+
+    if userDefaults.bool(forKey: apiKeyBootstrapMarkerUserDefaultsKey) {
+      return ""
+    }
+
+    userDefaults.set(true, forKey: apiKeyBootstrapMarkerUserDefaultsKey)
+
+    let plistAPIKey = resolveString(infoPlistKey: "SON_API_KEY", defaultValue: "", bundle: bundle)
+    guard !plistAPIKey.isEmpty else {
+      return ""
+    }
+
+    do {
+      try KeychainCredentialStore.store(apiKey: plistAPIKey)
+    } catch {
+      #if DEBUG
+      NSLog("RuntimeConfig: failed to seed API key into keychain: \(error)")
+      #endif
+    }
+
+    return plistAPIKey
+  }
+
   private static func resolveString(infoPlistKey: String, defaultValue: String, bundle: Bundle) -> String {
     if let raw = bundle.object(forInfoDictionaryKey: infoPlistKey) as? String {
       let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -147,6 +199,61 @@ public struct RuntimeConfig {
       }
     }
     return defaultValue
+  }
+
+  private static func resolveSilenceTimeout(bundle: Bundle, userDefaults: UserDefaults) -> Int {
+    if let override = resolveUserDefaultsInteger(key: "portworld.silenceTimeoutMs", userDefaults: userDefaults), override > 0 {
+      return max(250, override)
+    }
+
+    if let fromPlist = resolveOptionalInt(infoPlistKey: "SON_SILENCE_TIMEOUT_MS", bundle: bundle), fromPlist > 0 {
+      return max(250, fromPlist)
+    }
+
+    return 5_000
+  }
+
+  private static func resolveWakePhrase(bundle: Bundle, userDefaults: UserDefaults) -> String {
+    if let override = userDefaults.string(forKey: "portworld.wakePhrase")?
+      .trimmingCharacters(in: .whitespacesAndNewlines),
+      !override.isEmpty
+    {
+      return override
+    }
+
+    return resolveString(infoPlistKey: "SON_WAKE_PHRASE", defaultValue: "hey mario", bundle: bundle)
+  }
+
+  private static func resolveUserDefaultsInteger(key: String, userDefaults: UserDefaults) -> Int? {
+    guard userDefaults.object(forKey: key) != nil else {
+      return nil
+    }
+
+    if let raw = userDefaults.object(forKey: key) as? NSNumber {
+      return raw.intValue
+    }
+
+    if let raw = userDefaults.string(forKey: key),
+       let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines))
+    {
+      return parsed
+    }
+
+    return nil
+  }
+
+  private static func resolveOptionalInt(infoPlistKey: String, bundle: Bundle) -> Int? {
+    if let raw = bundle.object(forInfoDictionaryKey: infoPlistKey) as? NSNumber {
+      return raw.intValue
+    }
+
+    if let raw = bundle.object(forInfoDictionaryKey: infoPlistKey) as? String,
+       let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines))
+    {
+      return parsed
+    }
+
+    return nil
   }
 
   private static func resolveURL(infoPlistKey: String, defaultURLString: String, bundle: Bundle) -> URL {

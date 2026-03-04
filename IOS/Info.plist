@@ -75,6 +75,8 @@
 	<string>/v1/query</string>
 	<key>SON_QUERY_URL</key>
 	<string></string>
+	<key>SON_SLEEP_PHRASE</key>
+	<string>goodbye mario</string>
 	<key>SON_VISION_PATH</key>
 	<string>/vision/frame</string>
 	<key>SON_VISION_URL</key>
