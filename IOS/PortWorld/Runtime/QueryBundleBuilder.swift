@@ -72,35 +72,38 @@ final class QueryBundleBuilder: QueryBundleBuilderProtocol {
     audioFileURL: URL,
     videoFileURL: URL
   ) async throws -> QueryBundleUploadResult {
-    let (audioData, audioBytes) = try Self.loadFileData(at: audioFileURL, invalidFileError: .invalidAudioFile(audioFileURL))
-    let (videoData, videoBytes) = try Self.loadFileData(at: videoFileURL, invalidFileError: .invalidVideoFile(videoFileURL))
-
-    let boundary = "Boundary-\(UUID().uuidString)"
-    let body = try makeMultipartBody(
-      boundary: boundary,
-      metadata: metadata,
-      audioData: audioData,
-      audioFileName: audioFileURL.lastPathComponent,
-      videoData: videoData,
-      videoFileName: videoFileURL.lastPathComponent
-    )
+    let audioBytes = try Self.validateFileSize(at: audioFileURL, invalidFileError: .invalidAudioFile(audioFileURL))
+    let videoBytes = try Self.validateFileSize(at: videoFileURL, invalidFileError: .invalidVideoFile(videoFileURL))
 
     var lastError: Error?
     let maxAttemptCount = maxRetryCount + 1
 
     for attempt in 1...maxAttemptCount {
       do {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        let (multipartFileURL, requestBytes) = try makeMultipartTempFile(
+          boundary: boundary,
+          metadata: metadata,
+          audioFileURL: audioFileURL,
+          videoFileURL: videoFileURL
+        )
+        defer { Self.cleanupTempArtifact(at: multipartFileURL) }
+
         var request = URLRequest(url: endpointURL)
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue(String(requestBytes), forHTTPHeaderField: "Content-Length")
         for (name, value) in defaultHeaders {
           request.setValue(value, forHTTPHeaderField: name)
         }
-        request.httpBody = body
+        guard let bodyStream = InputStream(url: multipartFileURL) else {
+          throw QueryBundleBuilderError.transport(message: "Unable to open multipart stream at \(multipartFileURL.path)")
+        }
+        request.httpBodyStream = bodyStream
         request.timeoutInterval = TimeInterval(requestTimeoutMs) / 1000.0
 
         let startedAt = Date()
-        let (responseData, response) = try await urlSession.data(for: request)
+        let (responseData, response) = try await streamedUpload(for: request)
         let latencyMs = Int64(Date().timeIntervalSince(startedAt) * 1000)
 
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -122,7 +125,7 @@ final class QueryBundleBuilder: QueryBundleBuilderProtocol {
           queryId: metadata.queryID,
           statusCode: httpResponse.statusCode,
           latencyMs: latencyMs,
-          requestBytes: body.count,
+          requestBytes: requestBytes,
           responseBytes: responseData.count,
           audioBytes: audioBytes,
           videoBytes: videoBytes,
@@ -142,14 +145,29 @@ final class QueryBundleBuilder: QueryBundleBuilderProtocol {
     throw (lastError ?? QueryBundleBuilderError.transport(message: "Unknown upload failure"))
   }
 
-  private func makeMultipartBody(
+  private func streamedUpload(for request: URLRequest) async throws -> (Data, URLResponse) {
+    let delegate = StreamedUploadDelegate()
+    let session = URLSession(
+      configuration: urlSession.configuration,
+      delegate: delegate,
+      delegateQueue: nil
+    )
+    let task = session.uploadTask(withStreamedRequest: request)
+    delegate.attach(task: task, session: session)
+
+    return try await withTaskCancellationHandler(operation: {
+      try await delegate.awaitResultAndStart()
+    }, onCancel: {
+      delegate.cancel()
+    })
+  }
+
+  private func makeMultipartTempFile(
     boundary: String,
     metadata: QueryMetadata,
-    audioData: Data,
-    audioFileName: String,
-    videoData: Data,
-    videoFileName: String
-  ) throws -> Data {
+    audioFileURL: URL,
+    videoFileURL: URL
+  ) throws -> (URL, Int) {
     let metadataJSON: Data
     do {
       metadataJSON = try JSONEncoder().encode(metadata)
@@ -157,31 +175,55 @@ final class QueryBundleBuilder: QueryBundleBuilderProtocol {
       throw QueryBundleBuilderError.metadataEncodingFailed(error)
     }
 
-    var body = Data()
+    let tempURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("query-upload-\(UUID().uuidString)")
+      .appendingPathExtension("multipart")
+    guard let outputStream = OutputStream(url: tempURL, append: false) else {
+      throw QueryBundleBuilderError.transport(message: "Unable to create multipart temp file stream")
+    }
 
-    body.appendUTF8("--\(boundary)\r\n")
-    body.appendUTF8("Content-Disposition: form-data; name=\"metadata\"\r\n")
-    body.appendUTF8("Content-Type: application/json\r\n\r\n")
-    body.append(metadataJSON)
-    body.appendUTF8("\r\n")
+    outputStream.open()
+    defer { outputStream.close() }
 
-    body.appendUTF8("--\(boundary)\r\n")
-    body.appendUTF8("Content-Disposition: form-data; name=\"audio\"; filename=\"\(audioFileName)\"\r\n")
-    body.appendUTF8("Content-Type: audio/wav\r\n\r\n")
-    body.append(audioData)
-    body.appendUTF8("\r\n")
+    do {
+      try writeUTF8("--\(boundary)\r\n", to: outputStream)
+      try writeUTF8("Content-Disposition: form-data; name=\"metadata\"\r\n", to: outputStream)
+      try writeUTF8("Content-Type: application/json\r\n\r\n", to: outputStream)
+      try write(metadataJSON, to: outputStream)
+      try writeUTF8("\r\n", to: outputStream)
 
-    body.appendUTF8("--\(boundary)\r\n")
-    body.appendUTF8("Content-Disposition: form-data; name=\"video\"; filename=\"\(videoFileName)\"\r\n")
-    body.appendUTF8("Content-Type: video/mp4\r\n\r\n")
-    body.append(videoData)
-    body.appendUTF8("\r\n")
+      try writeUTF8("--\(boundary)\r\n", to: outputStream)
+      try writeUTF8(
+        "Content-Disposition: form-data; name=\"audio\"; filename=\"\(audioFileURL.lastPathComponent)\"\r\n",
+        to: outputStream
+      )
+      try writeUTF8("Content-Type: audio/wav\r\n\r\n", to: outputStream)
+      try copyFileContents(from: audioFileURL, to: outputStream, invalidFileError: .invalidAudioFile(audioFileURL))
+      try writeUTF8("\r\n", to: outputStream)
 
-    body.appendUTF8("--\(boundary)--\r\n")
-    return body
+      try writeUTF8("--\(boundary)\r\n", to: outputStream)
+      try writeUTF8(
+        "Content-Disposition: form-data; name=\"video\"; filename=\"\(videoFileURL.lastPathComponent)\"\r\n",
+        to: outputStream
+      )
+      try writeUTF8("Content-Type: video/mp4\r\n\r\n", to: outputStream)
+      try copyFileContents(from: videoFileURL, to: outputStream, invalidFileError: .invalidVideoFile(videoFileURL))
+      try writeUTF8("\r\n", to: outputStream)
+
+      try writeUTF8("--\(boundary)--\r\n", to: outputStream)
+    } catch {
+      Self.cleanupTempArtifact(at: tempURL)
+      throw error
+    }
+
+    let requestBytes = try Self.validateFileSize(
+      at: tempURL,
+      invalidFileError: QueryBundleBuilderError.transport(message: "Multipart temp file missing")
+    )
+    return (tempURL, Int(requestBytes))
   }
 
-  private static func loadFileData(at fileURL: URL, invalidFileError: QueryBundleBuilderError) throws -> (Data, Int64) {
+  private static func validateFileSize(at fileURL: URL, invalidFileError: QueryBundleBuilderError) throws -> Int64 {
     let filePath = fileURL.path
     guard FileManager.default.fileExists(atPath: filePath) else {
       throw invalidFileError
@@ -200,19 +242,96 @@ final class QueryBundleBuilder: QueryBundleBuilderProtocol {
       throw invalidFileError
     }
 
-    let data: Data
+    return sizeNumber.int64Value
+  }
+
+  private static func cleanupTempArtifact(at url: URL) {
     do {
-      data = try Data(contentsOf: fileURL)
+      if FileManager.default.fileExists(atPath: url.path) {
+        try FileManager.default.removeItem(at: url)
+      }
     } catch {
-      throw QueryBundleBuilderError.transport(
-        message: "Unable to read file data at \(filePath): \(error.localizedDescription)"
-      )
+#if DEBUG
+      NSLog("QueryBundleBuilder: failed to remove temp multipart artifact at %@: %@", url.path, error.localizedDescription)
+#endif
     }
-    return (data, sizeNumber.int64Value)
+  }
+
+  private func writeUTF8(_ value: String, to outputStream: OutputStream) throws {
+    guard let data = value.data(using: .utf8) else { return }
+    try write(data, to: outputStream)
+  }
+
+  private func write(_ data: Data, to outputStream: OutputStream) throws {
+    try data.withUnsafeBytes { rawBuffer in
+      guard let baseAddress = rawBuffer.bindMemory(to: UInt8.self).baseAddress else { return }
+      var bytesRemaining = data.count
+      var offset = 0
+      while bytesRemaining > 0 {
+        let bytesWritten = outputStream.write(baseAddress.advanced(by: offset), maxLength: bytesRemaining)
+        if bytesWritten < 0 {
+          throw QueryBundleBuilderError.transport(
+            message: outputStream.streamError?.localizedDescription ?? "Failed writing multipart body stream"
+          )
+        }
+        if bytesWritten == 0 {
+          throw QueryBundleBuilderError.transport(message: "Multipart stream write returned zero bytes")
+        }
+        offset += bytesWritten
+        bytesRemaining -= bytesWritten
+      }
+    }
+  }
+
+  private func copyFileContents(
+    from sourceURL: URL,
+    to outputStream: OutputStream,
+    invalidFileError: QueryBundleBuilderError
+  ) throws {
+    guard let inputStream = InputStream(url: sourceURL) else {
+      throw invalidFileError
+    }
+
+    inputStream.open()
+    defer { inputStream.close() }
+
+    let bufferSize = 64 * 1024
+    let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+    defer { buffer.deallocate() }
+
+    while true {
+      let readCount = inputStream.read(buffer, maxLength: bufferSize)
+      if readCount < 0 {
+        throw QueryBundleBuilderError.transport(
+          message: inputStream.streamError?.localizedDescription ?? "Failed reading \(sourceURL.path)"
+        )
+      }
+      if readCount == 0 {
+        break
+      }
+
+      var totalWritten = 0
+      while totalWritten < readCount {
+        let written = outputStream.write(
+          buffer.advanced(by: totalWritten),
+          maxLength: readCount - totalWritten
+        )
+        if written < 0 {
+          throw QueryBundleBuilderError.transport(
+            message: outputStream.streamError?.localizedDescription ?? "Failed writing multipart body stream"
+          )
+        }
+        if written == 0 {
+          throw QueryBundleBuilderError.transport(message: "Multipart stream write returned zero bytes")
+        }
+        totalWritten += written
+      }
+    }
   }
 
   private func shouldRetry(error: Error, attempt: Int) -> Bool {
     guard attempt <= maxRetryCount else { return false }
+    if isCancellation(error) { return false }
 
     if let queryError = error as? QueryBundleBuilderError {
       switch queryError {
@@ -250,10 +369,17 @@ final class QueryBundleBuilder: QueryBundleBuilderProtocol {
   }
 
   private func mapTransportError(_ error: Error) -> Error {
+    if error is CancellationError {
+      return error
+    }
+
     if let queryError = error as? QueryBundleBuilderError {
       return queryError
     }
     if let urlError = error as? URLError {
+      if urlError.code == .cancelled {
+        return CancellationError()
+      }
       if urlError.code == .timedOut {
         return QueryBundleBuilderError.timeout
       }
@@ -261,12 +387,93 @@ final class QueryBundleBuilder: QueryBundleBuilderProtocol {
     }
     return QueryBundleBuilderError.transport(message: error.localizedDescription)
   }
+
+  private func isCancellation(_ error: Error) -> Bool {
+    if error is CancellationError {
+      return true
+    }
+    guard let urlError = error as? URLError else {
+      return false
+    }
+    return urlError.code == .cancelled
+  }
 }
 
-private extension Data {
-  mutating func appendUTF8(_ value: String) {
-    if let data = value.data(using: .utf8) {
-      append(data)
+private final class StreamedUploadDelegate: NSObject, URLSessionDataDelegate, URLSessionTaskDelegate {
+  private var continuation: CheckedContinuation<(Data, URLResponse), Error>?
+  private var response: URLResponse?
+  private var responseData = Data()
+  private var uploadTask: URLSessionUploadTask?
+  private var session: URLSession?
+  private let lock = NSLock()
+
+  func attach(task: URLSessionUploadTask, session: URLSession) {
+    lock.lock()
+    uploadTask = task
+    self.session = session
+    lock.unlock()
+  }
+
+  func cancel() {
+    lock.lock()
+    let task = uploadTask
+    let session = session
+    lock.unlock()
+
+    task?.cancel()
+    session?.invalidateAndCancel()
+  }
+
+  func awaitResultAndStart() async throws -> (Data, URLResponse) {
+    try await withCheckedThrowingContinuation { continuation in
+      lock.lock()
+      self.continuation = continuation
+      let task = uploadTask
+      lock.unlock()
+      task?.resume()
     }
+  }
+
+  func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+    lock.lock()
+    responseData.append(data)
+    lock.unlock()
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    dataTask: URLSessionDataTask,
+    didReceive response: URLResponse,
+    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+  ) {
+    lock.lock()
+    self.response = response
+    lock.unlock()
+    completionHandler(.allow)
+  }
+
+  func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+    lock.lock()
+    let continuation = continuation
+    self.continuation = nil
+    let response = response
+    let data = responseData
+    lock.unlock()
+
+    defer { session.finishTasksAndInvalidate() }
+
+    if let error {
+      continuation?.resume(throwing: error)
+      return
+    }
+
+    guard let response else {
+      continuation?.resume(
+        throwing: QueryBundleBuilderError.transport(message: "No response received from streamed upload task")
+      )
+      return
+    }
+
+    continuation?.resume(returning: (data, response))
   }
 }
