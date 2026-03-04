@@ -214,11 +214,11 @@ public struct RuntimeConfig {
   }
 
   private static func resolveWakePhrase(bundle: Bundle, userDefaults: UserDefaults) -> String {
-    if let override = userDefaults.string(forKey: "portworld.wakePhrase")?
-      .trimmingCharacters(in: .whitespacesAndNewlines),
-      !override.isEmpty
-    {
-      return override
+    if let rawOverride = userDefaults.object(forKey: "portworld.wakePhrase") as? String {
+      let trimmedOverride = rawOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !trimmedOverride.isEmpty {
+        return trimmedOverride
+      }
     }
 
     return resolveString(infoPlistKey: "SON_WAKE_PHRASE", defaultValue: "hey mario", bundle: bundle)
