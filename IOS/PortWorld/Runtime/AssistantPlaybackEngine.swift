@@ -59,6 +59,80 @@ public struct AssistantAudioFormat: Equatable {
   }
 }
 
+struct AssistantPlaybackQueueState {
+  private(set) var pendingBufferCount: Int = 0
+  private(set) var pendingBufferDurationMs: Double = 0
+  private(set) var lastBufferDrainedAtMs: Int64 = 0
+  private(set) var lastBufferScheduledAtMs: Int64 = 0
+  private(set) var consecutiveStuckChecks: Int = 0
+
+  mutating func recordScheduledBuffer(durationMs: Double, nowMs: Int64) {
+    pendingBufferCount += 1
+    pendingBufferDurationMs += durationMs
+    lastBufferScheduledAtMs = nowMs
+  }
+
+  mutating func recordBufferDrained(durationMs: Double, nowMs: Int64) {
+    if pendingBufferCount > 0 {
+      pendingBufferCount -= 1
+    } else {
+      pendingBufferCount = 0
+    }
+
+    if pendingBufferDurationMs >= durationMs {
+      pendingBufferDurationMs -= durationMs
+    } else {
+      pendingBufferDurationMs = 0
+    }
+
+    lastBufferDrainedAtMs = nowMs
+  }
+
+  mutating func shouldAttemptRecovery(
+    nowMs: Int64,
+    thresholdMs: Int64,
+    maxConsecutiveChecks: Int
+  ) -> Bool {
+    guard pendingBufferCount > 0, lastBufferScheduledAtMs > 0 else {
+      return false
+    }
+
+    let timeSinceLastDrain = nowMs - lastBufferDrainedAtMs
+    let timeSinceLastSchedule = nowMs - lastBufferScheduledAtMs
+
+    if timeSinceLastSchedule < 500 && timeSinceLastDrain > thresholdMs {
+      consecutiveStuckChecks += 1
+      return consecutiveStuckChecks >= maxConsecutiveChecks
+    }
+
+    if timeSinceLastDrain < thresholdMs {
+      consecutiveStuckChecks = 0
+    }
+    return false
+  }
+
+  mutating func resetForStartResponse(nowMs: Int64) {
+    pendingBufferCount = 0
+    pendingBufferDurationMs = 0
+    consecutiveStuckChecks = 0
+    lastBufferScheduledAtMs = 0
+    lastBufferDrainedAtMs = nowMs
+  }
+
+  mutating func resetForCancelResponse() {
+    pendingBufferCount = 0
+    pendingBufferDurationMs = 0
+    consecutiveStuckChecks = 0
+  }
+
+  mutating func resetForRecovery(nowMs: Int64) {
+    pendingBufferCount = 0
+    pendingBufferDurationMs = 0
+    consecutiveStuckChecks = 0
+    lastBufferDrainedAtMs = nowMs
+  }
+}
+
 @MainActor
 public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
   public var onRouteChanged: ((String) -> Void)?
@@ -78,28 +152,12 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
     subsystem: Bundle.main.bundleIdentifier ?? "PortWorld",
     category: "AssistantPlaybackEngine"
   )
-
-  /// Number of buffers currently scheduled in the player node awaiting playback.
-  /// Used for backpressure and observability.
-  private(set) var pendingBufferCount: Int = 0
-
-  /// Estimated duration of pending audio in milliseconds.
-  /// Provides a more accurate backpressure signal than buffer count alone.
-  private(set) var pendingBufferDurationMs: Double = 0
-
-  /// Timestamp (ms) when the last buffer completion callback fired.
-  /// Used to detect stuck playback where buffers are scheduled but never drain.
-  private var lastBufferDrainedAtMs: Int64 = 0
-
-  /// Timestamp (ms) when the last buffer was scheduled.
-  private var lastBufferScheduledAtMs: Int64 = 0
-
-  /// Number of consecutive stuck-state detections. Used to trigger recovery.
-  private var consecutiveStuckChecks: Int = 0
+  private var queueState = AssistantPlaybackQueueState()
 
   /// Threshold (ms) for detecting stuck playback. If buffers were scheduled
   /// this recently but no drain callback fired, we may be stuck.
   private let stuckDetectionThresholdMs: Int64
+  private let nowMsProvider: () -> Int64
 
   /// Max consecutive stuck checks before attempting recovery.
   private static let maxStuckChecksBeforeRecovery: Int = 3
@@ -114,6 +172,9 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
 
   /// Whether the playback queue is under backpressure (pending audio exceeds high water mark).
   /// Callers can use this to throttle upstream chunk generation.
+  public var pendingBufferCount: Int { queueState.pendingBufferCount }
+  public var pendingBufferDurationMs: Double { queueState.pendingBufferDurationMs }
+
   public var isBackpressured: Bool {
     pendingBufferDurationMs > Self.backpressureHighWaterMs
   }
@@ -147,6 +208,7 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
     }
     self.playerNode = playerNode
     self.stuckDetectionThresholdMs = max(250, stuckDetectionThresholdMs)
+    self.nowMsProvider = { Clocks.nowMs() }
 
     // Attach once, then connect lazily from the first inbound chunk format.
     // Avoid disconnect/reconnect churn on a shared engine.
@@ -286,25 +348,18 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
 
     // Calculate buffer duration in milliseconds
     let bufferDurationMs = Double(frameCount) / Double(incomingFormat.sampleRate) * 1000.0
-    let nowMs = Clocks.nowMs()
+    let nowMs = nowMsProvider()
 
     // Check for stuck playback: buffers scheduled but never draining
-    if pendingBufferCount > 0 && lastBufferScheduledAtMs > 0 {
-      let timeSinceLastDrain = nowMs - lastBufferDrainedAtMs
-      let timeSinceLastSchedule = nowMs - lastBufferScheduledAtMs
-      
-      // If we've been scheduling buffers but nothing has drained for a while, we're stuck
-      if timeSinceLastSchedule < 500 && timeSinceLastDrain > stuckDetectionThresholdMs {
-        consecutiveStuckChecks += 1
-        debugLog("[AssistantPlaybackEngine] Stuck playback detected: pendingCount=\(pendingBufferCount), timeSinceLastDrain=\(timeSinceLastDrain)ms, consecutiveChecks=\(consecutiveStuckChecks)")
-        
-        if consecutiveStuckChecks >= Self.maxStuckChecksBeforeRecovery {
-          debugLog("[AssistantPlaybackEngine] Attempting stuck playback recovery")
-          attemptPlaybackRecovery()
-        }
-      } else if timeSinceLastDrain < stuckDetectionThresholdMs {
-        consecutiveStuckChecks = 0
-      }
+    if queueState.shouldAttemptRecovery(
+      nowMs: nowMs,
+      thresholdMs: stuckDetectionThresholdMs,
+      maxConsecutiveChecks: Self.maxStuckChecksBeforeRecovery
+    ) {
+      let timeSinceLastDrain = nowMs - queueState.lastBufferDrainedAtMs
+      debugLog("[AssistantPlaybackEngine] Stuck playback detected: pendingCount=\(pendingBufferCount), timeSinceLastDrain=\(timeSinceLastDrain)ms, consecutiveChecks=\(queueState.consecutiveStuckChecks)")
+      debugLog("[AssistantPlaybackEngine] Attempting stuck playback recovery")
+      attemptPlaybackRecovery()
     }
 
     // Log backpressure state for observability but DO NOT drop audio chunks.
@@ -338,25 +393,11 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
     }
 
     // Now it is safe to count and schedule: the graph is stable.
-    pendingBufferCount += 1
-    pendingBufferDurationMs += bufferDurationMs
-    lastBufferScheduledAtMs = nowMs
+    queueState.recordScheduledBuffer(durationMs: bufferDurationMs, nowMs: nowMs)
     playerNode.scheduleBuffer(buffer) { [weak self, bufferDurationMs] in
       Task { @MainActor [weak self] in
         guard let self else { return }
-        if self.pendingBufferCount > 0 {
-          self.pendingBufferCount -= 1
-        } else {
-          assertionFailure("[AssistantPlaybackEngine] pendingBufferCount underflow detected in completion callback")
-          self.pendingBufferCount = 0
-        }
-        if self.pendingBufferDurationMs >= bufferDurationMs {
-          self.pendingBufferDurationMs -= bufferDurationMs
-        } else {
-          assertionFailure("[AssistantPlaybackEngine] pendingBufferDurationMs underflow detected in completion callback")
-          self.pendingBufferDurationMs = 0
-        }
-        self.lastBufferDrainedAtMs = Clocks.nowMs()
+        self.queueState.recordBufferDrained(durationMs: bufferDurationMs, nowMs: self.nowMsProvider())
       }
     }
     debugLog("[AssistantPlaybackEngine] Buffer scheduled, playerNode.isPlaying: \(playerNode.isPlaying)")
@@ -391,11 +432,7 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
       )
     }
 
-    pendingBufferCount = 0
-    pendingBufferDurationMs = 0
-    consecutiveStuckChecks = 0
-    lastBufferScheduledAtMs = 0
-    lastBufferDrainedAtMs = Clocks.nowMs()
+    queueState.resetForStartResponse(nowMs: nowMsProvider())
     debugLog("[AssistantPlaybackEngine] startResponse: counters reset, player node untouched")
   }
 
@@ -408,16 +445,13 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
   public func cancelResponse() {
     playerNode.stop()
     playerNode.reset()
-    pendingBufferCount = 0
-    pendingBufferDurationMs = 0
-    consecutiveStuckChecks = 0
+    queueState.resetForCancelResponse()
     debugLog("[AssistantPlaybackEngine] cancelResponse: flushed playback queue")
   }
 
   public func shutdown() {
     playerNode.stop()
-    pendingBufferCount = 0
-    pendingBufferDurationMs = 0
+    queueState.resetForCancelResponse()
     if isPlayerNodeAttached {
       audioEngine.detach(playerNode)
       isPlayerNodeAttached = false
@@ -681,10 +715,7 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
     // Clear tracking state
     let previousPendingCount = pendingBufferCount
     let previousPendingDuration = pendingBufferDurationMs
-    pendingBufferCount = 0
-    pendingBufferDurationMs = 0
-    consecutiveStuckChecks = 0
-    lastBufferDrainedAtMs = Clocks.nowMs()
+    queueState.resetForRecovery(nowMs: nowMsProvider())
     
     debugLog("[AssistantPlaybackEngine] Recovery: cleared \(previousPendingCount) stuck buffers (~\(Int(previousPendingDuration))ms)")
     
