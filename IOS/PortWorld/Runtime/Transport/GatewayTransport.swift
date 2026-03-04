@@ -112,12 +112,16 @@ actor GatewayTransport: RealtimeTransport {
   }
 
   func sendAudio(_ buffer: Data, timestampMs: Int64) async throws {
-    let frame = TransportBinaryFrame(
-      frameType: .clientAudio,
-      timestampMs: timestampMs,
-      payload: buffer
-    )
-    let encoded = TransportBinaryFrameCodec.encode(frame)
+    let frame = await MainActor.run {
+      TransportBinaryFrame(
+        frameType: .clientAudio,
+        timestampMs: timestampMs,
+        payload: buffer
+      )
+    }
+    let encoded = await MainActor.run {
+      TransportBinaryFrameCodec.encode(frame)
+    }
     try await sendRawData(encoded)
   }
 
@@ -128,13 +132,17 @@ actor GatewayTransport: RealtimeTransport {
 
     let payloadJSON = message.payload.mapValues(Self.convertToRuntimeJSON)
     let sequence = nextOutboundSequence()
-    let envelope = WSMessageEnvelope(
-      type: message.type,
-      sessionID: transportConfig.sessionId,
-      seq: sequence,
-      payload: JSONValue.object(payloadJSON)
-    )
-    let encoded = try WSMessageCodec.encodeEnvelope(envelope)
+    let envelope = await MainActor.run {
+      WSMessageEnvelope(
+        type: message.type,
+        sessionID: transportConfig.sessionId,
+        seq: sequence,
+        payload: JSONValue.object(payloadJSON)
+      )
+    }
+    let encoded = try await MainActor.run {
+      try WSMessageCodec.encodeEnvelope(envelope)
+    }
     guard let text = String(data: encoded, encoding: .utf8) else {
       throw TransportError.protocolError
     }
@@ -151,16 +159,20 @@ actor GatewayTransport: RealtimeTransport {
       }
 
       do {
-        let envelope = try WSMessageCodec.decodeRawEnvelope(from: data)
+        let envelope = try await MainActor.run {
+          try WSMessageCodec.decodeRawEnvelope(from: data)
+        }
         guard case .object(let payload) = envelope.payload else {
           emit(.error(.protocolError))
           return
         }
 
-        let controlMessage = TransportControlMessage(
-          type: envelope.type,
-          payload: payload.mapValues(Self.convertToTransportJSON)
-        )
+        let controlMessage = await MainActor.run {
+          TransportControlMessage(
+            type: envelope.type,
+            payload: payload.mapValues(Self.convertToTransportJSON)
+          )
+        }
         emit(.controlReceived(controlMessage))
       } catch {
         emit(.error(.protocolError))
@@ -168,7 +180,9 @@ actor GatewayTransport: RealtimeTransport {
 
     case .binary(let data):
       do {
-        let frame = try TransportBinaryFrameCodec.decode(data)
+        let frame = try await MainActor.run {
+          try TransportBinaryFrameCodec.decode(data)
+        }
         guard frame.frameType == .serverAudio else {
           emit(.error(.protocolError))
           return
