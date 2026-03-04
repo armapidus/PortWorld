@@ -254,4 +254,113 @@ final class EventLoggerTests: XCTestCase {
     XCTAssertEqual(json["query_id"] as? String, "q_direct")
     XCTAssertEqual(json["ts_ms"] as? Int, 77777)
   }
+
+  // MARK: - Disk persistence
+
+  func testLogPersistsJsonlToDisk() throws {
+    let logsDirectory = makeTempLogsDirectory()
+    defer { removeDirectory(logsDirectory) }
+
+    let logger = EventLogger(
+      sink: { _ in },
+      logsDirectoryURL: logsDirectory
+    )
+
+    logger.log(name: "disk.event", sessionID: "sess_disk", tsMs: 123)
+    logger.flushDiskWritesForTesting()
+
+    let currentLogURL = logsDirectory.appendingPathComponent("events-1.jsonl")
+    let lines = try readLines(from: currentLogURL)
+    XCTAssertEqual(lines.count, 1)
+
+    guard let data = lines[0].data(using: .utf8),
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else {
+      XCTFail("Disk line is not valid JSON")
+      return
+    }
+
+    XCTAssertEqual(json["name"] as? String, "disk.event")
+    XCTAssertEqual(json["session_id"] as? String, "sess_disk")
+    XCTAssertEqual(json["ts_ms"] as? Int, 123)
+  }
+
+  func testDiskRotationKeepsThreeFiles() throws {
+    let logsDirectory = makeTempLogsDirectory()
+    defer { removeDirectory(logsDirectory) }
+
+    let logger = EventLogger(
+      sink: { _ in },
+      logsDirectoryURL: logsDirectory,
+      maxLogFileBytes: 120,
+      maxLogFiles: 3
+    )
+
+    for index in 0..<8 {
+      logger.log(
+        name: "rotation_\(index)",
+        sessionID: "sess_rotation",
+        fields: ["payload": .string(String(repeating: "x", count: 80))]
+      )
+    }
+    logger.flushDiskWritesForTesting()
+
+    let events1 = logsDirectory.appendingPathComponent("events-1.jsonl")
+    let events2 = logsDirectory.appendingPathComponent("events-2.jsonl")
+    let events3 = logsDirectory.appendingPathComponent("events-3.jsonl")
+    let events4 = logsDirectory.appendingPathComponent("events-4.jsonl")
+
+    XCTAssertTrue(FileManager.default.fileExists(atPath: events1.path))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: events2.path))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: events3.path))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: events4.path))
+
+    let mostRecent = try readLines(from: events1).joined(separator: "\n")
+    XCTAssertTrue(mostRecent.contains("rotation_7"))
+  }
+
+  func testExportCurrentLogReturnsCurrentLogURL() throws {
+    let logsDirectory = makeTempLogsDirectory()
+    defer { removeDirectory(logsDirectory) }
+
+    let logger = EventLogger(
+      sink: { _ in },
+      logsDirectoryURL: logsDirectory
+    )
+
+    logger.log(name: "exported.event", sessionID: "sess_export")
+    logger.flushDiskWritesForTesting()
+
+    let exportedURL = logger.exportCurrentLog()
+    XCTAssertEqual(exportedURL.lastPathComponent, "events-1.jsonl")
+    XCTAssertTrue(FileManager.default.fileExists(atPath: exportedURL.path))
+
+    let lines = try readLines(from: exportedURL)
+    XCTAssertEqual(lines.count, 1)
+    XCTAssertTrue(lines[0].contains("exported.event"))
+  }
+
+  private func makeTempLogsDirectory() -> URL {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("EventLoggerTests-\(UUID().uuidString)", isDirectory: true)
+    do {
+      try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    } catch {
+      XCTFail("Failed creating temp directory: \(error.localizedDescription)")
+    }
+    return root
+  }
+
+  private func removeDirectory(_ url: URL) {
+    do {
+      try FileManager.default.removeItem(at: url)
+    } catch {
+      // Best-effort cleanup for test artifacts.
+    }
+  }
+
+  private func readLines(from url: URL) throws -> [String] {
+    let content = try String(contentsOf: url, encoding: .utf8)
+    return content.split(separator: "\n").map(String.init)
+  }
 }
