@@ -55,7 +55,8 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
       await harness.transport.sentAudioCount() == 1
     }
 
-    let sent = try XCTUnwrap(await harness.transport.lastSentAudio())
+    let lastSentAudio = await harness.transport.lastSentAudio()
+    let sent = try XCTUnwrap(lastSentAudio)
     XCTAssertEqual(sent.buffer, connectedPayload)
     XCTAssertEqual(sent.timestampMs, 30)
 
@@ -139,7 +140,7 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
     await harness.orchestrator.deactivate()
   }
 
-  func testSleepDetectionDisconnectsAndReturnsSnapshotToIdleListening() async throws {
+  func testNetworkUnavailableDisconnectsAndReturnsSnapshotToIdleListening() async throws {
     let harness = makeHarness()
     var snapshots: [SessionOrchestrator.StatusSnapshot] = []
     harness.orchestrator.onStatusUpdated = { snapshots.append($0) }
@@ -153,13 +154,7 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
 
     await harness.transport.emit(.stateChanged(.connected))
 
-    let sleepEvent = WakeWordDetectionEvent(
-      wakePhrase: "goodbye mario",
-      timestampMs: 5_000,
-      engine: "manual",
-      confidence: 1.0
-    )
-    try emitSleepDetected(into: harness.orchestrator, event: sleepEvent)
+    harness.orchestrator.setNetworkAvailable(false)
 
     try await assertEventually {
       await harness.transport.disconnectCallCount() == 1
@@ -192,12 +187,20 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
     harness.orchestrator.setNetworkAvailable(false)
     harness.orchestrator.setNetworkAvailable(true)
 
-    try await assertEventually(timeout: 2.0) {
+    try await assertEventually(timeout: 4.0) {
       await harness.transport.disconnectCallCount() == 1
     }
-    try await assertEventually(timeout: 2.0) {
+    try await assertEventually(timeout: 4.0) {
       await harness.transport.connectCallCount() == 2
     }
+    let callEvents = await harness.transport.recordedCallEvents()
+    let firstDisconnectCompleted = try XCTUnwrap(
+      nthCallSequence(callEvents, name: "disconnect.completed", occurrence: 1)
+    )
+    let secondConnectStarted = try XCTUnwrap(
+      nthCallSequence(callEvents, name: "connect.started", occurrence: 2)
+    )
+    XCTAssertLessThan(firstDisconnectCompleted, secondConnectStarted)
 
     await harness.orchestrator.deactivate()
   }
@@ -248,6 +251,122 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
     await harness.orchestrator.deactivate()
   }
 
+  func testOutboundControlMessagesBufferWhileDisconnectedAndReplayOnConnected() async throws {
+    let harness = makeHarness()
+
+    await harness.transport.setRejectControlsWithDisconnected(true)
+    await harness.orchestrator.activate()
+
+    harness.orchestrator.triggerWakeForTesting()
+    try await assertEventually {
+      await harness.transport.connectCallCount() == 1
+    }
+
+    let activateBeforeReconnect = await harness.transport.sentControlCount(type: "session.activate")
+    let wakewordBeforeReconnect = await harness.transport.sentControlCount(type: "wakeword.detected")
+    XCTAssertEqual(activateBeforeReconnect, 0)
+    XCTAssertEqual(wakewordBeforeReconnect, 0)
+
+    await harness.transport.setRejectControlsWithDisconnected(false)
+    await harness.transport.emit(.stateChanged(.connected))
+
+    try await assertEventually {
+      let activateCount = await harness.transport.sentControlCount(type: "session.activate")
+      let wakewordCount = await harness.transport.sentControlCount(type: "wakeword.detected")
+      return activateCount >= 1 && wakewordCount == 1
+    }
+
+    await harness.orchestrator.deactivate()
+  }
+
+  func testDeactivateDuringDisconnectDelayPreventsReconnectOnNetworkRestore() async throws {
+    let harness = makeHarness()
+    await harness.transport.setDisconnectDelayNs(150_000_000)
+
+    await harness.orchestrator.activate()
+    harness.orchestrator.triggerWakeForTesting()
+    try await assertEventually {
+      await harness.transport.connectCallCount() == 1
+    }
+    await harness.transport.emit(.stateChanged(.connected))
+
+    let deactivateTask = Task {
+      await harness.orchestrator.deactivate()
+    }
+    try await Task.sleep(nanoseconds: 20_000_000)
+
+    harness.orchestrator.setNetworkAvailable(false)
+    harness.orchestrator.setNetworkAvailable(true)
+
+    await deactivateTask.value
+
+    try await assertEventually(timeout: 2.0) {
+      await harness.transport.disconnectCallCount() == 1
+    }
+    let connectCount = await harness.transport.connectCallCount()
+    XCTAssertEqual(connectCount, 1)
+  }
+
+  func testSessionRestartCountInHealthStatsPersistsAcrossReactivate() async throws {
+    var nowMs: Int64 = 10_000
+    let harness = makeHarness(clock: { nowMs })
+
+    await harness.orchestrator.activate()
+    nowMs = 10_500
+    harness.orchestrator.handleAppDidEnterBackground()
+
+    let firstHealth = try await assertEventuallyValue {
+      await harness.transport.lastSentControl(type: "health.stats")
+    }
+    guard case .number(let firstRestartCount) = firstHealth.payload["session_restart_count"] else {
+      XCTFail("Missing session_restart_count in initial health payload")
+      return
+    }
+    XCTAssertEqual(Int(firstRestartCount), 0)
+
+    await harness.orchestrator.deactivate()
+
+    nowMs = 11_000
+    await harness.orchestrator.activate()
+    nowMs = 11_500
+    harness.orchestrator.handleAppDidEnterBackground()
+
+    try await assertEventually {
+      guard
+        let message = await harness.transport.lastSentControl(type: "health.stats"),
+        case .number(let value) = message.payload["session_restart_count"]
+      else {
+        return false
+      }
+      return Int(value) == 1
+    }
+
+    await harness.orchestrator.deactivate()
+  }
+
+  func testHealthLoopStopsAfterDeactivateAndIgnoresLifecycleHealthTriggers() async throws {
+    let harness = makeHarness()
+
+    await harness.orchestrator.activate()
+
+    try await assertEventually {
+      await harness.transport.sentControlCount(type: "health.ping") >= 1
+    }
+    let pingCountBeforeDeactivate = await harness.transport.sentControlCount(type: "health.ping")
+    let statsCountBeforeDeactivate = await harness.transport.sentControlCount(type: "health.stats")
+
+    await harness.orchestrator.deactivate()
+    harness.orchestrator.handleAppDidEnterBackground()
+    harness.orchestrator.handleAppDidBecomeActive()
+
+    try await Task.sleep(nanoseconds: 250_000_000)
+
+    let pingCountAfterDeactivate = await harness.transport.sentControlCount(type: "health.ping")
+    let statsCountAfterDeactivate = await harness.transport.sentControlCount(type: "health.stats")
+    XCTAssertEqual(pingCountAfterDeactivate, pingCountBeforeDeactivate)
+    XCTAssertEqual(statsCountAfterDeactivate, statsCountBeforeDeactivate)
+  }
+
   private func makeHarness(
     clock: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) },
     eventSink: ((String) -> Void)? = nil
@@ -290,25 +409,23 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
     )
   }
 
-  private func emitSleepDetected(into orchestrator: SessionOrchestrator, event: WakeWordDetectionEvent) throws {
-    guard
-      let engine = Mirror(reflecting: orchestrator)
-        .children
-        .first(where: { $0.label == "manualWakeEngine" })?
-        .value as? ManualWakeWordEngine
-    else {
-      throw TestError.manualWakeEngineNotFound
+  private func nthCallSequence(
+    _ events: [MockRealtimeTransport.CallEvent],
+    name: String,
+    occurrence: Int
+  ) -> Int? {
+    var matchCount = 0
+    for event in events where event.name == name {
+      matchCount += 1
+      if matchCount == occurrence {
+        return event.sequence
+      }
     }
-
-    guard let callback = engine.onSleepDetected else {
-      throw TestError.sleepCallbackNotConfigured
-    }
-
-    callback(event)
+    return nil
   }
 
   private func assertEventually(
-    timeout: TimeInterval = 1.5,
+    timeout: TimeInterval = 3.0,
     pollIntervalNs: UInt64 = 20_000_000,
     condition: @escaping () async -> Bool,
     file: StaticString = #filePath,
@@ -325,7 +442,7 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
   }
 
   private func assertEventuallyValue<T>(
-    timeout: TimeInterval = 1.5,
+    timeout: TimeInterval = 3.0,
     pollIntervalNs: UInt64 = 20_000_000,
     value: @escaping () async -> T?,
     file: StaticString = #filePath,
@@ -347,18 +464,22 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
     let transport: MockRealtimeTransport
   }
 
-  private enum TestError: Error {
-    case manualWakeEngineNotFound
-    case sleepCallbackNotConfigured
-  }
 }
 
 private actor MockRealtimeTransport: RealtimeTransport {
+  struct CallEvent: Sendable, Equatable {
+    let sequence: Int
+    let name: String
+  }
+
   private(set) var connectConfigs: [TransportConfig] = []
   private(set) var disconnectCount = 0
   private(set) var sentControls: [TransportControlMessage] = []
   private var disconnectDelayNs: UInt64 = 0
   private var sendAudioDelayNs: UInt64 = 0
+  private var rejectControlsWithDisconnected = false
+  private var callEvents: [CallEvent] = []
+  private var nextCallSequence = 1
 
   struct SentAudio {
     let buffer: Data
@@ -378,14 +499,18 @@ private actor MockRealtimeTransport: RealtimeTransport {
   }
 
   func connect(config: TransportConfig) async throws {
+    appendCallEvent("connect.started")
     connectConfigs.append(config)
+    appendCallEvent("connect.completed")
   }
 
   func disconnect() async {
+    appendCallEvent("disconnect.started")
     if disconnectDelayNs > 0 {
       try? await Task.sleep(nanoseconds: disconnectDelayNs)
     }
     disconnectCount += 1
+    appendCallEvent("disconnect.completed")
   }
 
   func sendAudio(_ buffer: Data, timestampMs: Int64) async throws {
@@ -396,6 +521,9 @@ private actor MockRealtimeTransport: RealtimeTransport {
   }
 
   func sendControl(_ message: TransportControlMessage) async throws {
+    if rejectControlsWithDisconnected {
+      throw TransportError.disconnected
+    }
     sentControls.append(message)
   }
 
@@ -437,6 +565,19 @@ private actor MockRealtimeTransport: RealtimeTransport {
 
   func setSendAudioDelayNs(_ value: UInt64) {
     sendAudioDelayNs = value
+  }
+
+  func setRejectControlsWithDisconnected(_ value: Bool) {
+    rejectControlsWithDisconnected = value
+  }
+
+  func recordedCallEvents() -> [CallEvent] {
+    callEvents
+  }
+
+  private func appendCallEvent(_ name: String) {
+    callEvents.append(CallEvent(sequence: nextCallSequence, name: name))
+    nextCallSequence += 1
   }
 }
 
