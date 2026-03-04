@@ -65,6 +65,12 @@ struct NonStreamView: View {
           wearablesVM.disconnectGlasses()
         }
         .disabled(wearablesVM.registrationState != .registered)
+
+        Divider()
+
+        Button("Reset temporary credentials", role: .destructive) {
+          viewModel.resetTemporaryCredentials()
+        }
       } label: {
         Image(systemName: "slider.horizontal.3")
           .font(.system(size: 17, weight: .bold))
@@ -116,6 +122,17 @@ struct NonStreamView: View {
           value: store.runtimeWakeEngineText.capitalized
         )
       }
+
+      TransportStatusBadge(
+        sessionStateText: store.runtimeSessionStateText,
+        playbackStateText: store.runtimePlaybackStateText,
+        transportStatusText: store.transportStatusText
+      )
+
+      PhraseHintsView(
+        wakePhrase: store.runtimeWakePhraseText,
+        sleepPhrase: store.runtimeSleepPhraseText
+      )
     }
     .padding(16)
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -135,15 +152,27 @@ struct NonStreamView: View {
   }
 
   private var connectionCard: some View {
-    HStack(spacing: 10) {
-      Image(systemName: store.hasActiveDevice ? "checkmark.circle.fill" : "hourglass")
-        .font(.system(size: 16, weight: .semibold))
-        .foregroundColor(store.hasActiveDevice ? Color.green.opacity(0.85) : Color.orange.opacity(0.9))
+    VStack(alignment: .leading, spacing: 8) {
+      HStack(spacing: 10) {
+        Image(systemName: store.hasActiveDevice ? "checkmark.circle.fill" : "hourglass")
+          .font(.system(size: 16, weight: .semibold))
+          .foregroundColor(store.hasActiveDevice ? Color.green.opacity(0.85) : Color.orange.opacity(0.9))
 
-      Text(store.hasActiveDevice ? "Active device detected. You can launch runtime now." : "No active device detected yet.")
-        .font(.system(.subheadline, design: .rounded).weight(.semibold))
-        .foregroundColor(.white.opacity(0.9))
-        .frame(maxWidth: .infinity, alignment: .leading)
+        Text(store.hasActiveDevice ? "Active device detected. You can launch runtime now." : "No active device detected yet.")
+          .font(.system(.subheadline, design: .rounded).weight(.semibold))
+          .foregroundColor(.white.opacity(0.9))
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+
+      if !store.isInternetReachable {
+        HStack(spacing: 8) {
+          Image(systemName: "wifi.slash")
+          Text("No internet connection")
+            .lineLimit(1)
+        }
+        .font(.system(.caption, design: .rounded).weight(.semibold))
+        .foregroundColor(.red.opacity(0.95))
+      }
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 12)
@@ -221,11 +250,22 @@ private struct RuntimeStatusPanelView: View {
 
       RuntimeMetricRow(label: "Wake", value: "\(store.runtimeWakeStateText) (\(store.runtimeWakeCount))")
       RuntimeMetricRow(label: "Query", value: "\(store.runtimeQueryStateText) (\(store.runtimeQueryCount))")
+      RuntimeMetricRow(label: "Transport", value: store.transportStatusText)
+      RuntimeMetricRow(label: "Stream Duration", value: "\(store.streamDurationSeconds)s")
       RuntimeMetricRow(label: "Photo Uploads", value: "\(store.runtimePhotoUploadCount)")
       RuntimeMetricRow(label: "Playback Chunks", value: "\(store.runtimePlaybackChunkCount)")
       RuntimeMetricRow(label: "Video Frames Routed", value: "\(store.runtimeVideoFrameCount)")
 
       Divider().background(Color.white.opacity(0.2))
+
+      if !store.runtimeInfoText.isEmpty {
+        HStack(alignment: .top, spacing: 6) {
+          Image(systemName: "info.circle.fill")
+          Text(store.runtimeInfoText)
+        }
+        .font(.system(.caption, design: .rounded).weight(.semibold))
+        .foregroundColor(.white.opacity(0.9))
+      }
 
       if !store.runtimeErrorText.isEmpty || !store.audioLastError.isEmpty {
         VStack(alignment: .leading, spacing: 4) {
@@ -265,6 +305,86 @@ private struct RuntimeStatusPanelView: View {
         .stroke(Color.white.opacity(0.18), lineWidth: 1)
     )
     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+  }
+}
+
+private struct TransportStatusBadge: View {
+  let sessionStateText: String
+  let playbackStateText: String
+  let transportStatusText: String
+
+  private var badgeColor: Color {
+    let state = sessionStateText.lowercased()
+    if state == "reconnecting" {
+      return Color.orange.opacity(0.22)
+    }
+    if state == "active" {
+      return Color.green.opacity(0.22)
+    }
+    if state == "failed" {
+      return Color.red.opacity(0.22)
+    }
+    return Color.white.opacity(0.14)
+  }
+
+  var body: some View {
+    HStack(spacing: 8) {
+      Image(systemName: "dot.radiowaves.left.and.right")
+        .font(.system(size: 12, weight: .semibold))
+        .foregroundColor(.white.opacity(0.85))
+
+      Text("Transport: \(transportStatusText)")
+        .font(.system(.caption, design: .rounded).weight(.bold))
+        .foregroundColor(.white)
+
+      Spacer(minLength: 8)
+
+      Text("Session \(sessionStateText) | Playback \(playbackStateText)")
+        .font(.system(.caption2, design: .rounded).weight(.semibold))
+        .foregroundColor(.white.opacity(0.78))
+        .lineLimit(1)
+    }
+    .padding(.horizontal, 10)
+    .padding(.vertical, 8)
+    .background(badgeColor)
+    .overlay(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .stroke(Color.white.opacity(0.2), lineWidth: 1)
+    )
+    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+  }
+}
+
+private struct PhraseHintsView: View {
+  let wakePhrase: String
+  let sleepPhrase: String
+
+  private var normalizedWakePhrase: String? {
+    let value = wakePhrase.trimmingCharacters(in: .whitespacesAndNewlines)
+    return value.isEmpty ? nil : value
+  }
+
+  private var normalizedSleepPhrase: String? {
+    let value = sleepPhrase.trimmingCharacters(in: .whitespacesAndNewlines)
+    return value.isEmpty ? nil : value
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      if let normalizedWakePhrase {
+        Text("Wake phrase: \"\(normalizedWakePhrase)\" starts a query while the assistant is active.")
+      } else {
+        Text("Wake phrase detection starts a query while the assistant is active.")
+      }
+
+      if let normalizedSleepPhrase {
+        Text("Sleep phrase: \"\(normalizedSleepPhrase)\" ends the live streaming session.")
+      } else {
+        Text("Sleep phrase detection ends the live streaming session.")
+      }
+    }
+    .font(.system(.caption, design: .rounded).weight(.semibold))
+    .foregroundColor(.white.opacity(0.78))
   }
 }
 

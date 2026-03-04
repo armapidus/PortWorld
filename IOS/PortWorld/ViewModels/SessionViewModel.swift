@@ -6,7 +6,7 @@ final class SessionViewModel {
   let store: SessionStateStore
 
   private let deviceSessionCoordinator: DeviceSessionCoordinator
-  private let runtimeCoordinator: RuntimeCoordinator
+  private var runtimeCoordinator: RuntimeCoordinator
 
   init(wearables: WearablesInterface, store: SessionStateStore? = nil) {
     let stateStore = store ?? SessionStateStore()
@@ -18,6 +18,8 @@ final class SessionViewModel {
       deviceSessionCoordinator: deviceSessionCoordinator,
       runtimeConfig: runtimeConfig
     )
+    stateStore.runtimeWakePhraseText = runtimeConfig.wakePhrase
+    stateStore.runtimeSleepPhraseText = runtimeConfig.sleepPhrase
   }
 
   func preflightWakeAuthorization() async {
@@ -26,10 +28,21 @@ final class SessionViewModel {
 
   func activateAssistantRuntime() async {
     guard store.canActivateAssistantRuntime else { return }
+    if !store.isStreaming {
+      let runtimeConfig = RuntimeConfig.load()
+      runtimeCoordinator = RuntimeCoordinator(
+        store: store,
+        deviceSessionCoordinator: deviceSessionCoordinator,
+        runtimeConfig: runtimeConfig
+      )
+      store.runtimeWakePhraseText = runtimeConfig.wakePhrase
+      store.runtimeSleepPhraseText = runtimeConfig.sleepPhrase
+    }
 
     store.assistantRuntimeState = .activating
     store.runtimeSessionStateText = "activating"
     store.runtimeErrorText = ""
+    store.runtimeInfoText = ""
 
     do {
       try await deviceSessionCoordinator.ensureCameraPermissionIfNeeded()
@@ -75,5 +88,16 @@ final class SessionViewModel {
 
   func handleScenePhaseChange(_ phase: ScenePhase) {
     runtimeCoordinator.handleScenePhaseChange(phase)
+  }
+
+  func resetTemporaryCredentials() {
+    do {
+      try RuntimeConfig.clearStoredAPIKey()
+      store.runtimeInfoText = "Temporary credentials reset. Reactivate runtime to reload config."
+      store.runtimeErrorText = ""
+    } catch {
+      store.runtimeInfoText = ""
+      store.runtimeErrorText = "Failed to reset credentials: \(error.localizedDescription)"
+    }
   }
 }
