@@ -376,7 +376,7 @@ public struct EmptyPayload: Codable {
   public init() {}
 }
 
-@preconcurrency public struct WSMessageEnvelope<Payload> {
+@preconcurrency nonisolated public struct WSMessageEnvelope<Payload> {
   public let type: String
   public let sessionID: String
   public let seq: Int
@@ -403,7 +403,7 @@ public struct EmptyPayload: Codable {
 extension WSMessageEnvelope: Encodable where Payload: Encodable {}
 extension WSMessageEnvelope: Decodable where Payload: Decodable {}
 
-@preconcurrency public struct WSRawMessageEnvelope: Codable {
+@preconcurrency nonisolated public struct WSRawMessageEnvelope: Codable {
   public let type: String
   public let sessionID: String
   public let seq: Int

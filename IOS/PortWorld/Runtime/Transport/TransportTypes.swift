@@ -110,7 +110,7 @@ enum TransportJSONValue: Codable, Sendable, Equatable {
   }
 }
 
-struct TransportControlMessage: Codable, Sendable, Equatable {
+nonisolated struct TransportControlMessage: Codable, Sendable, Equatable {
   let type: String
   let payload: [String: TransportJSONValue]
 
