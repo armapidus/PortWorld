@@ -8,9 +8,17 @@ import SwiftUI
 private final class SessionViewModelLifetime: ObservableObject {
   @Published private(set) var viewModel: SessionViewModel?
 
-  func ensureInitialized(wearables: WearablesInterface, store: SessionStateStore) {
+  func ensureInitialized(
+    wearables: WearablesInterface,
+    store: SessionStateStore,
+    preferSpeakerOutput: Bool
+  ) {
     guard viewModel == nil else { return }
-    viewModel = SessionViewModel(wearables: wearables, store: store)
+    viewModel = SessionViewModel(
+      wearables: wearables,
+      store: store,
+      preferSpeakerOutput: preferSpeakerOutput
+    )
   }
 }
 
@@ -27,6 +35,8 @@ struct StreamSessionView: View {
   }
 
   var body: some View {
+    let preferSpeakerOutput = wearablesViewModel.isMockModeEnabled
+
     ZStack {
       if let viewModel = sessionViewModelLifetime.viewModel {
         if store.isStreaming {
@@ -49,11 +59,19 @@ struct StreamSessionView: View {
       Text(store.errorMessage)
     }
     .onAppear {
-      sessionViewModelLifetime.ensureInitialized(wearables: wearables, store: store)
+      sessionViewModelLifetime.ensureInitialized(
+        wearables: wearables,
+        store: store,
+        preferSpeakerOutput: preferSpeakerOutput
+      )
       sessionViewModelLifetime.viewModel?.handleScenePhaseChange(scenePhase)
     }
     .onChange(of: scenePhase) { _, newPhase in
-      sessionViewModelLifetime.ensureInitialized(wearables: wearables, store: store)
+      sessionViewModelLifetime.ensureInitialized(
+        wearables: wearables,
+        store: store,
+        preferSpeakerOutput: preferSpeakerOutput
+      )
       sessionViewModelLifetime.viewModel?.handleScenePhaseChange(newPhase)
     }
   }

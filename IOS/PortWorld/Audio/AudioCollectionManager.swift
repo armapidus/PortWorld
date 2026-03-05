@@ -30,6 +30,7 @@ final class AudioCollectionManager: ObservableObject {
     private let chunkDurationMs = 500
     private let speechRMSActivityThreshold: Float
     private let speechActivityDebounceMs: Int64
+    private let preferSpeakerOutput: Bool
 
     private var routeObserver: NSObjectProtocol?
     private var interruptionObserver: NSObjectProtocol?
@@ -43,6 +44,7 @@ final class AudioCollectionManager: ObservableObject {
     init(
         speechRMSThreshold: Float = 0.02,
         speechActivityDebounceMs: Int64 = 250,
+        preferSpeakerOutput: Bool = false,
         audioSessionClient: AudioSessionControlling? = nil,
         observerCenter: NotificationObserving? = nil,
         sharedAudioEngine: AVAudioEngine? = nil,
@@ -51,6 +53,7 @@ final class AudioCollectionManager: ObservableObject {
     ) {
         self.speechRMSActivityThreshold = speechRMSThreshold
         self.speechActivityDebounceMs = speechActivityDebounceMs
+        self.preferSpeakerOutput = preferSpeakerOutput
         self.audioSessionClient = audioSessionClient ?? SystemAudioSessionClient()
         self.observerCenter = observerCenter ?? SystemNotificationCenter()
         self.sharedAudioEngine = sharedAudioEngine ?? AVAudioEngine()
@@ -95,7 +98,11 @@ final class AudioCollectionManager: ObservableObject {
         do {
             // Use .default mode and .allowBluetoothHFP per DAT SDK recommendations for HFP.
             // .voiceChat mode can apply aggressive audio processing that interferes with TTS playback.
-            try audioSessionClient.setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothHFP])
+            var categoryOptions: AVAudioSession.CategoryOptions = [.allowBluetoothHFP]
+            if preferSpeakerOutput {
+                categoryOptions.insert(.defaultToSpeaker)
+            }
+            try audioSessionClient.setCategory(.playAndRecord, mode: .default, options: categoryOptions)
             try audioSessionClient.setActive(true, options: [.notifyOthersOnDeactivation])
             registerRouteObserverIfNeeded()
             isAudioSessionReady = true
@@ -112,7 +119,7 @@ final class AudioCollectionManager: ObservableObject {
             return
         }
 
-        if hasBluetoothHFPInput() == false {
+        if hasRequiredInputRoute() == false {
             state = .waitingForDevice
             return
         }
@@ -265,7 +272,7 @@ final class AudioCollectionManager: ObservableObject {
             return
         }
 
-        state = hasBluetoothHFPInput() ? .idle : .waitingForDevice
+        state = hasRequiredInputRoute() ? .idle : .waitingForDevice
     }
 
     private func handleInterruption(_ interruptionType: AVAudioSession.InterruptionType?) {
@@ -305,6 +312,13 @@ final class AudioCollectionManager: ObservableObject {
 
     private func hasBluetoothHFPInput() -> Bool {
         audioSessionClient.hasBluetoothHFPInput()
+    }
+
+    private func hasRequiredInputRoute() -> Bool {
+        if preferSpeakerOutput {
+            return true
+        }
+        return hasBluetoothHFPInput()
     }
 
     private func requestRecordPermission() async -> Bool {

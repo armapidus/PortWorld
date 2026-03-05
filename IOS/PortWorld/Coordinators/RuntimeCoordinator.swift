@@ -14,13 +14,15 @@ final class RuntimeCoordinator {
   init(
     store: SessionStateStore,
     deviceSessionCoordinator: DeviceSessionCoordinator,
-    runtimeConfig: RuntimeConfig
+    runtimeConfig: RuntimeConfig,
+    preferSpeakerOutput: Bool = false
   ) {
     self.store = store
     self.deviceSessionCoordinator = deviceSessionCoordinator
     self.audioCollectionManager = AudioCollectionManager(
       speechRMSThreshold: runtimeConfig.speechRMSThreshold,
-      speechActivityDebounceMs: runtimeConfig.speechActivityDebounceMs
+      speechActivityDebounceMs: runtimeConfig.speechActivityDebounceMs,
+      preferSpeakerOutput: preferSpeakerOutput
     )
     let audioManager = self.audioCollectionManager
     let audioSessionLeaseManager = AudioSessionLeaseManager(arbiter: AudioSessionArbiter())

@@ -5,18 +5,25 @@ import SwiftUI
 final class SessionViewModel {
   let store: SessionStateStore
 
+  private let preferSpeakerOutput: Bool
   private let deviceSessionCoordinator: DeviceSessionCoordinator
   private var runtimeCoordinator: RuntimeCoordinator
 
-  init(wearables: WearablesInterface, store: SessionStateStore? = nil) {
+  init(
+    wearables: WearablesInterface,
+    store: SessionStateStore? = nil,
+    preferSpeakerOutput: Bool = false
+  ) {
     let stateStore = store ?? SessionStateStore()
     let runtimeConfig = RuntimeConfig.load()
+    self.preferSpeakerOutput = preferSpeakerOutput
     self.store = stateStore
     self.deviceSessionCoordinator = DeviceSessionCoordinator(wearables: wearables)
     self.runtimeCoordinator = RuntimeCoordinator(
       store: stateStore,
       deviceSessionCoordinator: deviceSessionCoordinator,
-      runtimeConfig: runtimeConfig
+      runtimeConfig: runtimeConfig,
+      preferSpeakerOutput: preferSpeakerOutput
     )
     stateStore.runtimeWakePhraseText = runtimeConfig.wakePhrase
     stateStore.runtimeSleepPhraseText = runtimeConfig.sleepPhrase
@@ -33,7 +40,8 @@ final class SessionViewModel {
       runtimeCoordinator = RuntimeCoordinator(
         store: store,
         deviceSessionCoordinator: deviceSessionCoordinator,
-        runtimeConfig: runtimeConfig
+        runtimeConfig: runtimeConfig,
+        preferSpeakerOutput: preferSpeakerOutput
       )
       store.runtimeWakePhraseText = runtimeConfig.wakePhrase
       store.runtimeSleepPhraseText = runtimeConfig.sleepPhrase
@@ -45,7 +53,9 @@ final class SessionViewModel {
     store.runtimeInfoText = ""
 
     do {
-      try await deviceSessionCoordinator.ensureCameraPermissionIfNeeded()
+      if !preferSpeakerOutput {
+        try await deviceSessionCoordinator.ensureCameraPermissionIfNeeded()
+      }
       await runtimeCoordinator.preflightWakeAuthorization()
       await runtimeCoordinator.activate()
     } catch {
