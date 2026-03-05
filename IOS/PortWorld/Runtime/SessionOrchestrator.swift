@@ -4,7 +4,7 @@ import Foundation
 import OSLog
 import UIKit
 
-private final class RealtimePCMUplinkWorker {
+private final class RealtimePCMUplinkWorker: @unchecked Sendable {
   struct Frame {
     let payload: Data
     let timestampMs: Int64
@@ -13,7 +13,7 @@ private final class RealtimePCMUplinkWorker {
   private let capacity: Int
   private let sendFrame: @Sendable (Frame) async throws -> Void
   private let onSendError: @Sendable (Error) -> Void
-  private let stateQueue = DispatchQueue(label: "com.portworld.session_orchestrator.realtime_pcm_uplink")
+  private let lock = NSLock()
   private let drainSignal: AsyncStream<Void>
   private let drainSignalContinuation: AsyncStream<Void>.Continuation
   private var drainTask: Task<Void, Never>?
@@ -33,51 +33,52 @@ private final class RealtimePCMUplinkWorker {
     let stream = AsyncStream.makeStream(of: Void.self)
     self.drainSignal = stream.stream
     self.drainSignalContinuation = stream.continuation
-    self.drainTask = Task { [weak self] in
+    self.drainTask = Task.detached { [weak self] in
       await self?.runDrainLoop()
     }
   }
 
   func enqueue(payload: Data, timestampMs: Int64) {
-    stateQueue.async { [weak self] in
-      guard let self, self.isActive else { return }
-      if self.pendingFrames.count >= self.capacity {
-        self.pendingFrames.removeFirst()
-        self.droppedFrameCountSinceLastRead += 1
-      }
-      self.pendingFrames.append(Frame(payload: payload, timestampMs: timestampMs))
-      if !self.hasPendingDrainSignal {
-        self.hasPendingDrainSignal = true
-        self.drainSignalContinuation.yield(())
-      }
+    lock.lock()
+    guard isActive else { lock.unlock(); return }
+    if pendingFrames.count >= capacity {
+      pendingFrames.removeFirst()
+      droppedFrameCountSinceLastRead += 1
+    }
+    pendingFrames.append(Frame(payload: payload, timestampMs: timestampMs))
+    let shouldSignal = !hasPendingDrainSignal
+    if shouldSignal { hasPendingDrainSignal = true }
+    lock.unlock()
+    if shouldSignal {
+      drainSignalContinuation.yield(())
     }
   }
 
   func consumeDroppedFrameCount() -> Int {
-    stateQueue.sync {
-      let count = droppedFrameCountSinceLastRead
-      droppedFrameCountSinceLastRead = 0
-      return count
-    }
+    lock.lock()
+    let count = droppedFrameCountSinceLastRead
+    droppedFrameCountSinceLastRead = 0
+    lock.unlock()
+    return count
   }
 
   func stopAndReset() {
-    stateQueue.sync {
-      isActive = false
-      pendingFrames.removeAll(keepingCapacity: false)
-      hasPendingDrainSignal = false
-      droppedFrameCountSinceLastRead = 0
-    }
+    lock.lock()
+    isActive = false
+    pendingFrames.removeAll(keepingCapacity: false)
+    hasPendingDrainSignal = false
+    droppedFrameCountSinceLastRead = 0
+    lock.unlock()
     drainSignalContinuation.finish()
     drainTask?.cancel()
     drainTask = nil
   }
 
   func clearPendingFrames() {
-    stateQueue.async { [weak self] in
-      self?.pendingFrames.removeAll(keepingCapacity: false)
-      self?.hasPendingDrainSignal = false
-    }
+    lock.lock()
+    pendingFrames.removeAll(keepingCapacity: false)
+    hasPendingDrainSignal = false
+    lock.unlock()
   }
 
   private func runDrainLoop() async {
@@ -96,22 +97,28 @@ private final class RealtimePCMUplinkWorker {
   }
 
   private func popNextFrameForDrain() -> Frame? {
-    stateQueue.sync {
-      guard isActive else {
-        pendingFrames.removeAll(keepingCapacity: false)
-        hasPendingDrainSignal = false
-        return nil
-      }
-      guard !pendingFrames.isEmpty else {
-        hasPendingDrainSignal = false
-        return nil
-      }
-      return pendingFrames.removeFirst()
+    lock.lock()
+    guard isActive else {
+      pendingFrames.removeAll(keepingCapacity: false)
+      hasPendingDrainSignal = false
+      lock.unlock()
+      return nil
     }
+    guard !pendingFrames.isEmpty else {
+      hasPendingDrainSignal = false
+      lock.unlock()
+      return nil
+    }
+    let frame = pendingFrames.removeFirst()
+    lock.unlock()
+    return frame
   }
 
   private func isWorkerActive() -> Bool {
-    stateQueue.sync { isActive }
+    lock.lock()
+    let active = isActive
+    lock.unlock()
+    return active
   }
 }
 
@@ -319,7 +326,7 @@ final class SessionOrchestrator {
   private var wsReconnectAttempts = 0
   private var isNetworkAvailable = true
   private var reconnectOnNetworkRestore = false
-  private var pendingNetworkAvailability: Bool?
+  private var pendingNetworkTransitions: [Bool] = []
   private var networkTransitionTask: Task<Void, Never>?
   /// Counts full session restarts (deactivate+activate cycles), persists across activations.
   /// Distinguishes from wsReconnectAttempts which tracks transport-level reconnects within a session.
@@ -555,22 +562,23 @@ final class SessionOrchestrator {
   }
 
   func setNetworkAvailable(_ isAvailable: Bool) {
-    let hasPendingTransition = pendingNetworkAvailability != nil
-    guard isNetworkAvailable != isAvailable || hasPendingTransition else { return }
-    pendingNetworkAvailability = isAvailable
+    let lastKnownAvailability = pendingNetworkTransitions.last ?? isNetworkAvailable
+    guard lastKnownAvailability != isAvailable else { return }
+    pendingNetworkTransitions.append(isAvailable)
     guard networkTransitionTask == nil else { return }
 
-    networkTransitionTask = Task { [weak self] in
-      await self?.processPendingNetworkTransitions()
+    networkTransitionTask = Task { @MainActor [weak self] in
+      guard let self else { return }
+      defer { self.networkTransitionTask = nil }
+      await self.processPendingNetworkTransitions()
     }
   }
 
   private func processPendingNetworkTransitions() async {
-    while let nextAvailability = pendingNetworkAvailability {
-      pendingNetworkAvailability = nil
+    while !pendingNetworkTransitions.isEmpty {
+      let nextAvailability = pendingNetworkTransitions.removeFirst()
       await applyNetworkAvailabilityTransition(nextAvailability)
     }
-    networkTransitionTask = nil
   }
 
   private func applyNetworkAvailabilityTransition(_ isAvailable: Bool) async {
