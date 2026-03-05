@@ -6,6 +6,7 @@ final class RealtimeTransportTests: XCTestCase {
   func testConnectSendTenFramesReceiveTenEchoedFramesThenDisconnect() async throws {
     let transport = MockRealtimeTransport(echoAudioOnSend: true)
     let harness = RealtimeSessionHarness(transport: transport)
+    registerHarnessTeardown(harness)
 
     try await harness.start(config: Self.makeConfig())
 
@@ -42,6 +43,7 @@ final class RealtimeTransportTests: XCTestCase {
   func testConnectThenTransportDropTriggersAutoReconnectAndResumeIntent() async throws {
     let transport = MockRealtimeTransport(echoAudioOnSend: false)
     let harness = RealtimeSessionHarness(transport: transport)
+    registerHarnessTeardown(harness)
 
     try await harness.start(config: Self.makeConfig())
 
@@ -70,6 +72,7 @@ final class RealtimeTransportTests: XCTestCase {
   func testSleepWordDrivenGracefulDisconnectPreventsReconnect() async throws {
     let transport = MockRealtimeTransport(echoAudioOnSend: false)
     let harness = RealtimeSessionHarness(transport: transport)
+    registerHarnessTeardown(harness)
 
     try await harness.start(config: Self.makeConfig())
 
@@ -83,7 +86,7 @@ final class RealtimeTransportTests: XCTestCase {
       await transport.disconnectCallCount() == 1
     }
 
-    let sentSleepControlCount = await transport.sentControlCount(type: "control.sleep_word_detected")
+    let sentSleepControlCount = await transport.sentControlCount(messageType: "control.sleep_word_detected")
     let reconnectIntentCount = harness.reconnectIntentCount()
     XCTAssertEqual(sentSleepControlCount, 1)
     XCTAssertEqual(reconnectIntentCount, 0)
@@ -121,6 +124,13 @@ final class RealtimeTransportTests: XCTestCase {
 
     XCTFail("Condition not met within \(timeout)s", file: file, line: line)
   }
+
+  private func registerHarnessTeardown(_ harness: RealtimeSessionHarness) {
+    addTeardownBlock {
+      await harness.stop()
+    }
+  }
+
 }
 
 @MainActor
@@ -243,6 +253,7 @@ private actor MockRealtimeTransport: RealtimeTransport {
   private(set) var disconnectCount = 0
   private(set) var sentAudio: [SentAudio] = []
   private(set) var sentControls: [TransportControlMessage] = []
+  private(set) var sentControlTypes: [String] = []
   private var isConnected = false
   private let echoAudioOnSend: Bool
 
@@ -281,7 +292,9 @@ private actor MockRealtimeTransport: RealtimeTransport {
   }
 
   func sendControl(_ message: TransportControlMessage) async throws {
+    let messageType = message.type
     sentControls.append(message)
+    sentControlTypes.append(messageType)
   }
 
   func simulateDrop() {
@@ -302,8 +315,8 @@ private actor MockRealtimeTransport: RealtimeTransport {
     sentAudio.count
   }
 
-  func sentControlCount(type: String) -> Int {
-    sentControls.filter { $0.type == type }.count
+  func sentControlCount(messageType: String) async -> Int {
+    sentControlTypes.filter { $0 == messageType }.count
   }
 
   func sentAudioFrames() -> [SentAudio] {
