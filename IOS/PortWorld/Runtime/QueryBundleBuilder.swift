@@ -96,14 +96,13 @@ final class QueryBundleBuilder: QueryBundleBuilderProtocol {
         for (name, value) in defaultHeaders {
           request.setValue(value, forHTTPHeaderField: name)
         }
-        guard let bodyStream = InputStream(url: multipartFileURL) else {
-          throw QueryBundleBuilderError.transport(message: "Unable to open multipart stream at \(multipartFileURL.path)")
-        }
-        request.httpBodyStream = bodyStream
         request.timeoutInterval = TimeInterval(requestTimeoutMs) / 1000.0
 
         let startedAt = Date()
-        let (responseData, response) = try await streamedUpload(for: request)
+        let (responseData, response) = try await streamedUpload(
+          for: request,
+          bodyFileURL: multipartFileURL
+        )
         let latencyMs = Int64(Date().timeIntervalSince(startedAt) * 1000)
 
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -145,8 +144,8 @@ final class QueryBundleBuilder: QueryBundleBuilderProtocol {
     throw (lastError ?? QueryBundleBuilderError.transport(message: "Unknown upload failure"))
   }
 
-  private func streamedUpload(for request: URLRequest) async throws -> (Data, URLResponse) {
-    let delegate = StreamedUploadDelegate()
+  private func streamedUpload(for request: URLRequest, bodyFileURL: URL) async throws -> (Data, URLResponse) {
+    let delegate = StreamedUploadDelegate(bodyFileURL: bodyFileURL)
     let session = URLSession(
       configuration: urlSession.configuration,
       delegate: delegate,
@@ -404,12 +403,18 @@ final class QueryBundleBuilder: QueryBundleBuilderProtocol {
 }
 
 private final class StreamedUploadDelegate: NSObject, URLSessionDataDelegate, URLSessionTaskDelegate {
+  private let bodyFileURL: URL
   private var continuation: CheckedContinuation<(Data, URLResponse), Error>?
   private var response: URLResponse?
   private var responseData = Data()
   private var uploadTask: URLSessionUploadTask?
   private var session: URLSession?
+  private var isCancelled = false
   private let lock = NSLock()
+
+  init(bodyFileURL: URL) {
+    self.bodyFileURL = bodyFileURL
+  }
 
   func attach(task: URLSessionUploadTask, session: URLSession) {
     lock.lock()
@@ -420,10 +425,14 @@ private final class StreamedUploadDelegate: NSObject, URLSessionDataDelegate, UR
 
   func cancel() {
     lock.lock()
+    isCancelled = true
+    let continuation = continuation
+    self.continuation = nil
     let task = uploadTask
     let session = session
     lock.unlock()
 
+    continuation?.resume(throwing: CancellationError())
     task?.cancel()
     session?.invalidateAndCancel()
   }
@@ -431,6 +440,11 @@ private final class StreamedUploadDelegate: NSObject, URLSessionDataDelegate, UR
   func awaitResultAndStart() async throws -> (Data, URLResponse) {
     try await withCheckedThrowingContinuation { continuation in
       lock.lock()
+      if isCancelled {
+        lock.unlock()
+        continuation.resume(throwing: CancellationError())
+        return
+      }
       self.continuation = continuation
       let task = uploadTask
       lock.unlock()
@@ -454,6 +468,14 @@ private final class StreamedUploadDelegate: NSObject, URLSessionDataDelegate, UR
     self.response = response
     lock.unlock()
     completionHandler(.allow)
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    task: URLSessionTask,
+    needNewBodyStream completionHandler: @escaping (InputStream?) -> Void
+  ) {
+    completionHandler(InputStream(url: bodyFileURL))
   }
 
   func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
