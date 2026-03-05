@@ -186,6 +186,8 @@ actor SessionWebSocketClient: SessionWebSocketClientProtocol {
 
   public func sendText(_ text: String) async throws {
     guard let webSocketTask else { throw SessionWebSocketClientError.notConnected }
+    let taskState = webSocketTaskStateProvider(webSocketTask)
+    guard taskState == .running else { throw SessionWebSocketClientError.notConnected }
 
     do {
       try await webSocketTask.send(.string(text))
@@ -196,6 +198,8 @@ actor SessionWebSocketClient: SessionWebSocketClientProtocol {
 
   public func sendData(_ data: Data) async throws {
     guard let webSocketTask else { throw SessionWebSocketClientError.notConnected }
+    let taskState = webSocketTaskStateProvider(webSocketTask)
+    guard taskState == .running else { throw SessionWebSocketClientError.notConnected }
 
     do {
       try await webSocketTask.send(.data(data))
