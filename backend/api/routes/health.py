@@ -1,15 +1,10 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
-from pydantic import BaseModel
 
-from backend.config import settings
+from backend.core.settings import settings
 
 router = APIRouter()
-
-
-class VisionFramePayload(BaseModel):
-    frame_id: str | None = None
 
 
 @router.get("/healthz")
@@ -23,8 +18,3 @@ async def healthz() -> dict[str, str]:
         if settings.openai_debug_mock_capture_mode
         else "disabled",
     }
-
-
-@router.post("/vision/frame")
-async def vision_frame(payload: VisionFramePayload) -> dict[str, str | None]:
-    return {"status": "ok", "frame_id": payload.frame_id}

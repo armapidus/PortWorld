@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Dict, Optional
+from typing import Any, AsyncIterator, Optional
 from urllib.parse import urlencode
 
 import websockets
@@ -120,7 +120,7 @@ class OpenAIRealtimeClient:
                 f"Failed to connect to realtime endpoint: {self.websocket_url}"
             ) from exc
 
-    async def send_json(self, event: Dict[str, Any]) -> None:
+    async def send_json(self, event: dict[str, Any]) -> None:
         """Serialize and send a JSON event over websocket."""
         ws = self._ws
         if ws is None or getattr(ws, "closed", False):
@@ -138,7 +138,7 @@ class OpenAIRealtimeClient:
         except Exception as exc:
             raise RealtimeSendError("Failed to send event") from exc
 
-    async def recv_json(self) -> Dict[str, Any]:
+    async def recv_json(self) -> dict[str, Any]:
         """Read one websocket message and parse it as JSON event."""
         ws = self._ws
         if ws is None or getattr(ws, "closed", False):
@@ -174,7 +174,7 @@ class OpenAIRealtimeClient:
 
         return self.normalize_event(event)
 
-    async def iter_events(self) -> AsyncIterator[Dict[str, Any]]:
+    async def iter_events(self) -> AsyncIterator[dict[str, Any]]:
         """Async iterator yielding parsed events until websocket closure."""
         while True:
             try:
@@ -182,7 +182,7 @@ class OpenAIRealtimeClient:
             except RealtimeClosedError:
                 return
 
-    def normalize_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
+    def normalize_event(self, event: dict[str, Any]) -> dict[str, Any]:
         """Normalize alternate audio event names to canonical names."""
         event_type = event.get("type")
         if not isinstance(event_type, str):
@@ -239,14 +239,14 @@ class OpenAIRealtimeClient:
         instructions: Optional[str],
         voice: Optional[str],
         schema_mode: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         resolved_instructions = (
             self._instructions if instructions is None else instructions
         )
         resolved_voice = self._voice if voice is None else voice
 
         if schema_mode == "legacy":
-            session: Dict[str, Any] = {
+            session: dict[str, Any] = {
                 "type": "realtime",
                 "input_audio_format": "pcm16",
                 "output_audio_format": "pcm16",

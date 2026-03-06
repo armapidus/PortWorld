@@ -1,0 +1,30 @@
+from __future__ import annotations
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from backend.api.routes.health import router as health_router
+from backend.api.routes.session_ws import router as session_ws_router
+from backend.api.routes.vision import router as vision_router
+from backend.core.settings import settings
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(title="loopa-mock-backend")
+
+    allow_all = settings.cors_origins == ["*"]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=not allow_all,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    app.include_router(health_router)
+    app.include_router(vision_router)
+    app.include_router(session_ws_router)
+    return app
+
+
+app = create_app()

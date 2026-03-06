@@ -8,7 +8,7 @@ from typing import Any
 
 import websockets
 
-from backend.frame_codec import CLIENT_AUDIO_FRAME_TYPE, encode_frame
+from backend.ws.frame_codec import CLIENT_AUDIO_FRAME_TYPE, encode_frame
 
 
 def _make_envelope(message_type: str, session_id: str, payload: dict[str, Any]) -> str:

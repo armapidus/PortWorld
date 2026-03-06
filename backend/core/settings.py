@@ -6,7 +6,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-_BACKEND_ENV_PATH = Path(__file__).resolve().parent / ".env"
+_BACKEND_ROOT = Path(__file__).resolve().parents[1]
+_BACKEND_ENV_PATH = _BACKEND_ROOT / ".env"
 load_dotenv(dotenv_path=_BACKEND_ENV_PATH)
 load_dotenv()
 
@@ -101,7 +102,7 @@ class Settings:
             ),
             openai_debug_dump_input_audio_dir=os.getenv(
                 "OPENAI_DEBUG_DUMP_INPUT_AUDIO_DIR",
-                "backend/debug_audio",
+                "backend/var/debug_audio",
             ),
             openai_debug_mock_capture_mode=_parse_bool_env(
                 "OPENAI_DEBUG_MOCK_CAPTURE_MODE",
