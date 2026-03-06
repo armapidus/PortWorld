@@ -121,6 +121,7 @@ __Snapshots__/
 debug_audio/
 backend/var/
 archived/
+tests_archived/
 
 # ──────────────────────────────────────────────────────────────────────────────
 #  Swift Package Manager
