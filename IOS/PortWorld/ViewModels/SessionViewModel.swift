@@ -61,20 +61,9 @@ final class SessionViewModel {
     store.runtimeErrorText = ""
     store.runtimeInfoText = ""
 
-    do {
-      if !preferSpeakerOutput {
-        try await deviceSessionCoordinator.ensureCameraPermissionIfNeeded()
-      }
-      await runtimeCoordinator.preflightWakeAuthorization()
-      await runtimeCoordinator.activate()
-      runtimeCoordinatorIsActivated = true
-    } catch {
-      store.errorMessage = "Permission error: \(error.localizedDescription)"
-      store.showError = true
-      store.runtimeErrorText = "Permission error: \(error.localizedDescription)"
-      store.assistantRuntimeState = .inactive
-      store.runtimeSessionStateText = "idle"
-    }
+    await runtimeCoordinator.preflightWakeAuthorization()
+    await runtimeCoordinator.activate()
+    runtimeCoordinatorIsActivated = true
   }
 
   func deactivateAssistantRuntime() async {

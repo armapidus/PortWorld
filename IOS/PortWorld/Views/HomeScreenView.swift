@@ -29,13 +29,11 @@ struct HomeScreenView: View {
   }
 
   private var registrationStatusSubtitle: String {
-    if isRegistered {
-      return "You can continue to runtime setup."
-    }
+    if isRegistered { return "You can continue to runtime setup." }
     if isRegistering {
       return "Waiting for Meta AI confirmation."
     }
-    return "Connect once in Meta AI to unlock live session."
+    return "Connect glasses for DAT features, or continue phone-only now."
   }
 
   var body: some View {
@@ -152,11 +150,27 @@ struct HomeScreenView: View {
     .animation(.spring(response: 0.35, dampingFraction: 0.85), value: viewModel.devices.count)
     .safeAreaInset(edge: .bottom) {
       VStack(spacing: 10) {
-        Text("You will be redirected to the Meta AI app to confirm access.")
+        Text("Meta onboarding is optional for phone-only assistant activation.")
           .font(.system(.caption, design: .rounded).weight(.medium))
           .foregroundColor(.white.opacity(0.7))
           .multilineTextAlignment(.leading)
           .frame(maxWidth: .infinity, alignment: .leading)
+
+        Button {
+          viewModel.enterPhoneOnlyAssistantMode()
+        } label: {
+          HStack(spacing: 10) {
+            Image(systemName: "iphone")
+            Text("Continue on iPhone")
+          }
+          .font(.system(.headline, design: .rounded).weight(.semibold))
+          .foregroundColor(.white)
+          .frame(maxWidth: .infinity)
+          .frame(height: 50)
+        }
+        .buttonStyle(.plain)
+        .background(Color.white.opacity(0.2))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
         #if DEBUG
           Button {
@@ -244,8 +258,8 @@ private extension HomeScreenView {
       HomeProgressRow.RowData(
         id: "runtime",
         title: "Runtime activation",
-        detail: isRegistered ? "Ready on next screen" : "Available after authorization",
-        status: isRegistered ? .active : .pending
+        detail: isRegistered ? "Ready on next screen" : "Phone-only mode available now",
+        status: isRegistered ? .active : .done
       ),
     ]
   }

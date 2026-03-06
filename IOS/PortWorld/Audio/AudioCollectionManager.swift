@@ -33,6 +33,7 @@ final class AudioCollectionManager: ObservableObject {
     private let speechRMSActivityThreshold: Float
     private let speechActivityDebounceMs: Int64
     private let preferSpeakerOutput: Bool
+    private let allowBuiltInMicInput: Bool
 
     private var routeObserver: NSObjectProtocol?
     private var interruptionObserver: NSObjectProtocol?
@@ -47,6 +48,7 @@ final class AudioCollectionManager: ObservableObject {
         speechRMSThreshold: Float = 0.02,
         speechActivityDebounceMs: Int64 = 250,
         preferSpeakerOutput: Bool = false,
+        allowBuiltInMicInput: Bool = true,
         audioSessionClient: AudioSessionControlling? = nil,
         observerCenter: NotificationObserving? = nil,
         sharedAudioEngine: AVAudioEngine? = nil,
@@ -56,6 +58,7 @@ final class AudioCollectionManager: ObservableObject {
         self.speechRMSActivityThreshold = speechRMSThreshold
         self.speechActivityDebounceMs = speechActivityDebounceMs
         self.preferSpeakerOutput = preferSpeakerOutput
+        self.allowBuiltInMicInput = allowBuiltInMicInput
         self.audioSessionClient = audioSessionClient ?? SystemAudioSessionClient()
         self.observerCenter = observerCenter ?? SystemNotificationCenter()
         self.sharedAudioEngine = sharedAudioEngine ?? AVAudioEngine()
@@ -113,10 +116,8 @@ final class AudioCollectionManager: ObservableObject {
         }
 
         do {
-            // Use .default mode and .allowBluetoothHFP per DAT SDK recommendations for HFP.
-            // .voiceChat mode can apply aggressive audio processing that interferes with TTS playback.
             var categoryOptions: AVAudioSession.CategoryOptions = [.allowBluetoothHFP]
-            if preferSpeakerOutput {
+            if allowBuiltInMicInput || preferSpeakerOutput {
                 categoryOptions.insert(.defaultToSpeaker)
             }
             try audioSessionClient.setCategory(.playAndRecord, mode: .default, options: categoryOptions)
@@ -333,7 +334,7 @@ final class AudioCollectionManager: ObservableObject {
     }
 
     private func hasRequiredInputRoute() -> Bool {
-        if preferSpeakerOutput {
+        if allowBuiltInMicInput || preferSpeakerOutput {
             return true
         }
         return hasBluetoothHFPInput()

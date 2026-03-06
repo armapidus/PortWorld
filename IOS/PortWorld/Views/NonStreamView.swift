@@ -122,7 +122,7 @@ struct NonStreamView: View {
             .font(.system(.title3, design: .rounded).weight(.semibold))
             .foregroundColor(.white)
 
-          Text("Start session streaming, wake detection hooks, and runtime telemetry in one flow.")
+          Text("Arm wake listening on iPhone. Conversation transport starts only after wake.")
             .font(.system(.subheadline, design: .rounded).weight(.medium))
             .foregroundColor(.white.opacity(0.82))
             .fixedSize(horizontal: false, vertical: true)
@@ -177,7 +177,11 @@ struct NonStreamView: View {
           .font(.system(size: 16, weight: .semibold))
           .foregroundColor(store.hasActiveDevice ? Color.green.opacity(0.85) : Color.orange.opacity(0.9))
 
-        Text(store.hasActiveDevice ? "Active device detected. You can launch runtime now." : "No active device detected yet.")
+        Text(
+          store.hasActiveDevice
+            ? "Active glasses detected. DAT features are available."
+            : "No active glasses detected. Phone-only assistant remains available."
+        )
           .font(.system(.subheadline, design: .rounded).weight(.semibold))
           .foregroundColor(.white.opacity(0.9))
           .frame(maxWidth: .infinity, alignment: .leading)
@@ -300,8 +304,6 @@ private struct RuntimeStatusPanelView: View {
       RuntimeMetricRow(label: "Photo Uploads", value: "\(store.runtimePhotoUploadCount)")
       RuntimeMetricRow(label: "Playback Chunks", value: "\(store.runtimePlaybackChunkCount)")
       RuntimeMetricRow(label: "Video Frames Routed", value: "\(store.runtimeVideoFrameCount)")
-      RuntimeMetricRow(label: "First Frame Wait", value: store.firstFrameWaitStatusText)
-      RuntimeMetricRow(label: "First Frame Updated", value: store.firstFrameWaitTimestampText)
 
       Divider().background(Color.white.opacity(0.2))
 

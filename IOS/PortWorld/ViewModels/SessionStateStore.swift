@@ -121,7 +121,7 @@ final class SessionStateStore {
   }
 
   var canActivateAssistantRuntime: Bool {
-    hasActiveDevice && assistantRuntimeState == .inactive
+    assistantRuntimeState == .inactive
   }
 
   var canDeactivateAssistantRuntime: Bool {

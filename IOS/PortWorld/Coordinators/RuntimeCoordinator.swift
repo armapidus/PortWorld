@@ -10,8 +10,6 @@ final class RuntimeCoordinator {
   private let runtimeOrchestrator: SessionOrchestrator
   private let reachability = NWReachability()
   private var audioStateCancellables = Set<AnyCancellable>()
-  private var firstFrameTimeoutTask: Task<Void, Never>?
-  private let firstFrameTimeoutNanoseconds: UInt64 = 8_000_000_000
 
   init(
     store: SessionStateStore,
@@ -24,7 +22,8 @@ final class RuntimeCoordinator {
     self.audioCollectionManager = AudioCollectionManager(
       speechRMSThreshold: runtimeConfig.speechRMSThreshold,
       speechActivityDebounceMs: runtimeConfig.speechActivityDebounceMs,
-      preferSpeakerOutput: preferSpeakerOutput
+      preferSpeakerOutput: preferSpeakerOutput,
+      allowBuiltInMicInput: true
     )
     let audioManager = self.audioCollectionManager
     let audioSessionLeaseManager = AudioSessionLeaseManager(arbiter: AudioSessionArbiter())
@@ -32,7 +31,7 @@ final class RuntimeCoordinator {
     let dependencies = SessionOrchestrator.Dependencies(
       startStream: {
         do {
-          try await audioSessionLeaseManager.acquire(configuration: .playAndRecordHFP)
+          try await audioSessionLeaseManager.acquire(configuration: .playAndRecordPhone)
         } catch {
           let message = RuntimeCoordinator.audioLeaseErrorMessage(prefix: "Failed to acquire audio session lease", error: error)
           store.audioLastError = message
@@ -48,11 +47,9 @@ final class RuntimeCoordinator {
         if audioManager.isAudioSessionReady {
           await audioManager.start()
         }
-        await deviceSessionCoordinator.startSession()
       },
       stopStream: {
         await audioManager.stop()
-        await deviceSessionCoordinator.stopSession()
         do {
           try await audioSessionLeaseManager.releaseIfNeeded()
         } catch {
@@ -90,21 +87,13 @@ final class RuntimeCoordinator {
     bindAudioState()
   }
 
-  deinit {
-    firstFrameTimeoutTask?.cancel()
-  }
-
   func activate() async {
-    store.markWaitingForFirstFrame()
-    scheduleFirstFrameTimeoutIfNeeded()
     await runtimeOrchestrator.preflightWakeAuthorization()
     await runtimeOrchestrator.activate()
   }
 
   func deactivate() async {
     store.assistantRuntimeState = .deactivating
-    store.resetFirstFrameState(status: "reset_manual_deactivate")
-    cancelFirstFrameTimeout()
     await runtimeOrchestrator.deactivate()
   }
 
@@ -185,10 +174,7 @@ final class RuntimeCoordinator {
     deviceSessionCoordinator.hooks.onVideoFrame = { [weak self] image, timestampMs in
       guard let self else { return }
       store.currentVideoFrame = image
-      if !store.hasReceivedFirstFrame {
-        store.markFirstFrameReceived()
-        cancelFirstFrameTimeout()
-      }
+      if !store.hasReceivedFirstFrame { store.markFirstFrameReceived() }
       runtimeOrchestrator.pushVideoFrame(image, timestampMs: timestampMs)
     }
 
@@ -224,22 +210,6 @@ final class RuntimeCoordinator {
       store.runtimePendingPlaybackBufferCount = snapshot.pendingPlaybackBufferCount
       store.runtimeVideoFrameCount = snapshot.videoFrameCount
       store.runtimeErrorText = snapshot.lastError
-
-      switch snapshot.sessionState {
-      case .idle, .ended:
-        store.resetFirstFrameState(status: "reset_runtime_inactive")
-        cancelFirstFrameTimeout()
-      case .connecting, .reconnecting, .active, .streaming:
-        store.markWaitingForFirstFrame()
-        scheduleFirstFrameTimeoutIfNeeded()
-      case .disconnecting:
-        store.resetFirstFrameState(status: "reset_runtime_deactivating")
-        cancelFirstFrameTimeout()
-      case .failed:
-        store.resetFirstFrameState(status: "reset_runtime_failed")
-        cancelFirstFrameTimeout()
-      }
-
     }
 
     audioCollectionManager.onWakePCMFrame = { [weak self] frame in
@@ -314,8 +284,6 @@ final class RuntimeCoordinator {
     switch state {
     case .stopped:
       store.streamingStatus = .stopped
-      store.resetFirstFrameState(status: "reset_stream_stopped")
-      cancelFirstFrameTimeout()
       if store.assistantRuntimeState == .deactivating {
         store.runtimeSessionStateText = "idle"
       } else if store.assistantRuntimeState == .connectingConversation || store.assistantRuntimeState == .activeConversation {
@@ -328,8 +296,6 @@ final class RuntimeCoordinator {
       }
     case .streaming:
       store.streamingStatus = .streaming
-      store.markWaitingForFirstFrame()
-      scheduleFirstFrameTimeoutIfNeeded()
       if store.assistantRuntimeState == .connectingConversation || store.assistantRuntimeState == .activeConversation {
         store.runtimeSessionStateText = "active"
       }
@@ -340,8 +306,6 @@ final class RuntimeCoordinator {
     store.errorMessage = message
     store.showError = true
     store.runtimeErrorText = message
-    store.resetFirstFrameState(status: "reset_stream_error")
-    cancelFirstFrameTimeout()
 
     if store.assistantRuntimeState != .inactive {
       store.assistantRuntimeState = .inactive
@@ -351,34 +315,6 @@ final class RuntimeCoordinator {
 
   private static func audioLeaseErrorMessage(prefix: String, error: Error) -> String {
     "\(prefix): \(error.localizedDescription)"
-  }
-
-  private func scheduleFirstFrameTimeoutIfNeeded() {
-    guard !store.hasReceivedFirstFrame else {
-      cancelFirstFrameTimeout()
-      return
-    }
-    firstFrameTimeoutTask?.cancel()
-    firstFrameTimeoutTask = Task { @MainActor [weak self] in
-      guard let self else { return }
-      do {
-        try await Task.sleep(nanoseconds: self.firstFrameTimeoutNanoseconds)
-      } catch {
-        return
-      }
-      guard !Task.isCancelled else { return }
-      guard !self.store.hasReceivedFirstFrame else { return }
-      guard self.store.assistantRuntimeState == .connectingConversation || self.store.assistantRuntimeState == .activeConversation else { return }
-      self.store.resetFirstFrameState(status: "first_frame_timeout")
-      if self.store.runtimeInfoText.isEmpty {
-        self.store.runtimeInfoText = "No video frame received yet. Check mock device state (PowerOn/Unfold/Don) and retry activation."
-      }
-    }
-  }
-
-  private func cancelFirstFrameTimeout() {
-    firstFrameTimeoutTask?.cancel()
-    firstFrameTimeoutTask = nil
   }
 
   private func storeReachabilityState(

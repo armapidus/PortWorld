@@ -7,6 +7,7 @@ import Foundation
 actor AudioSessionArbiter {
     enum Configuration: Sendable, Equatable {
         case playAndRecordHFP
+        case playAndRecordPhone
         case playbackOnly
     }
 

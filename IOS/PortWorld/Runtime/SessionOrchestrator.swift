@@ -505,27 +505,38 @@ final class SessionOrchestrator {
     playbackEngine?.hasActivePendingPlayback() ?? false
   }
 
-  private func configureInjectedServices() async {
-    self.realtimeTransport = dependencies.makeRealtimeTransport(config)
-    self.realtimePCMUplinkWorker = makeRealtimePCMUplinkWorker()
-
-    let visionFrameUploader = dependencies.makeVisionFrameUploader(config)
-    await visionFrameUploader.bindHandlers(
-      sessionIDProvider: { [weak self] in self?.activeSessionID },
-      onUploadResult: { [weak self] result in
-        Task { @MainActor in
-          self?.handleVisionUploadResult(result)
-        }
-      }
-    )
-    self.visionFrameUploader = visionFrameUploader
-    self.rollingVideoBuffer = dependencies.makeRollingVideoBuffer(config)
-    self.playbackEngine = dependencies.makePlaybackEngine(
+  private func configureAssistantServicesIfNeeded() {
+    guard playbackEngine == nil else { return }
+    playbackEngine = dependencies.makePlaybackEngine(
       dependencies.sharedAudioEngine,
       config.assistantStuckDetectionThresholdMs
     )
     configurePlaybackEngine()
-    startTransportEventsLoop()
+  }
+
+  private func configureConversationServicesIfNeeded() async {
+    if realtimeTransport == nil {
+      realtimeTransport = dependencies.makeRealtimeTransport(config)
+      realtimePCMUplinkWorker = makeRealtimePCMUplinkWorker()
+      startTransportEventsLoop()
+    }
+
+    if visionFrameUploader == nil {
+      let uploader = dependencies.makeVisionFrameUploader(config)
+      await uploader.bindHandlers(
+        sessionIDProvider: { [weak self] in self?.activeSessionID },
+        onUploadResult: { [weak self] result in
+          Task { @MainActor in
+            self?.handleVisionUploadResult(result)
+          }
+        }
+      )
+      visionFrameUploader = uploader
+    }
+
+    if rollingVideoBuffer == nil {
+      rollingVideoBuffer = dependencies.makeRollingVideoBuffer(config)
+    }
   }
 
   private func makeRealtimePCMUplinkWorker() -> RealtimePCMUplinkWorker? {
@@ -610,7 +621,7 @@ final class SessionOrchestrator {
     guard !isActivated else { return }
 
     isActivated = true
-    await configureInjectedServices()
+    configureAssistantServicesIfNeeded()
     activeSessionID = nil
 
     snapshot.sessionState = .idle
@@ -644,9 +655,6 @@ final class SessionOrchestrator {
     clearRealtimePrerollBuffer()
 
     await dependencies.startStream()
-    if let visionFrameUploader {
-      await visionFrameUploader.start()
-    }
     manualWakeEngine.startListening()
     if primaryWakeEngine !== manualWakeEngine {
       _ = await primaryWakeEngine.requestAuthorizationIfNeeded()
@@ -896,6 +904,7 @@ final class SessionOrchestrator {
     publishSnapshot()
 
     Task { [weak self] in
+      await self?.configureConversationServicesIfNeeded()
       await self?.connectRealtimeTransport(reason: "wake_detected")
     }
 
@@ -964,6 +973,7 @@ final class SessionOrchestrator {
 
   private func connectRealtimeTransport(reason: String) async {
     guard let activeSessionID else { return }
+    await configureConversationServicesIfNeeded()
     guard let realtimeTransport else { return }
     if wantsRealtimeStreaming && (transportState == .connected || transportState == .connecting || transportState == .reconnecting) {
       return
