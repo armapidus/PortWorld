@@ -15,15 +15,15 @@
 
 ## Codebase State
 
-The codebase is a **hackathon MVP being refactored to a consumer-quality v1.0** in tracked phases.
+The codebase is a **hackathon MVP being refactored toward a consumer-quality iOS assistant**.
 
-- **Current** pipeline: half-duplex batch — wake word → record → silence timeout → WAV+MP4 upload (`POST /query`) → PCM response.
-- **Target** pipeline (Phase 6): persistent bidirectional WebSocket streaming.
-- Phases are tracked in `IOS/docs/IMPLEMENTATION_PLAN.md`.
+- The active near-term direction for the iOS assistant is documented in `docs/IOS_AUDIO_ONLY_ASSISTANT_PLAN.md`.
+- Archived iOS planning/spec documents live in `IOS/docs/archived/` and are **historical context only** unless the user explicitly asks to consult them.
+- Do not treat archived phase language or archived target-state docs as the implementation authority for new work.
 
 **Golden rules (always enforce):**
 
-1. Do not add features until the phase they belong to is reached.
+1. Do not add features until the active plan or milestone explicitly calls for them.
 2. Always leave the app compilable after every change.
 3. No secrets (API keys, tokens, IP addresses) in source — use xcconfig injection.
 
@@ -41,6 +41,13 @@ Run these checks (in order) after any non-trivial change:
 ```
 
 For small, localised fixes (single file, no API or concurrency surface change) a build-only check is sufficient.
+
+### Backend Test Policy
+
+- Do not add backend pytest files by default.
+- Do not run backend pytest by default.
+- Backend regression tests are deferred unless the user explicitly asks for them.
+- For backend server changes, prefer implementation work, local inspection, and manual/runtime validation over authoring or maintaining pytest coverage.
 
 ### Simulator Launch Guard (Mandatory)
 
@@ -87,9 +94,9 @@ Use these tools if available. If a tool is not available, use the closest equiva
 
 ## Implementation Policy
 
-- Keep every change aligned with `IOS/docs/PRD.md` and `IOS/docs/ARCHITECTURE.md`.
-- If a proposed change conflicts with either, flag it explicitly before proceeding.
-- Each phase in `IOS/docs/IMPLEMENTATION_PLAN.md` has a completion criterion — verify it before advancing.
+- For active iOS assistant runtime work, keep changes aligned first with `docs/IOS_AUDIO_ONLY_ASSISTANT_PLAN.md`.
+- Use `IOS/docs/archived/PRD.md`, `IOS/docs/archived/ARCHITECTURE.md`, and `IOS/docs/archived/IMPLEMENTATION_PLAN.md` only as historical background or for migration context.
+- If archived docs conflict with `docs/IOS_AUDIO_ONLY_ASSISTANT_PLAN.md`, follow the new root `docs/` plan unless the user explicitly directs otherwise.
 
 ---
 
@@ -101,7 +108,7 @@ State the following in your response:
 2. **MWDAT module touched** (if DAT SDK involved) — `MWDATCore`, `MWDATCamera`, or `MWDATMockDevice`.
 3. **MCP tools used** — which tools provided research and what they returned.
 4. **Assumptions made** — iOS lifecycle, integration, or API behaviour assumptions.
-5. **Phase** — which phase of `IMPLEMENTATION_PLAN.md` this change belongs to.
+5. **Plan / milestone** — which active plan document governs the change (for example `docs/IOS_AUDIO_ONLY_ASSISTANT_PLAN.md`).
 
 ---
 

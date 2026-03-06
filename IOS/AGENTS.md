@@ -10,16 +10,17 @@ For **non-trivial architecture, runtime, transport, or SDK changes**, read the r
 
 | File | Read when… |
 |---|---|
-| `IOS/docs/ARCHITECTURE.md` | Touching module boundaries, data flows, concurrency model, or design system |
-| `IOS/docs/PRD.md` | Verifying functional requirements, transport contracts, or failure modes |
-| `IOS/docs/IMPLEMENTATION_PLAN.md` | Checking which tasks belong to the current phase |
-| `IOS/docs/TESTING.md` | Adding or modifying tests, or before a phase gate |
+| `docs/IOS_AUDIO_ONLY_ASSISTANT_PLAN.md` | Touching the active assistant runtime, wake/sleep flow, audio-only scope, transport ownership, or execution order |
+| `IOS/docs/archived/ARCHITECTURE.md` | Checking legacy architecture rationale or understanding how the current code drifted into its present shape |
+| `IOS/docs/archived/PRD.md` | Looking up historical requirements or legacy compatibility behavior |
+| `IOS/docs/archived/IMPLEMENTATION_PLAN.md` | Tracing old refactor intent or diagnosing why legacy/stabilization branches exist |
+| `IOS/docs/archived/TESTING.md` | Reusing historical test ideas selectively; not as an active phase gate |
 | `IOS/docs/Wearables DAT SDK.md` | Any code that touches the DAT SDK |
 
 For **small, localised fixes** (single file, no API surface or concurrency change), read only the directly relevant file(s).
 
-> **Archived docs** in `IOS/PortWorld/docs/` are hackathon v4 documents and are not authoritative.
-> See `IOS/PortWorld/docs/ARCHIVE_NOTICE.md` for the mapping to current docs.
+> `docs/IOS_AUDIO_ONLY_ASSISTANT_PLAN.md` is now the authoritative forward-looking implementation document for the assistant runtime.
+> Archived docs in `IOS/docs/archived/` are not authoritative for new runtime behavior and may describe legacy or confusing intermediate states.
 
 ---
 
