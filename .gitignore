@@ -119,6 +119,8 @@ playground.xcworkspace
 tmp/
 __Snapshots__/
 debug_audio/
+backend/var/
+archived/
 
 # ──────────────────────────────────────────────────────────────────────────────
 #  Swift Package Manager
