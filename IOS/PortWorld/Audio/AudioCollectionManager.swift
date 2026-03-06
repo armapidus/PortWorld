@@ -1,4 +1,4 @@
-import AVFAudio
+@preconcurrency import AVFAudio
 import Combine
 import Foundation
 import OSLog
@@ -28,6 +28,8 @@ final class AudioCollectionManager: ObservableObject {
     private let processor: AudioChunkProcessing
     private let realtimePCMSinkRelay = RealtimePCMSinkRelay()
     private let chunkDurationMs = 500
+    private let realtimePCMChunkDurationMs = 100
+    private let realtimePCMMaximumChunkBytes = 4080
     private let speechRMSActivityThreshold: Float
     private let speechActivityDebounceMs: Int64
     private let preferSpeakerOutput: Bool
@@ -62,6 +64,21 @@ final class AudioCollectionManager: ObservableObject {
         }
         self.tapController = resolvedTapFactory(self.sharedAudioEngine)
         self.processor = processor ?? AudioChunkProcessor()
+        self.realtimePCMSinkRelay.configureChunking(
+            minimumChunkSizeBytes: min(
+                Self.realtimePCMChunkSizeBytes(
+                    durationMs: realtimePCMChunkDurationMs,
+                    sampleRate: 24_000,
+                    channels: 1
+                ),
+                realtimePCMMaximumChunkBytes
+            ),
+            logChunkEmission: { [logger] chunkIndex, byteCount, timestampMs in
+                logger.debug(
+                    "realtime_pcm_chunk_emitted index=\(chunkIndex, privacy: .public) bytes=\(byteCount, privacy: .public) timestamp_ms=\(timestampMs, privacy: .public)"
+                )
+            }
+        )
         interruptionObserver = self.observerCenter.addObserver(
             forName: AVAudioSession.interruptionNotification,
             object: self.audioSessionClient.notificationObject,
@@ -174,8 +191,8 @@ final class AudioCollectionManager: ObservableObject {
                 }
 
                 if realtimePCMSinkRelay.hasSink {
-                    guard let payload = Self.copyPCMPayload(buffer) else {
-                        processor.enqueueError("Failed to copy captured audio payload.")
+                    guard let payload = Self.copyRealtimePCMPayload(buffer) else {
+                        processor.enqueueError("Failed to convert realtime audio payload to pcm_s16le mono 24kHz.")
                         return
                     }
                     realtimePCMSinkRelay.emit(payload: payload, timestampMs: timestampMs)
@@ -219,6 +236,7 @@ final class AudioCollectionManager: ObservableObject {
         }
 
         teardownEngineIfNeeded()
+        realtimePCMSinkRelay.flush()
         processor.stopAndFlush()
 
         if case .failed = state {
@@ -352,8 +370,17 @@ final class AudioCollectionManager: ObservableObject {
         return documentsURL
     }
 
-    private static func nowMs() -> Int64 {
+    private nonisolated static func nowMs() -> Int64 {
         Clocks.nowMs()
+    }
+
+    private nonisolated static func realtimePCMChunkSizeBytes(
+        durationMs: Int,
+        sampleRate: Int,
+        channels: Int
+    ) -> Int {
+        let frames = max(1, (sampleRate * durationMs) / 1000)
+        return max(2, frames * max(1, channels) * MemoryLayout<Int16>.size)
     }
 
     private static func computeRMS(_ buffer: AVAudioPCMBuffer) -> Float {
@@ -438,6 +465,77 @@ final class AudioCollectionManager: ObservableObject {
         }
 
         return payload.isEmpty ? nil : payload
+    }
+
+    private static func copyRealtimePCMPayload(_ buffer: AVAudioPCMBuffer) -> Data? {
+        let targetSampleRate = 24_000.0
+        let inputFormat = buffer.format
+        let isTargetFormat =
+            inputFormat.commonFormat == .pcmFormatInt16 &&
+            inputFormat.channelCount == 1 &&
+            abs(inputFormat.sampleRate - targetSampleRate) < 0.001
+        if isTargetFormat {
+            return copyPCMPayload(buffer)
+        }
+
+        guard let outputFormat = AVAudioFormat(
+            commonFormat: .pcmFormatInt16,
+            sampleRate: targetSampleRate,
+            channels: 1,
+            interleaved: false
+        ) else {
+            return nil
+        }
+
+        guard let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
+            return nil
+        }
+
+        let ratio = outputFormat.sampleRate / max(inputFormat.sampleRate, 1)
+        let capacity = AVAudioFrameCount(max(1, Int((Double(buffer.frameLength) * ratio).rounded(.up)) + 32))
+        guard let convertedBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity) else {
+            return nil
+        }
+
+        var consumed = false
+        var convertedPayload = Data()
+
+        while true {
+            var conversionError: NSError?
+            let status = converter.convert(to: convertedBuffer, error: &conversionError) { _, outStatus in
+                if consumed {
+                    outStatus.pointee = .noDataNow
+                    return nil
+                }
+                consumed = true
+                outStatus.pointee = .haveData
+                return buffer
+            }
+
+            if conversionError != nil {
+                return nil
+            }
+
+            let producedFrames = Int(convertedBuffer.frameLength)
+            if producedFrames > 0 {
+                guard let channelData = convertedBuffer.int16ChannelData else {
+                    return nil
+                }
+                let byteCount = producedFrames * MemoryLayout<Int16>.size
+                convertedPayload.append(contentsOf: UnsafeRawBufferPointer(start: channelData[0], count: byteCount))
+            }
+
+            switch status {
+            case .haveData:
+                continue
+            case .inputRanDry, .endOfStream:
+                return convertedPayload.isEmpty ? nil : convertedPayload
+            case .error:
+                return nil
+            @unknown default:
+                return convertedPayload.isEmpty ? nil : convertedPayload
+            }
+        }
     }
 
     private static func makeWakePCMFrame(from buffer: AVAudioPCMBuffer, timestampMs: Int64) -> WakeWordPCMFrame? {
@@ -786,6 +884,10 @@ private final class RealtimePCMSinkRelay: @unchecked Sendable {
     private let lock = NSLock()
     private let callbackQueue = DispatchQueue(label: "PortWorld.RealtimePCMSinkRelay")
     private var sink: (@Sendable (Data, Int64) -> Void)?
+    private var accumulatedPayload = Data()
+    private var minimumChunkSizeBytes = 0
+    private var nextChunkIndex = 0
+    private var logChunkEmission: (@Sendable (Int, Int, Int64) -> Void)?
 
     var hasSink: Bool {
         lock.lock()
@@ -794,20 +896,83 @@ private final class RealtimePCMSinkRelay: @unchecked Sendable {
         return hasSink
     }
 
+    func configureChunking(
+        minimumChunkSizeBytes: Int,
+        logChunkEmission: (@Sendable (Int, Int, Int64) -> Void)? = nil
+    ) {
+        lock.lock()
+        self.minimumChunkSizeBytes = max(2, minimumChunkSizeBytes)
+        self.logChunkEmission = logChunkEmission
+        lock.unlock()
+    }
+
     func setSink(_ sink: (@Sendable (Data, Int64) -> Void)?) {
         lock.lock()
         self.sink = sink
+        if sink == nil {
+            accumulatedPayload.removeAll(keepingCapacity: false)
+            nextChunkIndex = 0
+        }
         lock.unlock()
     }
 
     func emit(payload: Data, timestampMs: Int64) {
+        let emissions: [(Data, Int64, Int)]
+        lock.lock()
+        guard sink != nil else {
+            lock.unlock()
+            return
+        }
+        accumulatedPayload.append(payload)
+        emissions = dequeueReadyChunksLocked(timestampMs: timestampMs)
+        lock.unlock()
+        dispatch(emissions)
+    }
+
+    func flush() {
+        let emissions: [(Data, Int64, Int)]
+        lock.lock()
+        guard sink != nil, !accumulatedPayload.isEmpty else {
+            accumulatedPayload.removeAll(keepingCapacity: false)
+            lock.unlock()
+            return
+        }
+        let chunkIndex = nextChunkIndex
+        nextChunkIndex += 1
+        emissions = [(accumulatedPayload, Clocks.nowMs(), chunkIndex)]
+        accumulatedPayload = Data()
+        lock.unlock()
+        dispatch(emissions)
+    }
+
+    private func dequeueReadyChunksLocked(timestampMs: Int64) -> [(Data, Int64, Int)] {
+        let chunkSize = max(2, minimumChunkSizeBytes)
+        guard accumulatedPayload.count >= chunkSize else { return [] }
+
+        var emissions: [(Data, Int64, Int)] = []
+        while accumulatedPayload.count >= chunkSize {
+            let chunk = accumulatedPayload.prefix(chunkSize)
+            let chunkIndex = nextChunkIndex
+            nextChunkIndex += 1
+            emissions.append((Data(chunk), timestampMs, chunkIndex))
+            accumulatedPayload.removeFirst(chunkSize)
+        }
+        return emissions
+    }
+
+    private func dispatch(_ emissions: [(Data, Int64, Int)]) {
+        guard !emissions.isEmpty else { return }
         lock.lock()
         let sink = self.sink
+        let logChunkEmission = self.logChunkEmission
         lock.unlock()
 
         guard let sink else { return }
         callbackQueue.async {
-            sink(payload, timestampMs)
+            for (payload, timestampMs, chunkIndex) in emissions {
+                logChunkEmission?(chunkIndex, payload.count, timestampMs)
+                sink(payload, timestampMs)
+            }
         }
     }
 }

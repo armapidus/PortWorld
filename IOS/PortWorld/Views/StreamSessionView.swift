@@ -39,7 +39,7 @@ struct StreamSessionView: View {
 
     ZStack {
       if let viewModel = sessionViewModelLifetime.viewModel {
-        if store.isStreaming {
+        if store.shouldPresentStreamView {
           StreamView(viewModel: viewModel, store: store)
         } else {
           NonStreamView(viewModel: viewModel, store: store, wearablesVM: wearablesViewModel)

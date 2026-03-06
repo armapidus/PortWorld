@@ -267,6 +267,15 @@ public struct HealthStatsPayload: Codable {
   public let wsRoundTripLatencyMs: Int
   public let frameDropCount: Int
   public let frameDropRate: Double
+  public let realtimeAudioFramesEnqueued: Int
+  public let realtimeAudioFramesSendAttempted: Int
+  public let realtimeAudioFramesSent: Int
+  public let realtimeAudioBackendConfirmedFrames: Int
+  public let realtimeAudioBackendConfirmedBytes: Int
+  public let realtimeAudioSendFailures: Int
+  public let realtimeAudioLastSendError: String?
+  public let realtimeUplinkConfirmed: Bool
+  public let realtimeUplinkAckLatencyMs: Int?
   /// Number of full session restarts (deactivate+activate cycles).
   /// Unlike wsReconnectAttempts, this persists across session activations.
   public let sessionRestartCount: Int
@@ -294,6 +303,15 @@ public struct HealthStatsPayload: Codable {
     wsRoundTripLatencyMs: Int = 0,
     frameDropCount: Int = 0,
     frameDropRate: Double = 0,
+    realtimeAudioFramesEnqueued: Int = 0,
+    realtimeAudioFramesSendAttempted: Int = 0,
+    realtimeAudioFramesSent: Int = 0,
+    realtimeAudioBackendConfirmedFrames: Int = 0,
+    realtimeAudioBackendConfirmedBytes: Int = 0,
+    realtimeAudioSendFailures: Int = 0,
+    realtimeAudioLastSendError: String? = nil,
+    realtimeUplinkConfirmed: Bool = false,
+    realtimeUplinkAckLatencyMs: Int? = nil,
     sessionRestartCount: Int,
     pendingPlaybackDurationMs: Int,
     playbackBackpressured: Bool,
@@ -316,6 +334,15 @@ public struct HealthStatsPayload: Codable {
     self.wsRoundTripLatencyMs = wsRoundTripLatencyMs
     self.frameDropCount = frameDropCount
     self.frameDropRate = frameDropRate
+    self.realtimeAudioFramesEnqueued = realtimeAudioFramesEnqueued
+    self.realtimeAudioFramesSendAttempted = realtimeAudioFramesSendAttempted
+    self.realtimeAudioFramesSent = realtimeAudioFramesSent
+    self.realtimeAudioBackendConfirmedFrames = realtimeAudioBackendConfirmedFrames
+    self.realtimeAudioBackendConfirmedBytes = realtimeAudioBackendConfirmedBytes
+    self.realtimeAudioSendFailures = realtimeAudioSendFailures
+    self.realtimeAudioLastSendError = realtimeAudioLastSendError
+    self.realtimeUplinkConfirmed = realtimeUplinkConfirmed
+    self.realtimeUplinkAckLatencyMs = realtimeUplinkAckLatencyMs
     self.sessionRestartCount = sessionRestartCount
     self.pendingPlaybackDurationMs = pendingPlaybackDurationMs
     self.playbackBackpressured = playbackBackpressured
@@ -340,6 +367,15 @@ public struct HealthStatsPayload: Codable {
     case wsRoundTripLatencyMs = "ws_round_trip_latency_ms"
     case frameDropCount = "frame_drop_count"
     case frameDropRate = "frame_drop_rate"
+    case realtimeAudioFramesEnqueued = "realtime_audio_frames_enqueued"
+    case realtimeAudioFramesSendAttempted = "realtime_audio_frames_send_attempted"
+    case realtimeAudioFramesSent = "realtime_audio_frames_sent"
+    case realtimeAudioBackendConfirmedFrames = "realtime_audio_backend_confirmed_frames"
+    case realtimeAudioBackendConfirmedBytes = "realtime_audio_backend_confirmed_bytes"
+    case realtimeAudioSendFailures = "realtime_audio_send_failures"
+    case realtimeAudioLastSendError = "realtime_audio_last_send_error"
+    case realtimeUplinkConfirmed = "realtime_uplink_confirmed"
+    case realtimeUplinkAckLatencyMs = "realtime_uplink_ack_latency_ms"
     case sessionRestartCount = "session_restart_count"
     case pendingPlaybackDurationMs = "pending_playback_duration_ms"
     case playbackBackpressured = "playback_backpressured"
@@ -347,6 +383,24 @@ public struct HealthStatsPayload: Codable {
     case appVersion = "app_version"
     case deviceModel = "device_model"
     case osVersion = "os_version"
+  }
+}
+
+@preconcurrency public struct RealtimeUplinkAckPayload: Codable {
+  public let framesReceived: Int
+  public let bytesReceived: Int
+  public let probeAcknowledged: Bool?
+
+  public init(framesReceived: Int, bytesReceived: Int, probeAcknowledged: Bool? = nil) {
+    self.framesReceived = framesReceived
+    self.bytesReceived = bytesReceived
+    self.probeAcknowledged = probeAcknowledged
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case framesReceived = "frames_received"
+    case bytesReceived = "bytes_received"
+    case probeAcknowledged = "probe_acknowledged"
   }
 }
 
@@ -374,6 +428,47 @@ public struct HealthStatsPayload: Codable {
 
 public struct EmptyPayload: Codable {
   public init() {}
+}
+
+@preconcurrency public struct SessionActivatePayload: Codable {
+  public struct SessionInfo: Codable {
+    public let type: String
+
+    public init(type: String) {
+      self.type = type
+    }
+  }
+
+  public struct ClientAudioFormat: Codable {
+    public let encoding: String
+    public let channels: Int
+    public let sampleRate: Int
+
+    public init(encoding: String, channels: Int, sampleRate: Int) {
+      self.encoding = encoding
+      self.channels = channels
+      self.sampleRate = sampleRate
+    }
+
+    private enum CodingKeys: String, CodingKey {
+      case encoding
+      case channels
+      case sampleRate = "sample_rate"
+    }
+  }
+
+  public let session: SessionInfo
+  public let audioFormat: ClientAudioFormat
+
+  public init(session: SessionInfo, audioFormat: ClientAudioFormat) {
+    self.session = session
+    self.audioFormat = audioFormat
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case session
+    case audioFormat = "audio_format"
+  }
 }
 
 @preconcurrency nonisolated public struct WSMessageEnvelope<Payload> {

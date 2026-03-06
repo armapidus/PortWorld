@@ -124,20 +124,33 @@ enum TransportEvent: Sendable, Equatable {
   case audioReceived(Data, timestampMs: Int64)
   case controlReceived(TransportControlMessage)
   case stateChanged(TransportState)
+  case closed(TransportSocketCloseInfo)
   case error(TransportError)
 }
 
 enum TransportFrameType: UInt8, Sendable {
   case clientAudio = 0x01
   case serverAudio = 0x02
-  case reserved = 0x03
+  case clientProbe = 0x03
 }
 
 enum TransportBinaryFraming {
   static let headerSize = 9
   static let clientAudioTypeByte: UInt8 = 0x01
   static let serverAudioTypeByte: UInt8 = 0x02
-  static let reservedTypeByte: UInt8 = 0x03
+  static let clientProbeTypeByte: UInt8 = 0x03
+}
+
+nonisolated struct TransportSocketCloseInfo: Sendable, Equatable {
+  let connectionID: Int
+  let code: Int?
+  let reason: String?
+
+  init(connectionID: Int, code: Int?, reason: String?) {
+    self.connectionID = connectionID
+    self.code = code
+    self.reason = reason
+  }
 }
 
 struct TransportBinaryFrame: Sendable, Equatable {

@@ -7,6 +7,7 @@ import UIKit
 typealias SessionWebSocketStateHandler = (SessionWebSocketConnectionState) -> Void
 typealias SessionWebSocketMessageHandler = (WSInboundMessage) -> Void
 typealias SessionWebSocketRawMessageHandler = (SessionWebSocketRawMessage) -> Void
+typealias SessionWebSocketCloseHandler = (TransportSocketCloseInfo) -> Void
 typealias SessionWebSocketErrorHandler = (SessionWebSocketClientError) -> Void
 typealias VisionFrameSessionIDProvider = () -> String?
 typealias VisionFrameUploadResultHandler = (VisionFrameUploadResult) -> Void
@@ -21,6 +22,7 @@ protocol SessionWebSocketClientProtocol: Actor {
   func bindHandlers(
     onStateChange: SessionWebSocketStateHandler?,
     onMessage: SessionWebSocketMessageHandler?,
+    onClose: SessionWebSocketCloseHandler?,
     onError: SessionWebSocketErrorHandler?,
     eventLogger: EventLoggerProtocol?
   )
@@ -40,12 +42,14 @@ extension SessionWebSocketClientProtocol {
     onStateChange: SessionWebSocketStateHandler?,
     onMessage: SessionWebSocketMessageHandler?,
     onRawMessage: SessionWebSocketRawMessageHandler?,
+    onClose: SessionWebSocketCloseHandler?,
     onError: SessionWebSocketErrorHandler?,
     eventLogger: EventLoggerProtocol?
   ) {
     bindHandlers(
       onStateChange: onStateChange,
       onMessage: onMessage,
+      onClose: onClose,
       onError: onError,
       eventLogger: eventLogger
     )

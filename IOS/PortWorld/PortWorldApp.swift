@@ -12,30 +12,11 @@ import SwiftUI
 @main
 struct PortWorldApp: App {
   @State private var sdkInitError: String?
+  @State private var sdkInitDiagnostics: [String] = []
+  @State private var didAttemptInitialSDKInit = false
+  @State private var isRetryingSDKInit = false
   @State private var wearables: WearablesInterface?
   @State private var wearablesViewModel: WearablesViewModel?
-
-  init() {
-    let sdkErrorMessage: String?
-    let wearablesInstance: WearablesInterface?
-    let wearablesViewModel: WearablesViewModel?
-
-    do {
-      try Wearables.configure()
-      let sharedWearables = Wearables.shared
-      sdkErrorMessage = nil
-      wearablesInstance = sharedWearables
-      wearablesViewModel = WearablesViewModel(wearables: sharedWearables)
-    } catch {
-      sdkErrorMessage = error.localizedDescription
-      wearablesInstance = nil
-      wearablesViewModel = nil
-    }
-
-    self._sdkInitError = State(initialValue: sdkErrorMessage)
-    self._wearables = State(initialValue: wearablesInstance)
-    self._wearablesViewModel = State(initialValue: wearablesViewModel)
-  }
 
   var body: some Scene {
     WindowGroup {
@@ -53,38 +34,87 @@ struct PortWorldApp: App {
               Text(wearablesViewModel.errorMessage)
             }
         } else {
-          FatalSDKInitializationView(errorMessage: sdkInitError ?? "Unknown initialization error.")
+          RecoverableSDKInitializationView(
+            errorMessage: sdkInitError ?? "Wearables SDK is not initialized yet.",
+            diagnostics: sdkInitDiagnostics,
+            isRetrying: isRetryingSDKInit,
+            onRetry: initializeWearablesSDK
+          )
         }
       }
-      .alert("Wearables SDK Initialization Failed", isPresented: Binding(
-        get: { sdkInitError != nil },
-        set: { _ in }
-      )) {
-        Button("Quit", role: .destructive) {
-          exit(0)
-        }
-      } message: {
-        Text(sdkInitError ?? "Unknown initialization error.")
+      .task {
+        guard didAttemptInitialSDKInit == false else { return }
+        didAttemptInitialSDKInit = true
+        initializeWearablesSDK()
       }
     }
   }
+
+  @MainActor
+  private func initializeWearablesSDK() {
+    guard isRetryingSDKInit == false else { return }
+    isRetryingSDKInit = true
+    defer { isRetryingSDKInit = false }
+
+    do {
+      try Wearables.configure()
+      let sharedWearables = Wearables.shared
+      wearables = sharedWearables
+      wearablesViewModel = WearablesViewModel(wearables: sharedWearables)
+      sdkInitError = nil
+      sdkInitDiagnostics = []
+    } catch {
+      wearables = nil
+      wearablesViewModel = nil
+      sdkInitError = error.localizedDescription
+      sdkInitDiagnostics = Self.buildInitializationDiagnostics(from: error)
+    }
+  }
+
+  private static func buildInitializationDiagnostics(from error: Error) -> [String] {
+    let nsError = error as NSError
+    var diagnostics = [
+      "Confirm the Meta AI app is installed and developer mode is enabled for this build.",
+      "Verify `MWDAT.AppLinkURLScheme` and `MWDAT.MetaAppID` values in `Info.plist` (`MetaAppID=0` is valid for developer mode).",
+      "Check that Bluetooth is enabled and your glasses can be discovered by the phone.",
+      "Retry initialization after correcting the issue."
+    ]
+
+    #if DEBUG
+      diagnostics.append("Debug details: domain=\(nsError.domain), code=\(nsError.code)")
+    #endif
+
+    return diagnostics
+  }
 }
 
-private struct FatalSDKInitializationView: View {
+private struct RecoverableSDKInitializationView: View {
   let errorMessage: String
+  let diagnostics: [String]
+  let isRetrying: Bool
+  let onRetry: () -> Void
 
   var body: some View {
-    VStack(spacing: 16) {
+    VStack(alignment: .leading, spacing: 16) {
       Text("Wearables SDK Initialization Failed")
         .font(.headline)
       Text(errorMessage)
         .font(.subheadline)
-        .multilineTextAlignment(.center)
+        .multilineTextAlignment(.leading)
         .foregroundColor(.secondary)
-      Button("Quit", role: .destructive) {
-        exit(0)
+      VStack(alignment: .leading, spacing: 8) {
+        ForEach(Array(diagnostics.enumerated()), id: \.offset) { _, diagnostic in
+          Text("• \(diagnostic)")
+            .font(.footnote)
+            .foregroundColor(.secondary)
+        }
       }
+      Button(isRetrying ? "Retrying..." : "Retry initialization") {
+        onRetry()
+      }
+      .disabled(isRetrying)
     }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     .padding(24)
   }
 }

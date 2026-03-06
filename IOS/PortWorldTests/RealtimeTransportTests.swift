@@ -227,6 +227,9 @@ private final class RealtimeSessionHarness {
       // and `.error(.disconnected)` for the same drop event.
       _ = error
 
+    case .closed:
+      break
+
     case .controlReceived:
       break
     }
@@ -289,6 +292,10 @@ private actor MockRealtimeTransport: RealtimeTransport {
     if echoAudioOnSend, isConnected {
       continuation.yield(.audioReceived(buffer, timestampMs: timestampMs))
     }
+  }
+
+  func sendProbe(timestampMs: Int64) async throws {
+    _ = timestampMs
   }
 
   func sendControl(_ message: TransportControlMessage) async throws {

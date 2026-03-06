@@ -102,6 +102,21 @@ final class GatewayTransportTests: XCTestCase {
     XCTAssertEqual(decoded.payload, payload)
   }
 
+  func testSendProbeWritesClientProbeFrameTypeToRawSentData() async throws {
+    let webSocket = MockSessionWebSocketClient()
+    let transport = GatewayTransport(webSocketClient: webSocket)
+    try await transport.connect(config: Self.makeConfig())
+
+    try await transport.sendProbe(timestampMs: 77)
+
+    let sentData = await webSocket.lastSentData()
+    let unwrappedData = try XCTUnwrap(sentData)
+    let decoded = try TransportBinaryFrameCodec.decode(unwrappedData)
+    XCTAssertEqual(decoded.frameType, .clientProbe)
+    XCTAssertEqual(decoded.timestampMs, 77)
+    XCTAssertEqual(decoded.payload, Data([0x50, 0x57, 0x50, 0x31]))
+  }
+
   func testSendControlWritesTextPayloadContainingControlType() async throws {
     let webSocket = MockSessionWebSocketClient()
     let transport = GatewayTransport(webSocketClient: webSocket)
@@ -124,11 +139,67 @@ final class GatewayTransportTests: XCTestCase {
     XCTAssertEqual(decoded.type, controlType)
   }
 
+  func testTextControlFramesPreserveRealtimeUplinkAckType() async throws {
+    let webSocket = MockSessionWebSocketClient()
+    let transport = GatewayTransport(webSocketClient: webSocket)
+
+    var receivedControl: TransportControlMessage?
+    let eventExpectation = expectation(description: "receives transport uplink ack")
+
+    let eventsTask = Task {
+      for await event in transport.events {
+        guard case .controlReceived(let control) = event else { continue }
+        guard control.type == "transport.uplink.ack" else { continue }
+        receivedControl = control
+        eventExpectation.fulfill()
+        break
+      }
+    }
+
+    try await transport.connect(config: Self.makeConfig())
+    await webSocket.emitRaw(
+      .text(
+        """
+        {"type":"transport.uplink.ack","session_id":"sess_test","seq":1,"ts_ms":123,"payload":{"frames_received":1,"bytes_received":4}}
+        """
+      )
+    )
+
+    await fulfillment(of: [eventExpectation], timeout: 1.0)
+    eventsTask.cancel()
+
+    XCTAssertEqual(receivedControl?.type, "transport.uplink.ack")
+  }
+
+  func testCloseCallbackEmitsClosedTransportEvent() async throws {
+    let webSocket = MockSessionWebSocketClient()
+    let transport = GatewayTransport(webSocketClient: webSocket)
+
+    var receivedCloseInfo: TransportSocketCloseInfo?
+    let expectation = expectation(description: "receives close event")
+    let eventsTask = Task {
+      for await event in transport.events {
+        guard case .closed(let closeInfo) = event else { continue }
+        receivedCloseInfo = closeInfo
+        expectation.fulfill()
+        break
+      }
+    }
+
+    try await transport.connect(config: Self.makeConfig())
+    await webSocket.emitClose(TransportSocketCloseInfo(connectionID: 3, code: 1001, reason: "test"))
+
+    await fulfillment(of: [expectation], timeout: 1.0)
+    eventsTask.cancel()
+
+    XCTAssertEqual(receivedCloseInfo, TransportSocketCloseInfo(connectionID: 3, code: 1001, reason: "test"))
+  }
+
   private static func makeConfig() -> TransportConfig {
     TransportConfig(
       endpoint: URL(string: "wss://example.invalid/ws")!,
       sessionId: "sess_test",
-      audioFormat: AudioStreamFormat(sampleRate: 8_000, channels: 1, encoding: "pcm_s16le"),
+      audioFormat: AudioStreamFormat(sampleRate: 24_000, channels: 1, encoding: "pcm_s16le"),
       headers: ["Authorization": "Bearer test"]
     )
   }
@@ -137,16 +208,19 @@ final class GatewayTransportTests: XCTestCase {
 private actor MockSessionWebSocketClient: SessionWebSocketClientProtocol {
   private var onStateChange: SessionWebSocketStateHandler?
   private var onRawMessage: SessionWebSocketRawMessageHandler?
+  private var onClose: SessionWebSocketCloseHandler?
   private(set) var sentTexts: [String] = []
   private(set) var sentData: [Data] = []
 
   func bindHandlers(
     onStateChange: SessionWebSocketStateHandler?,
     onMessage: SessionWebSocketMessageHandler?,
+    onClose: SessionWebSocketCloseHandler?,
     onError: SessionWebSocketErrorHandler?,
     eventLogger: EventLoggerProtocol?
   ) {
     self.onStateChange = onStateChange
+    self.onClose = onClose
   }
 
   func bindRawMessageHandler(_ onRawMessage: SessionWebSocketRawMessageHandler?) {
@@ -179,6 +253,10 @@ private actor MockSessionWebSocketClient: SessionWebSocketClientProtocol {
 
   func emitRaw(_ message: SessionWebSocketRawMessage) {
     onRawMessage?(message)
+  }
+
+  func emitClose(_ closeInfo: TransportSocketCloseInfo) {
+    onClose?(closeInfo)
   }
 
   func lastSentText() -> String? {

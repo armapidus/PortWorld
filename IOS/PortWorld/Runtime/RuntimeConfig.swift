@@ -23,6 +23,7 @@ public struct RuntimeConfig {
   public let wakeWordLocaleIdentifier: String
   public let wakeWordRequiresOnDeviceRecognition: Bool
   public let wakeWordDetectionCooldownMs: Int64
+  public let sleepWordMinActiveStreamMs: Int64
   public let assistantStuckDetectionThresholdMs: Int64
 
   /// Minimum RMS energy to consider a frame as speech (0.0–1.0). Default 0.02.
@@ -46,6 +47,7 @@ public struct RuntimeConfig {
     wakeWordLocaleIdentifier: String = "en-US",
     wakeWordRequiresOnDeviceRecognition: Bool = true,
     wakeWordDetectionCooldownMs: Int64 = 1_500,
+    sleepWordMinActiveStreamMs: Int64 = 1_500,
     assistantStuckDetectionThresholdMs: Int64 = 1_500,
     speechRMSThreshold: Float = 0.02,
     speechActivityDebounceMs: Int64 = 250
@@ -65,6 +67,7 @@ public struct RuntimeConfig {
     self.wakeWordLocaleIdentifier = wakeWordLocaleIdentifier
     self.wakeWordRequiresOnDeviceRecognition = wakeWordRequiresOnDeviceRecognition
     self.wakeWordDetectionCooldownMs = wakeWordDetectionCooldownMs
+    self.sleepWordMinActiveStreamMs = max(0, sleepWordMinActiveStreamMs)
     self.assistantStuckDetectionThresholdMs = max(250, assistantStuckDetectionThresholdMs)
     self.speechRMSThreshold = speechRMSThreshold
     self.speechActivityDebounceMs = speechActivityDebounceMs
@@ -133,6 +136,7 @@ public struct RuntimeConfig {
       wakeWordLocaleIdentifier: resolveWakeLocale(bundle: bundle),
       wakeWordRequiresOnDeviceRecognition: resolveWakeRequiresOnDevice(bundle: bundle),
       wakeWordDetectionCooldownMs: resolveWakeCooldown(bundle: bundle),
+      sleepWordMinActiveStreamMs: resolveSleepWordMinActiveStreamMs(bundle: bundle),
       assistantStuckDetectionThresholdMs: resolveAssistantStuckDetectionThreshold(bundle: bundle)
     )
   }
@@ -373,6 +377,18 @@ public struct RuntimeConfig {
        let parsed = Int64(raw.trimmingCharacters(in: .whitespacesAndNewlines))
     {
       return max(250, parsed)
+    }
+    return 1_500
+  }
+
+  private static func resolveSleepWordMinActiveStreamMs(bundle: Bundle) -> Int64 {
+    if let raw = bundle.object(forInfoDictionaryKey: "SON_SLEEP_WORD_MIN_ACTIVE_STREAM_MS") as? NSNumber {
+      return max(0, raw.int64Value)
+    }
+    if let raw = bundle.object(forInfoDictionaryKey: "SON_SLEEP_WORD_MIN_ACTIVE_STREAM_MS") as? String,
+       let parsed = Int64(raw.trimmingCharacters(in: .whitespacesAndNewlines))
+    {
+      return max(0, parsed)
     }
     return 1_500
   }

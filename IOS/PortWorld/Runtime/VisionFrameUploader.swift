@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import UIKit
 
 struct VisionFrameUploadResult: Sendable {
@@ -31,6 +32,7 @@ enum VisionFrameUploaderError: LocalizedError {
 enum VisionFrameUploadErrorCode: String {
   case noSessionID = "PHOTO_UPLOAD_NO_SESSION_ID"
   case imageEncodingFailed = "PHOTO_UPLOAD_IMAGE_ENCODING_FAILED"
+  case localNetworkDenied = "PHOTO_UPLOAD_LOCAL_NETWORK_DENIED"
   case timeout = "PHOTO_UPLOAD_TIMEOUT"
   case network = "PHOTO_UPLOAD_NETWORK_ERROR"
   case server = "PHOTO_UPLOAD_HTTP_ERROR"
@@ -39,6 +41,7 @@ enum VisionFrameUploadErrorCode: String {
 
 actor VisionFrameUploader: VisionFrameUploaderProtocol {
   typealias UploadResultHandler = (VisionFrameUploadResult) -> Void
+  private static let networkPathKey = "_NSURLErrorNWPathKey"
 
   private var onUploadResult: UploadResultHandler?
 
@@ -306,7 +309,7 @@ actor VisionFrameUploader: VisionFrameUploaderProtocol {
         attemptCount: attempt,
         success: false,
         errorCode: errorCode.rawValue,
-        errorDescription: error?.localizedDescription ?? "HTTP \(statusCode ?? -1)"
+        errorDescription: uploadErrorDescription(errorCode: errorCode, error: error, statusCode: statusCode)
       )
     )
   }
@@ -315,6 +318,10 @@ actor VisionFrameUploader: VisionFrameUploaderProtocol {
     guard attempt <= maxRetryCount else { return false }
 
     if let urlError = error as? URLError {
+      if isLocalNetworkDenied(urlError) {
+        return false
+      }
+
       switch urlError.code {
       case .timedOut, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet:
         return true
@@ -329,6 +336,9 @@ actor VisionFrameUploader: VisionFrameUploaderProtocol {
 
   private func classifyError(error: Error?, statusCode: Int?) -> VisionFrameUploadErrorCode {
     if let urlError = error as? URLError {
+      if isLocalNetworkDenied(urlError) {
+        return .localNetworkDenied
+      }
       if urlError.code == .timedOut {
         return .timeout
       }
@@ -340,6 +350,43 @@ actor VisionFrameUploader: VisionFrameUploaderProtocol {
     }
 
     return .unknown
+  }
+
+  private func uploadErrorDescription(
+    errorCode: VisionFrameUploadErrorCode,
+    error: Error?,
+    statusCode: Int?
+  ) -> String {
+    switch errorCode {
+    case .localNetworkDenied:
+      return "Local network access denied. Enable Local Network for PortWorld in iOS Settings > Privacy & Security > Local Network."
+    case .server:
+      return "HTTP \(statusCode ?? -1)"
+    default:
+      return error?.localizedDescription ?? "HTTP \(statusCode ?? -1)"
+    }
+  }
+
+  private func isLocalNetworkDenied(_ urlError: URLError) -> Bool {
+    if pathUnsatisfiedReason(from: urlError as NSError) == .localNetworkDenied {
+      return true
+    }
+
+    if let underlyingError = (urlError as NSError).userInfo[NSUnderlyingErrorKey] as? NSError {
+      return pathUnsatisfiedReason(from: underlyingError) == .localNetworkDenied
+    }
+
+    return false
+  }
+
+  private func pathUnsatisfiedReason(from error: NSError) -> NWPath.UnsatisfiedReason? {
+    guard let path = error.userInfo[Self.networkPathKey] as? NWPath else {
+      return nil
+    }
+    if #available(iOS 14.2, *) {
+      return path.unsatisfiedReason
+    }
+    return nil
   }
 
   private func retryDelayMs(forAttempt attempt: Int) -> Int64 {

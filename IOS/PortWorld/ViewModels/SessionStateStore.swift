@@ -24,8 +24,18 @@ enum InternetReachabilityState {
 @MainActor
 @Observable
 final class SessionStateStore {
+  private static let firstFrameTimestampFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateStyle = .none
+    formatter.timeStyle = .medium
+    return formatter
+  }()
+
   var currentVideoFrame: UIImage?
   var hasReceivedFirstFrame: Bool = false
+  var firstFrameWaitStatusText: String = "idle"
+  var firstFrameWaitTimestampText: String = "-"
+  private var firstFrameWaitUpdatedAt: Date?
   var streamingStatus: StreamingStatus = .stopped
   var showError: Bool = false
   var errorMessage: String = ""
@@ -87,6 +97,15 @@ final class SessionStateStore {
   var showPhotoPreview: Bool = false
   private var streamStartedAt: Date?
 
+  var shouldPresentStreamView: Bool {
+    streamingStatus == .streaming &&
+      hasReceivedFirstFrame &&
+      currentVideoFrame != nil &&
+      assistantRuntimeState != .inactive &&
+      assistantRuntimeState != .deactivating &&
+      assistantRuntimeState != .failed
+  }
+
   var isStreaming: Bool {
     switch assistantRuntimeState {
     case .activating, .active, .deactivating:
@@ -96,8 +115,26 @@ final class SessionStateStore {
     }
   }
 
+  func markWaitingForFirstFrame(now: Date = Date()) {
+    guard !hasReceivedFirstFrame else { return }
+    guard firstFrameWaitStatusText != "waiting_for_first_frame" else { return }
+    updateFirstFrameDiagnostics(status: "waiting_for_first_frame", at: now)
+  }
+
+  func markFirstFrameReceived(now: Date = Date()) {
+    hasReceivedFirstFrame = true
+    updateFirstFrameDiagnostics(status: "first_frame_received", at: now)
+  }
+
+  func resetFirstFrameState(status: String, now: Date = Date()) {
+    guard hasReceivedFirstFrame || currentVideoFrame != nil || firstFrameWaitStatusText != status else { return }
+    currentVideoFrame = nil
+    hasReceivedFirstFrame = false
+    updateFirstFrameDiagnostics(status: status, at: now)
+  }
+
   var canActivateAssistantRuntime: Bool {
-    hasActiveDevice && (assistantRuntimeState == .inactive || assistantRuntimeState == .failed)
+    hasActiveDevice && !hasLiveRuntimeSessionState && (assistantRuntimeState == .inactive || assistantRuntimeState == .failed)
   }
 
   var canDeactivateAssistantRuntime: Bool {
@@ -110,36 +147,50 @@ final class SessionStateStore {
   }
 
   private func updateRealtimePresentationState(now: Date = Date()) {
+    let sessionState = runtimeSessionStateText.lowercased()
+    let playbackState = runtimePlaybackStateText.lowercased()
+    let isTransportConnecting =
+      sessionState == "connecting" ||
+      sessionState == "activating" ||
+      sessionState == "waiting" ||
+      playbackState.contains("streaming_connecting")
+    let isTransportReconnecting =
+      sessionState == "reconnecting" ||
+      playbackState.contains("streaming_reconnecting")
+    let isTransportReady =
+      playbackState == "streaming_ready" ||
+      playbackState.contains("streaming.ready") ||
+      playbackState.contains("streaming.active")
+
     if internetReachabilityState == .unknown {
       transportStatusText = "Checking internet"
     } else if !isInternetReachable {
       transportStatusText = "No internet"
-    } else {
-    let sessionState = runtimeSessionStateText.lowercased()
-    let playbackState = runtimePlaybackStateText.lowercased()
-
-    switch sessionState {
-    case "reconnecting":
-      transportStatusText = "Reconnecting"
-    case "connecting", "activating", "waiting":
-      transportStatusText = "Connecting"
-    case "active":
-      if playbackState.contains("buffer") || playbackState.contains("wait") {
-        transportStatusText = "Connected | Buffering audio"
-      } else if playbackState == "playing" {
-        transportStatusText = "Connected | Playing response"
-      } else {
-        transportStatusText = "Connected"
-      }
-    case "failed":
+    } else if sessionState == "failed" {
       transportStatusText = "Connection failed"
-    default:
+    } else if sessionState == "disconnecting" {
+      transportStatusText = "Disconnecting"
+    } else if isTransportReconnecting {
+      transportStatusText = "Reconnecting"
+    } else if isTransportConnecting {
+      transportStatusText = "Connecting"
+    } else if sessionState == "active" {
+      transportStatusText = "Session active | Waiting for transport"
+    } else if sessionState == "streaming" {
+      if playbackState == "playing" {
+        transportStatusText = "Connected | Playing response"
+      } else if playbackState.contains("buffer") || playbackState.contains("thinking") {
+        transportStatusText = "Connected | Waiting for response"
+      } else if playbackState.contains("waiting_ready") || !isTransportReady {
+        transportStatusText = "Connected | Waiting for session ready"
+      } else {
+        transportStatusText = "Connected | Ready"
+      }
+    } else {
       transportStatusText = "Disconnected"
     }
-    }
 
-    let sessionState = runtimeSessionStateText.lowercased()
-    if sessionState == "active" {
+    if sessionState == "active" || sessionState == "streaming" {
       if streamStartedAt == nil {
         streamStartedAt = now
       }
@@ -152,5 +203,20 @@ final class SessionStateStore {
       streamStartedAt = nil
       streamDurationSeconds = 0
     }
+  }
+
+  private func updateFirstFrameDiagnostics(status: String, at timestamp: Date) {
+    firstFrameWaitStatusText = status
+    firstFrameWaitUpdatedAt = timestamp
+    firstFrameWaitTimestampText = Self.firstFrameTimestampFormatter.string(from: timestamp)
+  }
+
+  private var hasLiveRuntimeSessionState: Bool {
+    let sessionState = runtimeSessionStateText.lowercased()
+    return sessionState == "active" ||
+      sessionState == "streaming" ||
+      sessionState == "connecting" ||
+      sessionState == "reconnecting" ||
+      sessionState == "disconnecting"
   }
 }

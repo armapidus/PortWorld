@@ -63,7 +63,7 @@ final class SFSpeechWakeWordEngineTests: XCTestCase {
     engine.onSleepDetected = { sleepDetections.append($0) }
 
     engine.startListening()
-    rig.emitTranscript("hey mario please go to sleep now", isFinal: false)
+    rig.emitTranscript("hey mario please go to sleep now", isFinal: true)
 
     try await AsyncTestWait.until {
       sleepDetections.count == 1
@@ -72,6 +72,20 @@ final class SFSpeechWakeWordEngineTests: XCTestCase {
     XCTAssertEqual(sleepDetections.count, 1)
     XCTAssertEqual(sleepDetections.first?.wakePhrase, "go to sleep")
     XCTAssertEqual(sleepDetections.first?.timestampMs, 7_500)
+  }
+
+  func testSleepDetectionIgnoresPartialTranscript() async throws {
+    let rig = TestRig(nowMs: 8_250)
+    let engine = rig.makeEngine(wakePhrase: "hey mario", sleepPhrase: "go to sleep", detectionCooldownMs: 250)
+
+    var sleepDetections: [WakeWordDetectionEvent] = []
+    engine.onSleepDetected = { sleepDetections.append($0) }
+
+    engine.startListening()
+    rig.emitTranscript("please go to sleep", isFinal: false)
+    try await Task.sleep(nanoseconds: 60_000_000)
+
+    XCTAssertTrue(sleepDetections.isEmpty)
   }
 
   func testCircuitBreakerStopsListeningAfterFiveConsecutiveErrors() async throws {

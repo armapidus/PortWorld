@@ -4,6 +4,12 @@ import Network
 
 @MainActor
 final class NWReachability: ObservableObject {
+  enum DisconnectionReason: Equatable {
+    case none
+    case generic
+    case localNetworkDenied
+  }
+
   enum ConnectivityState: Equatable {
     case unknown
     case connected
@@ -22,6 +28,7 @@ final class NWReachability: ObservableObject {
   }
 
   @Published private(set) var connectivityState: ConnectivityState = .unknown
+  @Published private(set) var disconnectionReason: DisconnectionReason = .none
   var isConnected: Bool {
     connectivityState == .connected
   }
@@ -76,10 +83,26 @@ final class NWReachability: ObservableObject {
   }
 
   private func handlePathUpdate(_ path: NWPath) {
-    let nextState: ConnectivityState = path.status == .satisfied ? .connected : .disconnected
-    guard nextState != connectivityState else { return }
+    let nextState: ConnectivityState
+    let nextDisconnectionReason: DisconnectionReason
+    switch path.status {
+    case .satisfied:
+      nextState = .connected
+      nextDisconnectionReason = .none
+    case .unsatisfied, .requiresConnection:
+      nextState = .disconnected
+      nextDisconnectionReason = disconnectionReason(for: path)
+    @unknown default:
+      nextState = .disconnected
+      nextDisconnectionReason = .generic
+    }
+
+    guard nextState != connectivityState || nextDisconnectionReason != disconnectionReason else {
+      return
+    }
 
     connectivityState = nextState
+    disconnectionReason = nextDisconnectionReason
     onConnectivityStateChanged?(nextState)
     if let connected = nextState.isConnected {
       onConnectivityChanged?(connected)
@@ -88,5 +111,12 @@ final class NWReachability: ObservableObject {
     for continuation in streamContinuations.values {
       continuation.yield(nextState)
     }
+  }
+
+  private func disconnectionReason(for path: NWPath) -> DisconnectionReason {
+    if #available(iOS 14.2, *), path.unsatisfiedReason == .localNetworkDenied {
+      return .localNetworkDenied
+    }
+    return .generic
   }
 }

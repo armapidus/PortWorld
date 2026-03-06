@@ -22,7 +22,7 @@ public enum AssistantPlaybackError: Error, LocalizedError {
     case .unsupportedCodec(let codec):
       return "Unsupported audio codec '\(codec)'. Expected pcm_s16le."
     case .unsupportedSampleRate(let sampleRate):
-      return "Unsupported sample rate '\(sampleRate)'. Expected 16000 Hz."
+      return "Unsupported sample rate '\(sampleRate)'. Expected 24000 Hz."
     case .unsupportedChannelCount(let channels):
       return "Unsupported channel count '\(channels)'. Only mono is supported."
     case .invalidPCMByteCount(let count):
@@ -147,7 +147,7 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
   private var interruptionObserver: NSObjectProtocol?
   private var isPlayerNodeAttached = false
   private var isPlayerNodeConnected = false
-  private static let graphFormat = AssistantAudioFormat(codec: "pcm_s16le", sampleRate: 16_000, channels: 1)
+  private static let graphFormat = AssistantAudioFormat(codec: "pcm_s16le", sampleRate: 24_000, channels: 1)
   private static let logger = Logger(
     subsystem: Bundle.main.bundleIdentifier ?? "PortWorld",
     category: "AssistantPlaybackEngine"

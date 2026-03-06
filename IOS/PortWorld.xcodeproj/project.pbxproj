@@ -379,7 +379,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				META_APP_ID = "";
+				META_APP_ID = 0;
 				PRODUCT_BUNDLE_IDENTIFIER = MistralParis.PortWorld;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -411,7 +411,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				META_APP_ID = "";
+				META_APP_ID = 0;
 				PRODUCT_BUNDLE_IDENTIFIER = MistralParis.PortWorld;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

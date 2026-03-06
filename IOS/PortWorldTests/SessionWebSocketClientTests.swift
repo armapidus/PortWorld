@@ -162,6 +162,30 @@ final class SessionWebSocketClientTests: XCTestCase {
     await client.disconnect()
   }
 
+  func testSendDataRejectsSuspendedSocketTaskState() async {
+    let task = URLSession.shared.webSocketTask(with: URL(string: "wss://example.invalid/ws")!)
+    let client = makeClient(webSocketTaskStateProvider: { candidate in
+      candidate === task ? .suspended : candidate.state
+    })
+
+    await client.setWebSocketTaskForTesting(task)
+
+    do {
+      try await client.sendData(Data([0x01, 0x02]))
+      XCTFail("Expected suspended socket send to fail")
+    } catch let error as SessionWebSocketClientError {
+      guard case .transport(let message) = error else {
+        XCTFail("Expected transport error, got \(error)")
+        return
+      }
+      XCTAssertTrue(message.contains("suspended"))
+    } catch {
+      XCTFail("Unexpected error type: \(error)")
+    }
+
+    await client.disconnect()
+  }
+
   func testReconnectBackoffIsBoundedAndDeterministicWhenJitterIsInjected() async {
     let deterministicClient = makeClient(reconnectJitterProvider: { _ in 1.0 })
     let deterministicAttempt1 = await deterministicClient.reconnectDelayMsForTesting(attempt: 1)
@@ -182,5 +206,31 @@ final class SessionWebSocketClientTests: XCTestCase {
     let maxAttempt6 = await maxJitterClient.reconnectDelayMsForTesting(attempt: 6)
     XCTAssertEqual(maxAttempt1, 120)
     XCTAssertEqual(maxAttempt6, 120)
+  }
+
+  func testDisconnectPublishesCloseMetadata() async {
+    let client = makeClient()
+    let task = URLSession.shared.webSocketTask(with: URL(string: "wss://example.invalid/ws")!)
+    await client.setWebSocketTaskForTesting(task)
+    await client.setActiveConnectionIDForTesting(7)
+
+    let closedExpectation = expectation(description: "close callback invoked")
+    var closeInfo: TransportSocketCloseInfo?
+    await client.bindHandlers(
+      onStateChange: nil,
+      onMessage: nil,
+      onClose: { info in
+        closeInfo = info
+        closedExpectation.fulfill()
+      },
+      onError: nil,
+      eventLogger: nil
+    )
+
+    await client.disconnect(closeCode: .goingAway)
+
+    await fulfillment(of: [closedExpectation], timeout: 1.0)
+    XCTAssertEqual(closeInfo?.connectionID, 7)
+    XCTAssertEqual(closeInfo?.code, Int(URLSessionWebSocketTask.CloseCode.goingAway.rawValue))
   }
 }

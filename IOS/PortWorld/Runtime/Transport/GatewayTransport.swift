@@ -1,12 +1,18 @@
 import Foundation
+import OSLog
 
 actor GatewayTransport: RealtimeTransport {
   nonisolated let events: AsyncStream<TransportEvent>
+  nonisolated private static let probePayload = Data([0x50, 0x57, 0x50, 0x31])
 
   private let webSocketClient: SessionWebSocketClientProtocol
+  private let logger = Logger(subsystem: "PortWorld", category: "GatewayTransport")
   private var eventsContinuation: AsyncStream<TransportEvent>.Continuation?
   private var transportConfig: TransportConfig?
   private var outboundSequence = 0
+  private var audioSendAttemptCount = 0
+  private var audioSendCount = 0
+  private var didEmitLiveAudioPathMarker = false
 
   init(webSocketClient: SessionWebSocketClientProtocol) {
     self.webSocketClient = webSocketClient
@@ -83,9 +89,14 @@ actor GatewayTransport: RealtimeTransport {
         }
       },
       onMessage: nil,
+      onClose: { [weak self] closeInfo in
+        Task {
+          await self?.handleWebSocketClose(closeInfo)
+        }
+      },
       onError: { [weak self] error in
         Task {
-          await self?.emit(.error(Self.mapWebSocketError(error)))
+          await self?.handleWebSocketError(error)
         }
       },
       eventLogger: nil
@@ -105,6 +116,7 @@ actor GatewayTransport: RealtimeTransport {
     await webSocketClient.bindHandlers(
       onStateChange: nil,
       onMessage: nil,
+      onClose: nil,
       onError: nil,
       eventLogger: nil
     )
@@ -112,17 +124,142 @@ actor GatewayTransport: RealtimeTransport {
   }
 
   func sendAudio(_ buffer: Data, timestampMs: Int64) async throws {
-    let frame = await MainActor.run {
-      TransportBinaryFrame(
+    audioSendAttemptCount += 1
+    let encodedFrame = await MainActor.run {
+      let frame = TransportBinaryFrame(
         frameType: .clientAudio,
         timestampMs: timestampMs,
         payload: buffer
       )
+      return TransportBinaryFrameCodec.encode(frame)
     }
-    let encoded = await MainActor.run {
-      TransportBinaryFrameCodec.encode(frame)
+    do {
+      if audioSendAttemptCount == 1 || audioSendAttemptCount % 100 == 0 {
+        logger.warning(
+          "send_audio_frame attempts=\(self.audioSendAttemptCount, privacy: .public) payload_bytes=\(buffer.count, privacy: .public) encoded_bytes=\(encodedFrame.count, privacy: .public) timestamp_ms=\(timestampMs, privacy: .public) mode=binary"
+        )
+      } else {
+        logger.debug(
+          "send_audio_frame attempts=\(self.audioSendAttemptCount, privacy: .public) payload_bytes=\(buffer.count, privacy: .public) encoded_bytes=\(encodedFrame.count, privacy: .public) timestamp_ms=\(timestampMs, privacy: .public) mode=binary"
+        )
+      }
+      try await sendRawData(encodedFrame)
+      audioSendCount += 1
+      if audioSendCount == 1 || audioSendCount % 100 == 0 {
+        logger.warning(
+          "sent_audio_frame sent=\(self.audioSendCount, privacy: .public) attempts=\(self.audioSendAttemptCount, privacy: .public) payload_bytes=\(buffer.count, privacy: .public) encoded_bytes=\(encodedFrame.count, privacy: .public) timestamp_ms=\(timestampMs, privacy: .public) mode=binary"
+        )
+      }
+    } catch {
+      logger.error(
+        "failed_audio_frame_send attempts=\(self.audioSendAttemptCount, privacy: .public) sent=\(self.audioSendCount, privacy: .public) payload_bytes=\(buffer.count, privacy: .public) encoded_bytes=\(encodedFrame.count, privacy: .public) timestamp_ms=\(timestampMs, privacy: .public) mode=binary detail=\(String(describing: error), privacy: .public)"
+      )
+      throw error
     }
-    try await sendRawData(encoded)
+  }
+
+  func sendLiveAudio(_ buffer: Data, timestampMs: Int64) async throws {
+    guard let transportConfig else {
+      throw TransportError.disconnected
+    }
+
+    if audioSendAttemptCount == 0 {
+      logger.warning(
+        "send_live_audio_text_path_entered payload_bytes=\(buffer.count, privacy: .public) timestamp_ms=\(timestampMs, privacy: .public)"
+      )
+    } else {
+      logger.debug(
+        "send_live_audio_text_path_entered payload_bytes=\(buffer.count, privacy: .public) timestamp_ms=\(timestampMs, privacy: .public)"
+      )
+    }
+
+    if !didEmitLiveAudioPathMarker {
+      let markerSequence = nextOutboundSequence()
+      let markerEnvelope = await MainActor.run {
+        WSMessageEnvelope(
+          type: "debug.live_audio_path",
+          sessionID: transportConfig.sessionId,
+          seq: markerSequence,
+          payload: JSONValue.object(
+            [
+              "mode": .string("text_base64"),
+              "timestamp_ms": .number(Double(timestampMs))
+            ]
+          )
+        )
+      }
+      let markerEncoded = try await MainActor.run {
+        try WSMessageCodec.encodeEnvelope(markerEnvelope)
+      }
+      guard let markerText = String(data: markerEncoded, encoding: .utf8) else {
+        throw TransportError.protocolError
+      }
+      try await sendRawText(markerText)
+      didEmitLiveAudioPathMarker = true
+    }
+
+    audioSendAttemptCount += 1
+    let audioBase64 = buffer.base64EncodedString()
+    let sequence = nextOutboundSequence()
+    let envelope = await MainActor.run {
+      WSMessageEnvelope(
+        type: "client.audio",
+        sessionID: transportConfig.sessionId,
+        seq: sequence,
+        payload: JSONValue.object(
+          [
+            "audio_b64": .string(audioBase64),
+            "timestamp_ms": .number(Double(timestampMs))
+          ]
+        )
+      )
+    }
+    let encoded = try await MainActor.run {
+      try WSMessageCodec.encodeEnvelope(envelope)
+    }
+    guard let text = String(data: encoded, encoding: .utf8) else {
+      throw TransportError.protocolError
+    }
+
+    do {
+      if audioSendAttemptCount == 1 || audioSendAttemptCount % 100 == 0 {
+        logger.warning(
+          "send_audio_frame attempts=\(self.audioSendAttemptCount, privacy: .public) payload_bytes=\(buffer.count, privacy: .public) encoded_bytes=\(text.utf8.count, privacy: .public) timestamp_ms=\(timestampMs, privacy: .public) mode=text_base64"
+        )
+      } else {
+        logger.debug(
+          "send_audio_frame attempts=\(self.audioSendAttemptCount, privacy: .public) payload_bytes=\(buffer.count, privacy: .public) encoded_bytes=\(text.utf8.count, privacy: .public) timestamp_ms=\(timestampMs, privacy: .public) mode=text_base64"
+        )
+      }
+      try await sendRawText(text)
+      audioSendCount += 1
+      if audioSendCount == 1 || audioSendCount % 100 == 0 {
+        logger.warning(
+          "sent_audio_frame sent=\(self.audioSendCount, privacy: .public) attempts=\(self.audioSendAttemptCount, privacy: .public) payload_bytes=\(buffer.count, privacy: .public) encoded_bytes=\(text.utf8.count, privacy: .public) timestamp_ms=\(timestampMs, privacy: .public) mode=text_base64"
+        )
+      }
+    } catch {
+      logger.error(
+        "failed_audio_frame_send attempts=\(self.audioSendAttemptCount, privacy: .public) sent=\(self.audioSendCount, privacy: .public) payload_bytes=\(buffer.count, privacy: .public) encoded_bytes=\(text.utf8.count, privacy: .public) timestamp_ms=\(timestampMs, privacy: .public) mode=text_base64 detail=\(String(describing: error), privacy: .public)"
+      )
+      throw error
+    }
+  }
+
+  func sendProbe(timestampMs: Int64) async throws {
+    let probePayload = Self.probePayload
+    let encodedFrame = await MainActor.run {
+      let frame = TransportBinaryFrame(
+        frameType: .clientProbe,
+        timestampMs: timestampMs,
+        payload: probePayload
+      )
+      return TransportBinaryFrameCodec.encode(frame)
+    }
+    logger.warning(
+      "send_probe_frame payload_bytes=\(probePayload.count, privacy: .public) encoded_bytes=\(encodedFrame.count, privacy: .public) timestamp_ms=\(timestampMs, privacy: .public)"
+    )
+    try await sendRawData(encodedFrame)
   }
 
   func sendControl(_ message: TransportControlMessage) async throws {
@@ -209,6 +346,18 @@ actor GatewayTransport: RealtimeTransport {
     }
 
     emit(.stateChanged(mappedState))
+  }
+
+  private func handleWebSocketError(_ error: Error) {
+    logger.error("websocket_error detail=\(error.localizedDescription, privacy: .public)")
+    emit(.error(Self.mapWebSocketError(error)))
+  }
+
+  private func handleWebSocketClose(_ closeInfo: TransportSocketCloseInfo) {
+    logger.warning(
+      "websocket_closed connection_id=\(closeInfo.connectionID, privacy: .public) code=\(String(describing: closeInfo.code), privacy: .public) reason=\(closeInfo.reason ?? "-", privacy: .public)"
+    )
+    emit(.closed(closeInfo))
   }
 
   private func sendRawText(_ text: String) async throws {

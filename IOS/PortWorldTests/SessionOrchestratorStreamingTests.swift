@@ -63,6 +63,224 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
     await harness.orchestrator.deactivate()
   }
 
+  func testBufferedRealtimePCMFramesFlushWhenSessionBecomesReady() async throws {
+    let harness = makeHarness()
+
+    await harness.orchestrator.activate()
+    harness.orchestrator.triggerWakeForTesting()
+
+    try await assertEventually {
+      await harness.transport.connectCallCount() == 1
+    }
+
+    await harness.transport.emit(.stateChanged(.connected))
+    harness.orchestrator.processRealtimePCMFrame(Data([0x01, 0x02, 0x03]), timestampMs: 41)
+    let sentAudioCountBeforeReady = await harness.transport.sentAudioCount()
+    XCTAssertEqual(sentAudioCountBeforeReady, 0)
+
+    await harness.transport.emit(
+      .controlReceived(
+        TransportControlMessage(type: "session.state", payload: ["state": .string("active")])
+      )
+    )
+    try await assertEventually {
+      await harness.transport.sentProbeCount() == 1
+    }
+    await harness.transport.emit(
+      .controlReceived(
+        TransportControlMessage(
+          type: "transport.uplink.ack",
+          payload: [
+            "frames_received": .number(0),
+            "bytes_received": .number(0),
+            "probe_acknowledged": .bool(true)
+          ]
+        )
+      )
+    )
+
+    try await assertEventually {
+      await harness.transport.sentAudioCount() == 9
+    }
+    let sentTimestamps = await harness.transport.sentAudioTimestamps()
+    XCTAssertEqual(Array(sentTimestamps.suffix(1)), [Int64(41)])
+
+    await harness.orchestrator.deactivate()
+  }
+
+  func testRealtimeAudioWaitsForProbeAckBeforeFlushingBufferedFrames() async throws {
+    let harness = makeHarness()
+
+    await harness.orchestrator.activate()
+    harness.orchestrator.triggerWakeForTesting()
+
+    try await assertEventually {
+      await harness.transport.connectCallCount() == 1
+    }
+
+    await harness.transport.emit(.stateChanged(.connected))
+    harness.orchestrator.processRealtimePCMFrame(Data([0x0A, 0x0B]), timestampMs: 52)
+    await harness.transport.emit(
+      .controlReceived(
+        TransportControlMessage(type: "session.state", payload: ["state": .string("active")])
+      )
+    )
+
+    try await assertEventually {
+      await harness.transport.sentProbeCount() == 1
+    }
+    let sentAudioCountBeforeAck = await harness.transport.sentAudioCount()
+    XCTAssertEqual(sentAudioCountBeforeAck, 0)
+
+    await harness.transport.emit(
+      .controlReceived(
+        TransportControlMessage(
+          type: "transport.uplink.ack",
+          payload: [
+            "frames_received": .number(0),
+            "bytes_received": .number(0),
+            "probe_acknowledged": .bool(true)
+          ]
+        )
+      )
+    )
+
+    try await assertEventually {
+      await harness.transport.sentAudioCount() == 9
+    }
+
+    await harness.orchestrator.deactivate()
+  }
+
+  func testProbeAckSendsDebugBinaryAndTextSweepFramesBeforeBufferedMicFrames() async throws {
+    let harness = makeHarness()
+
+    await harness.orchestrator.activate()
+    harness.orchestrator.triggerWakeForTesting()
+
+    try await assertEventually {
+      await harness.transport.connectCallCount() == 1
+    }
+
+    await harness.transport.emit(.stateChanged(.connected))
+    await harness.transport.emit(
+      .controlReceived(
+        TransportControlMessage(type: "session.state", payload: ["state": .string("active")])
+      )
+    )
+
+    try await assertEventually {
+      await harness.transport.sentProbeCount() == 1
+    }
+
+    await harness.transport.emit(
+      .controlReceived(
+        TransportControlMessage(
+          type: "transport.uplink.ack",
+          payload: [
+            "frames_received": .number(0),
+            "bytes_received": .number(0),
+            "probe_acknowledged": .bool(true)
+          ]
+        )
+      )
+    )
+
+    try await assertEventually {
+      await harness.transport.sentAudioCount() == 8
+    }
+    try await assertEventually {
+      await harness.transport.sentControlCount(messageType: "debug.payload_sweep") == 6
+    }
+    let sweepSizes = await harness.transport.sentAudioPayloadSizes()
+    XCTAssertEqual(sweepSizes, [16, 64, 256, 512, 1_024, 2_048, 3_072, 4_080])
+
+    await harness.orchestrator.deactivate()
+  }
+
+  func testMissingRealtimeUplinkAckInDebugDoesNotReconnectTransport() async throws {
+    let harness = makeHarness()
+    var snapshots: [SessionOrchestrator.StatusSnapshot] = []
+    harness.orchestrator.onStatusUpdated = { snapshots.append($0) }
+
+    await harness.orchestrator.activate()
+    harness.orchestrator.triggerWakeForTesting()
+
+    try await assertEventually {
+      await harness.transport.connectCallCount() == 1
+    }
+    try await emitConnectedAndWaitForStreamingReadiness(harness)
+
+    harness.orchestrator.processRealtimePCMFrame(Data([0x11, 0x12, 0x13]), timestampMs: 90)
+
+    try await assertEventually(timeout: 2.5) {
+      snapshots.contains(where: {
+        $0.playbackState == "streaming_audio_ack_missing_debug"
+      })
+    }
+    let reconnectError = try await assertEventuallyValue(timeout: 2.5) {
+      let message = snapshots.last?.lastError ?? ""
+      return message.contains("not acknowledged by backend") ? message : nil
+    }
+    XCTAssertTrue(reconnectError.contains("retained the current transport connection"))
+    let disconnectCount = await harness.transport.disconnectCallCount()
+    let connectCount = await harness.transport.connectCallCount()
+    XCTAssertEqual(disconnectCount, 0)
+    XCTAssertEqual(connectCount, 1)
+
+    await harness.orchestrator.deactivate()
+  }
+
+  func testHealthStatsIncludeBackendConfirmedRealtimeUplinkMetrics() async throws {
+    var nowMs: Int64 = 8_000
+    let harness = makeHarness(clock: { nowMs })
+
+    await harness.orchestrator.activate()
+    harness.orchestrator.triggerWakeForTesting()
+    try await assertEventually {
+      await harness.transport.connectCallCount() == 1
+    }
+    try await emitConnectedAndWaitForStreamingReadiness(harness)
+
+    nowMs = 8_050
+    harness.orchestrator.processRealtimePCMFrame(Data([0x21, 0x22, 0x23, 0x24]), timestampMs: 8_050)
+    await harness.transport.emit(
+      .controlReceived(
+        TransportControlMessage(
+          type: "transport.uplink.ack",
+          payload: [
+            "frames_received": .number(1),
+            "bytes_received": .number(4)
+          ]
+        )
+      )
+    )
+
+    nowMs = 8_250
+    harness.orchestrator.handleAppDidEnterBackground()
+
+    let healthMessage = try await assertEventuallyValue {
+      await harness.transport.lastSentControl(messageType: "health.stats")
+    }
+    guard case .number(let confirmedFrames) = healthMessage.payload["realtime_audio_backend_confirmed_frames"] else {
+      XCTFail("Missing realtime_audio_backend_confirmed_frames")
+      return
+    }
+    guard case .number(let confirmedBytes) = healthMessage.payload["realtime_audio_backend_confirmed_bytes"] else {
+      XCTFail("Missing realtime_audio_backend_confirmed_bytes")
+      return
+    }
+    guard case .bool(let uplinkConfirmed) = healthMessage.payload["realtime_uplink_confirmed"] else {
+      XCTFail("Missing realtime_uplink_confirmed")
+      return
+    }
+    XCTAssertEqual(Int(confirmedFrames), 1)
+    XCTAssertEqual(Int(confirmedBytes), 4)
+    XCTAssertTrue(uplinkConfirmed)
+
+    await harness.orchestrator.deactivate()
+  }
+
   func testRealtimePCMUplinkDropsOldestWhenQueueIsSaturated() async throws {
     var nowMs: Int64 = 1_000
     let harness = makeHarness(clock: { nowMs })
@@ -143,7 +361,7 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
     await harness.orchestrator.deactivate()
   }
 
-  func testNetworkUnavailableDisconnectsAndReturnsSnapshotToIdleListening() async throws {
+  func testNetworkUnavailableDisconnectsAndReturnsSnapshotToActiveListening() async throws {
     let harness = makeHarness()
     var snapshots: [SessionOrchestrator.StatusSnapshot] = []
     harness.orchestrator.onStatusUpdated = { snapshots.append($0) }
@@ -166,11 +384,11 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
     await harness.transport.emit(.stateChanged(.disconnected))
 
     try await assertEventually {
-      snapshots.contains(where: { $0.sessionState == .idle && $0.wakeState == .listening })
+      snapshots.contains(where: { $0.sessionState == .active && $0.wakeState == .listening })
     }
 
     let latest = try XCTUnwrap(snapshots.last)
-    XCTAssertEqual(latest.sessionState, .idle)
+    XCTAssertEqual(latest.sessionState, .active)
     XCTAssertEqual(latest.wakeState, .listening)
 
     await harness.orchestrator.deactivate()
@@ -371,7 +589,46 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
     XCTAssertEqual(statsCountAfterDeactivate, statsCountBeforeDeactivate)
   }
 
+  func testSleepDetectionIgnoredWhenStreamHasNotBeenActiveLongEnough() async throws {
+    var nowMs: Int64 = 3_000
+    let harness = makeHarness(
+      config: RuntimeConfig(
+        backendBaseURL: URL(string: "https://example.invalid")!,
+        webSocketURL: URL(string: "wss://example.invalid/ws")!,
+        visionFrameURL: URL(string: "https://example.invalid/vision")!,
+        queryURL: URL(string: "https://example.invalid/query")!,
+        wakeWordMode: .manualOnly,
+        sleepWordMinActiveStreamMs: 1_500
+      ),
+      clock: { nowMs }
+    )
+
+    await harness.orchestrator.activate()
+    harness.orchestrator.triggerWakeForTesting()
+    try await assertEventually {
+      await harness.transport.connectCallCount() == 1
+    }
+    await harness.transport.emit(.stateChanged(.connected))
+    try await assertEventually {
+      await harness.transport.lastKnownTransportState() == .connected
+    }
+
+    nowMs = 3_500
+    await harness.orchestrator.triggerSleepForTesting(phrase: "goodbye mario", timestampMs: nowMs)
+    let disconnectCountTooEarly = await harness.transport.disconnectCallCount()
+    XCTAssertEqual(disconnectCountTooEarly, 0)
+
+    nowMs = 4_700
+    await harness.orchestrator.triggerSleepForTesting(phrase: "goodbye mario", timestampMs: nowMs)
+    try await assertEventually {
+      await harness.transport.disconnectCallCount() == 1
+    }
+
+    await harness.orchestrator.deactivate()
+  }
+
   private func makeHarness(
+    config: RuntimeConfig? = nil,
     clock: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) },
     eventSink: ((String) -> Void)? = nil
   ) -> Harness {
@@ -380,7 +637,7 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
     let videoBuffer = MockRollingVideoBuffer()
     let playback = MockPlaybackEngine()
 
-    let config = RuntimeConfig(
+    let config = config ?? RuntimeConfig(
       backendBaseURL: URL(string: "https://example.invalid")!,
       webSocketURL: URL(string: "wss://example.invalid/ws")!,
       visionFrameURL: URL(string: "https://example.invalid/vision")!,
@@ -433,10 +690,38 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
     }
 
     await harness.transport.emit(.stateChanged(.connected))
+    await harness.transport.emit(
+      .controlReceived(
+        TransportControlMessage(type: "session.state", payload: ["state": .string("active")])
+      )
+    )
+    try await assertEventually {
+      await harness.transport.sentProbeCount() == 1
+    }
+    await harness.transport.emit(
+      .controlReceived(
+        TransportControlMessage(
+          type: "transport.uplink.ack",
+          payload: [
+            "frames_received": .number(0),
+            "bytes_received": .number(0),
+            "probe_acknowledged": .bool(true)
+          ]
+        )
+      )
+    )
 
     try await assertEventually {
       observedStreaming
     }
+
+    try await assertEventually {
+      await harness.transport.sentAudioCount() == 8
+    }
+    try await assertEventually {
+      await harness.transport.sentControlCount(messageType: "debug.payload_sweep") == 6
+    }
+    await harness.transport.clearSentAudioForTesting()
   }
 
   private func waitForControlReceivedEventLog(
@@ -545,12 +830,14 @@ private actor MockRealtimeTransport: RealtimeTransport {
   private var rejectControlsWithDisconnected = false
   private var callEvents: [CallEvent] = []
   private var nextCallSequence = 1
+  private var observedTransportState: TransportState = .disconnected
 
   struct SentAudio: Sendable {
     let buffer: Data
     let timestampMs: Int64
   }
   private(set) var sentAudio: [SentAudio] = []
+  private(set) var sentProbeTimestamps: [Int64] = []
 
   let events: AsyncStream<TransportEvent>
   private let continuation: AsyncStream<TransportEvent>.Continuation
@@ -585,6 +872,10 @@ private actor MockRealtimeTransport: RealtimeTransport {
     sentAudio.append(SentAudio(buffer: buffer, timestampMs: timestampMs))
   }
 
+  func sendProbe(timestampMs: Int64) async throws {
+    sentProbeTimestamps.append(timestampMs)
+  }
+
   func sendControl(_ message: TransportControlMessage) async throws {
     let messageType = message.type
     if rejectControlsWithDisconnected {
@@ -595,6 +886,9 @@ private actor MockRealtimeTransport: RealtimeTransport {
   }
 
   func emit(_ event: TransportEvent) {
+    if case .stateChanged(let state) = event {
+      observedTransportState = state
+    }
     continuation.yield(event)
   }
 
@@ -608,6 +902,10 @@ private actor MockRealtimeTransport: RealtimeTransport {
 
   func sentAudioCount() -> Int {
     sentAudio.count
+  }
+
+  func sentProbeCount() -> Int {
+    sentProbeTimestamps.count
   }
 
   func sentControlCount(messageType: String) async -> Int {
@@ -636,6 +934,10 @@ private actor MockRealtimeTransport: RealtimeTransport {
     sentAudio.map(\.timestampMs)
   }
 
+  func sentAudioPayloadSizes() -> [Int] {
+    sentAudio.map { $0.buffer.count }
+  }
+
   func sentAudioSince(_ index: Int) -> [SentAudio] {
     guard index >= 0 else { return sentAudio }
     guard index < sentAudio.count else { return [] }
@@ -660,6 +962,10 @@ private actor MockRealtimeTransport: RealtimeTransport {
 
   func recordedCallEvents() -> [CallEvent] {
     callEvents
+  }
+
+  func lastKnownTransportState() -> TransportState {
+    observedTransportState
   }
 
   private func appendCallEvent(_ name: String) {

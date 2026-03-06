@@ -1,5 +1,6 @@
 import AVFAudio
 import Foundation
+import OSLog
 import Speech
 
 struct WakeWordDetectionEvent {
@@ -311,6 +312,11 @@ final class SFSpeechWakeWordEngine: NSObject, WakeWordEngine {
   private let recognitionRequestFactory: RecognitionRequestFactory
   private let recognitionTaskFactory: RecognitionTaskFactory
   private let maxConsecutiveRecognitionErrors: Int = 5
+  private static let logger = Logger(subsystem: "PortWorld", category: "WakeWordEngine")
+  private static let noSpeechDetectedErrorDomain = "kAFAssistantErrorDomain"
+  private static let noSpeechDetectedErrorCode = 1_110
+  private static let speechErrorDomain = "SFSpeechErrorDomain"
+  private static let noSpeechDetectedMessageFragment = "no speech detected"
   private var recognizer: (any WakeWordSpeechRecognizer)?
   private var recognitionRequest: (any WakeWordSpeechRecognitionRequest)?
   private var recognitionTask: (any WakeWordSpeechRecognitionTask)?
@@ -492,7 +498,7 @@ final class SFSpeechWakeWordEngine: NSObject, WakeWordEngine {
           let detectedSleep = normalizedSleepPhrase.map { transcript.contains($0) } ?? false
           let detectedWake = transcript.contains(normalizedWakePhrase)
 
-          if detectedSleep, let sleepPhrase {
+          if detectedSleep, update.isFinal, let sleepPhrase {
             lastDetectionTimestampMs = now
             onSleepDetected?(
               WakeWordDetectionEvent(
@@ -524,6 +530,20 @@ final class SFSpeechWakeWordEngine: NSObject, WakeWordEngine {
     }
 
     if let error {
+      if let transientError = Self.transientRecognitionError(from: error) {
+        Self.debugLogTransientRecognitionError(transientError)
+        if isListening {
+          guard startRecognitionTaskLocked() else {
+            failRecognitionStartLocked(detail: "Failed to restart speech recognition task after transient recognition error")
+            onError?(WakeWordEngineError.recognitionTaskCreationFailed)
+            return
+          }
+          runtimeStatus = .listening
+          publishStatus(authorization: authorization, runtime: .listening)
+        }
+        return
+      }
+
       onError?(error)
       if isListening {
         consecutiveRecognitionErrorCount += 1
@@ -549,6 +569,38 @@ final class SFSpeechWakeWordEngine: NSObject, WakeWordEngine {
         publishStatus(authorization: authorization, runtime: .listening)
       }
     }
+  }
+
+  private static func transientRecognitionError(from error: Error) -> NSError? {
+    let nsError = error as NSError
+    if isTransientRecognitionNSError(nsError) {
+      return nsError
+    }
+    if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError,
+       isTransientRecognitionNSError(underlying) {
+      return underlying
+    }
+    return nil
+  }
+
+  private static func isTransientRecognitionNSError(_ error: NSError) -> Bool {
+    if error.domain == noSpeechDetectedErrorDomain, error.code == noSpeechDetectedErrorCode {
+      return true
+    }
+
+    guard error.domain == noSpeechDetectedErrorDomain || error.domain == speechErrorDomain else {
+      return false
+    }
+    let description = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return description.contains(noSpeechDetectedMessageFragment)
+  }
+
+  private static func debugLogTransientRecognitionError(_ error: NSError) {
+#if DEBUG
+    logger.debug(
+      "[SFSpeechWakeWordEngine] Suppressed transient recognition error domain=\(error.domain, privacy: .public) code=\(error.code, privacy: .public) description=\(error.localizedDescription, privacy: .public)"
+    )
+#endif
   }
 
   private func failRecognitionStartLocked(detail: String) {

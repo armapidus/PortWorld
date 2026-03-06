@@ -8,6 +8,8 @@ final class SessionViewModel {
   private let preferSpeakerOutput: Bool
   private let deviceSessionCoordinator: DeviceSessionCoordinator
   private var runtimeCoordinator: RuntimeCoordinator
+  private var isActivationInProgress = false
+  private var runtimeCoordinatorIsActivated = false
 
   init(
     wearables: WearablesInterface,
@@ -35,7 +37,16 @@ final class SessionViewModel {
 
   func activateAssistantRuntime() async {
     guard store.canActivateAssistantRuntime else { return }
-    if !store.isStreaming {
+    guard !isActivationInProgress else { return }
+    isActivationInProgress = true
+    defer { isActivationInProgress = false }
+
+    if runtimeCoordinatorIsActivated {
+      await runtimeCoordinator.deactivate()
+      runtimeCoordinatorIsActivated = false
+    }
+
+    if !runtimeCoordinatorIsActivated && !store.isStreaming {
       let runtimeConfig = RuntimeConfig.load()
       runtimeCoordinator = RuntimeCoordinator(
         store: store,
@@ -58,6 +69,7 @@ final class SessionViewModel {
       }
       await runtimeCoordinator.preflightWakeAuthorization()
       await runtimeCoordinator.activate()
+      runtimeCoordinatorIsActivated = true
     } catch {
       store.errorMessage = "Permission error: \(error.localizedDescription)"
       store.showError = true
@@ -69,10 +81,12 @@ final class SessionViewModel {
 
   func deactivateAssistantRuntime() async {
     guard store.canDeactivateAssistantRuntime else { return }
+    isActivationInProgress = false
 
     store.assistantRuntimeState = .deactivating
     store.runtimeSessionStateText = "deactivating"
     await runtimeCoordinator.deactivate()
+    runtimeCoordinatorIsActivated = false
     store.assistantRuntimeState = .inactive
     store.runtimeSessionStateText = "inactive"
   }

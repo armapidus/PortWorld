@@ -274,6 +274,8 @@ private struct RuntimeStatusPanelView: View {
       RuntimeMetricRow(label: "Photo Uploads", value: "\(store.runtimePhotoUploadCount)")
       RuntimeMetricRow(label: "Playback Chunks", value: "\(store.runtimePlaybackChunkCount)")
       RuntimeMetricRow(label: "Video Frames Routed", value: "\(store.runtimeVideoFrameCount)")
+      RuntimeMetricRow(label: "First Frame Wait", value: store.firstFrameWaitStatusText)
+      RuntimeMetricRow(label: "First Frame Updated", value: store.firstFrameWaitTimestampText)
 
       Divider().background(Color.white.opacity(0.2))
 
