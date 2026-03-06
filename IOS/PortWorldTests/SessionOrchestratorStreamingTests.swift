@@ -84,23 +84,11 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
       )
     )
     try await assertEventually {
-      await harness.transport.sentProbeCount() == 1
+      await harness.transport.sentProbeCount() == 0
     }
-    await harness.transport.emit(
-      .controlReceived(
-        TransportControlMessage(
-          type: "transport.uplink.ack",
-          payload: [
-            "frames_received": .number(0),
-            "bytes_received": .number(0),
-            "probe_acknowledged": .bool(true)
-          ]
-        )
-      )
-    )
 
     try await assertEventually {
-      await harness.transport.sentAudioCount() == 9
+      await harness.transport.sentAudioCount() == 1
     }
     let sentTimestamps = await harness.transport.sentAudioTimestamps()
     XCTAssertEqual(Array(sentTimestamps.suffix(1)), [Int64(41)])
@@ -109,7 +97,7 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
   }
 
   func testRealtimeAudioWaitsForProbeAckBeforeFlushingBufferedFrames() async throws {
-    let harness = makeHarness()
+    let harness = makeHarness(realtimeDiagnosticsEnabled: true)
 
     await harness.orchestrator.activate()
     harness.orchestrator.triggerWakeForTesting()
@@ -152,8 +140,8 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
     await harness.orchestrator.deactivate()
   }
 
-  func testProbeAckSendsDebugBinaryAndTextSweepFramesBeforeBufferedMicFrames() async throws {
-    let harness = makeHarness()
+  func testProbeAckSendsDebugBinarySweepFramesBeforeBufferedMicFrames() async throws {
+    let harness = makeHarness(realtimeDiagnosticsEnabled: true)
 
     await harness.orchestrator.activate()
     harness.orchestrator.triggerWakeForTesting()
@@ -190,7 +178,7 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
       await harness.transport.sentAudioCount() == 8
     }
     try await assertEventually {
-      await harness.transport.sentControlCount(messageType: "debug.payload_sweep") == 6
+      await harness.transport.sentControlCount(messageType: "debug.payload_sweep") == 0
     }
     let sweepSizes = await harness.transport.sentAudioPayloadSizes()
     XCTAssertEqual(sweepSizes, [16, 64, 256, 512, 1_024, 2_048, 3_072, 4_080])
@@ -629,6 +617,7 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
 
   private func makeHarness(
     config: RuntimeConfig? = nil,
+    realtimeDiagnosticsEnabled: Bool = false,
     clock: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) },
     eventSink: ((String) -> Void)? = nil
   ) -> Harness {
@@ -641,6 +630,7 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
       backendBaseURL: URL(string: "https://example.invalid")!,
       webSocketURL: URL(string: "wss://example.invalid/ws")!,
       visionFrameURL: URL(string: "https://example.invalid/vision")!,
+      realtimeDiagnosticsEnabled: realtimeDiagnosticsEnabled,
       queryURL: URL(string: "https://example.invalid/query")!,
       wakeWordMode: .manualOnly
     )
@@ -666,7 +656,8 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
 
     let harness = Harness(
       orchestrator: SessionOrchestrator(config: config, dependencies: deps),
-      transport: transport
+      transport: transport,
+      realtimeDiagnosticsEnabled: config.realtimeDiagnosticsEnabled
     )
     registerHarnessTeardown(harness)
     return harness
@@ -695,31 +686,39 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
         TransportControlMessage(type: "session.state", payload: ["state": .string("active")])
       )
     )
-    try await assertEventually {
-      await harness.transport.sentProbeCount() == 1
-    }
-    await harness.transport.emit(
-      .controlReceived(
-        TransportControlMessage(
-          type: "transport.uplink.ack",
-          payload: [
-            "frames_received": .number(0),
-            "bytes_received": .number(0),
-            "probe_acknowledged": .bool(true)
-          ]
+    if harness.realtimeDiagnosticsEnabled {
+      try await assertEventually {
+        await harness.transport.sentProbeCount() == 1
+      }
+      await harness.transport.emit(
+        .controlReceived(
+          TransportControlMessage(
+            type: "transport.uplink.ack",
+            payload: [
+              "frames_received": .number(0),
+              "bytes_received": .number(0),
+              "probe_acknowledged": .bool(true)
+            ]
+          )
         )
       )
-    )
+    } else {
+      try await assertEventually {
+        await harness.transport.sentProbeCount() == 0
+      }
+    }
 
     try await assertEventually {
       observedStreaming
     }
 
-    try await assertEventually {
-      await harness.transport.sentAudioCount() == 8
-    }
-    try await assertEventually {
-      await harness.transport.sentControlCount(messageType: "debug.payload_sweep") == 6
+    if harness.realtimeDiagnosticsEnabled {
+      try await assertEventually {
+        await harness.transport.sentAudioCount() == 8
+      }
+      try await assertEventually {
+        await harness.transport.sentControlCount(messageType: "debug.payload_sweep") == 0
+      }
     }
     await harness.transport.clearSentAudioForTesting()
   }
@@ -811,6 +810,7 @@ final class SessionOrchestratorStreamingTests: XCTestCase {
   private struct Harness {
     let orchestrator: SessionOrchestrator
     let transport: MockRealtimeTransport
+    let realtimeDiagnosticsEnabled: Bool
   }
 
 }

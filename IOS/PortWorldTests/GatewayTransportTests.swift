@@ -102,6 +102,28 @@ final class GatewayTransportTests: XCTestCase {
     XCTAssertEqual(decoded.payload, payload)
   }
 
+  func testSendLiveAudioWritesClientBinaryFrameTypeToRawSentData() async throws {
+    let webSocket = MockSessionWebSocketClient()
+    let transport = GatewayTransport(webSocketClient: webSocket)
+    try await transport.connect(config: Self.makeConfig())
+
+    let payload = Data([0xAA, 0xBB, 0xCC])
+    let timestamp: Int64 = 314
+    try await transport.sendLiveAudio(payload, timestampMs: timestamp)
+
+    let sentData = await webSocket.lastSentData()
+    let sent = try XCTUnwrap(sentData)
+    XCTAssertEqual(sent.first, TransportBinaryFraming.clientAudioTypeByte)
+
+    let decoded = try TransportBinaryFrameCodec.decode(sent)
+    XCTAssertEqual(decoded.frameType, .clientAudio)
+    XCTAssertEqual(decoded.timestampMs, timestamp)
+    XCTAssertEqual(decoded.payload, payload)
+
+    let sentText = await webSocket.lastSentText()
+    XCTAssertNil(sentText)
+  }
+
   func testSendProbeWritesClientProbeFrameTypeToRawSentData() async throws {
     let webSocket = MockSessionWebSocketClient()
     let transport = GatewayTransport(webSocketClient: webSocket)

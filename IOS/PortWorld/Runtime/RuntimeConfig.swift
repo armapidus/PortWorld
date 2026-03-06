@@ -11,6 +11,9 @@ public struct RuntimeConfig {
   public let backendBaseURL: URL
   public let webSocketURL: URL
   public let visionFrameURL: URL
+  public let realtimeDiagnosticsEnabled: Bool
+  /// Legacy batch `/query` endpoint retained for compatibility.
+  /// In Phase 6 realtime mode this endpoint is inactive on the primary path.
   public let queryURL: URL
   public let apiKey: String
   public let bearerToken: String
@@ -35,6 +38,7 @@ public struct RuntimeConfig {
     backendBaseURL: URL,
     webSocketURL: URL,
     visionFrameURL: URL,
+    realtimeDiagnosticsEnabled: Bool = false,
     queryURL: URL,
     apiKey: String = "",
     bearerToken: String = "",
@@ -55,6 +59,7 @@ public struct RuntimeConfig {
     self.backendBaseURL = backendBaseURL
     self.webSocketURL = webSocketURL
     self.visionFrameURL = visionFrameURL
+    self.realtimeDiagnosticsEnabled = realtimeDiagnosticsEnabled
     self.queryURL = queryURL
     self.apiKey = apiKey
     self.bearerToken = bearerToken
@@ -87,7 +92,7 @@ public struct RuntimeConfig {
   }
 
   public var backendSummary: String {
-    "base=\(backendBaseURL.absoluteString) ws=\(webSocketURL.absoluteString) vision=\(visionFrameURL.absoluteString) query=\(queryURL.absoluteString)"
+    "base=\(backendBaseURL.absoluteString) ws=\(webSocketURL.absoluteString) vision=\(visionFrameURL.absoluteString)"
   }
 
   public static func load(from bundle: Bundle = .main) -> RuntimeConfig {
@@ -125,6 +130,7 @@ public struct RuntimeConfig {
       backendBaseURL: backendBaseURL,
       webSocketURL: explicitWSURL ?? deriveWebSocketURL(baseURL: backendBaseURL, path: wsPath),
       visionFrameURL: explicitVisionURL ?? appendPath(path: visionPath, to: backendBaseURL),
+      realtimeDiagnosticsEnabled: resolveRealtimeDiagnosticsEnabled(bundle: bundle, userDefaults: userDefaults),
       queryURL: explicitQueryURL ?? appendPath(path: queryPath, to: backendBaseURL),
       apiKey: resolveAPIKey(bundle: bundle, userDefaults: userDefaults),
       bearerToken: resolveString(infoPlistKey: "SON_BEARER_TOKEN", defaultValue: "", bundle: bundle),
@@ -217,6 +223,13 @@ public struct RuntimeConfig {
     return 5_000
   }
 
+  private static func resolveRealtimeDiagnosticsEnabled(bundle: Bundle, userDefaults: UserDefaults) -> Bool {
+    if let override = resolveUserDefaultsBool(key: "portworld.realtimeDiagnosticsEnabled", userDefaults: userDefaults) {
+      return override
+    }
+    return resolveOptionalBool(infoPlistKey: "SON_REALTIME_DIAGNOSTICS_ENABLED", bundle: bundle) ?? false
+  }
+
   private static func resolveWakePhrase(bundle: Bundle, userDefaults: UserDefaults) -> String {
     if let rawOverride = userDefaults.object(forKey: "portworld.wakePhrase") as? String {
       let trimmedOverride = rawOverride.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -246,6 +259,29 @@ public struct RuntimeConfig {
     return nil
   }
 
+  private static func resolveUserDefaultsBool(key: String, userDefaults: UserDefaults) -> Bool? {
+    guard userDefaults.object(forKey: key) != nil else {
+      return nil
+    }
+
+    if let raw = userDefaults.object(forKey: key) as? NSNumber {
+      return raw.boolValue
+    }
+
+    if let raw = userDefaults.string(forKey: key) {
+      switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+      case "1", "true", "yes", "y", "on":
+        return true
+      case "0", "false", "no", "n", "off":
+        return false
+      default:
+        return nil
+      }
+    }
+
+    return nil
+  }
+
   private static func resolveOptionalInt(infoPlistKey: String, bundle: Bundle) -> Int? {
     if let raw = bundle.object(forInfoDictionaryKey: infoPlistKey) as? NSNumber {
       return raw.intValue
@@ -255,6 +291,25 @@ public struct RuntimeConfig {
        let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines))
     {
       return parsed
+    }
+
+    return nil
+  }
+
+  private static func resolveOptionalBool(infoPlistKey: String, bundle: Bundle) -> Bool? {
+    if let raw = bundle.object(forInfoDictionaryKey: infoPlistKey) as? NSNumber {
+      return raw.boolValue
+    }
+
+    if let raw = bundle.object(forInfoDictionaryKey: infoPlistKey) as? String {
+      switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+      case "1", "true", "yes", "y", "on":
+        return true
+      case "0", "false", "no", "n", "off":
+        return false
+      default:
+        return nil
+      }
     }
 
     return nil

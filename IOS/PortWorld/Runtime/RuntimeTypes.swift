@@ -85,6 +85,8 @@ public enum RuntimeState: String, Codable {
   }
 }
 
+/// Legacy batch-era metadata used by `POST /query` style uploads.
+/// Phase 6 realtime transport keeps this shape for compatibility but does not send it on the active WS streaming path.
 public struct QueryMetadata: Codable {
   public enum TriggerSource: String, Codable {
     case manual
@@ -518,6 +520,8 @@ public enum WSOutboundType: String, Codable {
   case sessionActivate = "session.activate"
   case sessionDeactivate = "session.deactivate"
   case wakewordDetected = "wakeword.detected"
+  // Legacy batch-era query lifecycle events. Retained for compatibility and observability only.
+  // In Phase 6 realtime streaming, these are not part of the active outbound transport contract.
   case queryStarted = "query.started"
   case queryEnded = "query.ended"
   case queryBundleUploaded = "query.bundle.uploaded"

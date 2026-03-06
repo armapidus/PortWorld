@@ -12,7 +12,6 @@ actor GatewayTransport: RealtimeTransport {
   private var outboundSequence = 0
   private var audioSendAttemptCount = 0
   private var audioSendCount = 0
-  private var didEmitLiveAudioPathMarker = false
 
   init(webSocketClient: SessionWebSocketClientProtocol) {
     self.webSocketClient = webSocketClient
@@ -159,91 +158,7 @@ actor GatewayTransport: RealtimeTransport {
   }
 
   func sendLiveAudio(_ buffer: Data, timestampMs: Int64) async throws {
-    guard let transportConfig else {
-      throw TransportError.disconnected
-    }
-
-    if audioSendAttemptCount == 0 {
-      logger.warning(
-        "send_live_audio_text_path_entered payload_bytes=\(buffer.count, privacy: .public) timestamp_ms=\(timestampMs, privacy: .public)"
-      )
-    } else {
-      logger.debug(
-        "send_live_audio_text_path_entered payload_bytes=\(buffer.count, privacy: .public) timestamp_ms=\(timestampMs, privacy: .public)"
-      )
-    }
-
-    if !didEmitLiveAudioPathMarker {
-      let markerSequence = nextOutboundSequence()
-      let markerEnvelope = await MainActor.run {
-        WSMessageEnvelope(
-          type: "debug.live_audio_path",
-          sessionID: transportConfig.sessionId,
-          seq: markerSequence,
-          payload: JSONValue.object(
-            [
-              "mode": .string("text_base64"),
-              "timestamp_ms": .number(Double(timestampMs))
-            ]
-          )
-        )
-      }
-      let markerEncoded = try await MainActor.run {
-        try WSMessageCodec.encodeEnvelope(markerEnvelope)
-      }
-      guard let markerText = String(data: markerEncoded, encoding: .utf8) else {
-        throw TransportError.protocolError
-      }
-      try await sendRawText(markerText)
-      didEmitLiveAudioPathMarker = true
-    }
-
-    audioSendAttemptCount += 1
-    let audioBase64 = buffer.base64EncodedString()
-    let sequence = nextOutboundSequence()
-    let envelope = await MainActor.run {
-      WSMessageEnvelope(
-        type: "client.audio",
-        sessionID: transportConfig.sessionId,
-        seq: sequence,
-        payload: JSONValue.object(
-          [
-            "audio_b64": .string(audioBase64),
-            "timestamp_ms": .number(Double(timestampMs))
-          ]
-        )
-      )
-    }
-    let encoded = try await MainActor.run {
-      try WSMessageCodec.encodeEnvelope(envelope)
-    }
-    guard let text = String(data: encoded, encoding: .utf8) else {
-      throw TransportError.protocolError
-    }
-
-    do {
-      if audioSendAttemptCount == 1 || audioSendAttemptCount % 100 == 0 {
-        logger.warning(
-          "send_audio_frame attempts=\(self.audioSendAttemptCount, privacy: .public) payload_bytes=\(buffer.count, privacy: .public) encoded_bytes=\(text.utf8.count, privacy: .public) timestamp_ms=\(timestampMs, privacy: .public) mode=text_base64"
-        )
-      } else {
-        logger.debug(
-          "send_audio_frame attempts=\(self.audioSendAttemptCount, privacy: .public) payload_bytes=\(buffer.count, privacy: .public) encoded_bytes=\(text.utf8.count, privacy: .public) timestamp_ms=\(timestampMs, privacy: .public) mode=text_base64"
-        )
-      }
-      try await sendRawText(text)
-      audioSendCount += 1
-      if audioSendCount == 1 || audioSendCount % 100 == 0 {
-        logger.warning(
-          "sent_audio_frame sent=\(self.audioSendCount, privacy: .public) attempts=\(self.audioSendAttemptCount, privacy: .public) payload_bytes=\(buffer.count, privacy: .public) encoded_bytes=\(text.utf8.count, privacy: .public) timestamp_ms=\(timestampMs, privacy: .public) mode=text_base64"
-        )
-      }
-    } catch {
-      logger.error(
-        "failed_audio_frame_send attempts=\(self.audioSendAttemptCount, privacy: .public) sent=\(self.audioSendCount, privacy: .public) payload_bytes=\(buffer.count, privacy: .public) encoded_bytes=\(text.utf8.count, privacy: .public) timestamp_ms=\(timestampMs, privacy: .public) mode=text_base64 detail=\(String(describing: error), privacy: .public)"
-      )
-      throw error
-    }
+    try await sendAudio(buffer, timestampMs: timestampMs)
   }
 
   func sendProbe(timestampMs: Int64) async throws {

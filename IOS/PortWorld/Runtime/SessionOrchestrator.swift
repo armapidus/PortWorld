@@ -361,21 +361,6 @@ final class SessionOrchestrator {
   private static let realtimeUplinkChannels = 1
   private static let realtimeUplinkSampleRate = 24_000
   private static let realtimeDebugBinarySweepSizes = [16, 64, 256, 512, 1_024, 2_048, 3_072, 4_080]
-  private static let realtimeDebugTextSweepSizes = [16, 64, 256, 512, 1_024, 2_048]
-  private static let realtimeUplinkProbeEnabled: Bool = {
-#if DEBUG
-    true
-#else
-    false
-#endif
-  }()
-  private static let realtimeDebugPayloadSweepEnabled: Bool = {
-#if DEBUG
-    true
-#else
-    false
-#endif
-  }()
   private static let realtimeUplinkAckTimeoutReconnectEnabled: Bool = {
 #if DEBUG
     false
@@ -473,6 +458,9 @@ final class SessionOrchestrator {
   private var lastLoggedErrorTsMs: Int64 = 0
   private var lastRealtimePCMDeferralLogKey = ""
   private let logger = Logger(subsystem: "PortWorld", category: "SessionOrchestrator")
+  private var realtimeDiagnosticsEnabled: Bool {
+    config.realtimeDiagnosticsEnabled
+  }
 
   init(config: RuntimeConfig, dependencies: Dependencies) {
     self.config = config
@@ -563,17 +551,10 @@ final class SessionOrchestrator {
       capacity: Self.realtimePCMUplinkQueueLimit,
       sendFrame: { [weak self] frame in
         guard !frame.payload.isEmpty else { return }
-        if let self, !self.didEmitRealtimeWorkerPathMarker {
-          self.didEmitRealtimeWorkerPathMarker = true
-          try await realtimeTransport.sendControl(
-            TransportControlMessage(
-              type: "debug.worker_live_audio_path",
-              payload: [
-                "mode": .string("worker_send_frame"),
-                "payload_bytes": .number(Double(frame.payload.count)),
-                "timestamp_ms": .number(Double(frame.timestampMs))
-              ]
-            )
+        if let self {
+          try await self.emitRealtimeWorkerPathMarkerIfNeeded(
+            using: realtimeTransport,
+            frame: frame
           )
         }
         try await sendLiveFrame(frame)
@@ -593,6 +574,24 @@ final class SessionOrchestrator {
           self?.setError("Failed to send realtime audio: \(String(describing: error))")
         }
       }
+    )
+  }
+
+  private func emitRealtimeWorkerPathMarkerIfNeeded(
+    using realtimeTransport: RealtimeTransport,
+    frame: RealtimePCMUplinkWorker.Frame
+  ) async throws {
+    guard !didEmitRealtimeWorkerPathMarker else { return }
+    didEmitRealtimeWorkerPathMarker = true
+    try await realtimeTransport.sendControl(
+      TransportControlMessage(
+        type: "debug.worker_live_audio_path",
+        payload: [
+          "mode": .string("worker_send_frame"),
+          "payload_bytes": .number(Double(frame.payload.count)),
+          "timestamp_ms": .number(Double(frame.timestampMs))
+        ]
+      )
     )
   }
 
@@ -1367,7 +1366,7 @@ final class SessionOrchestrator {
   }
 
   private func sendRealtimeUplinkProbeIfNeeded() async -> Bool {
-    guard Self.realtimeUplinkProbeEnabled else { return false }
+    guard realtimeDiagnosticsEnabled else { return false }
     guard realtimeServerSessionReady else { return false }
     guard !realtimeSessionReady else { return false }
     guard !realtimeUplinkProbeAcknowledged else { return false }
@@ -1394,7 +1393,7 @@ final class SessionOrchestrator {
     flushBufferedFrames: Bool = true
   ) {
     guard realtimeServerSessionReady else { return }
-    if Self.realtimeUplinkProbeEnabled && !realtimeUplinkProbeAcknowledged {
+    if realtimeDiagnosticsEnabled && !realtimeUplinkProbeAcknowledged {
       return
     }
     realtimeSessionReady = true
@@ -1407,7 +1406,7 @@ final class SessionOrchestrator {
   }
 
   private func sendDebugPayloadSweepIfNeeded() async {
-    guard Self.realtimeDebugPayloadSweepEnabled else { return }
+    guard realtimeDiagnosticsEnabled else { return }
     guard realtimeSessionReady else { return }
     guard !realtimeDebugPayloadSweepSent else { return }
     guard let realtimeTransport else { return }
@@ -1429,33 +1428,6 @@ final class SessionOrchestrator {
         try await realtimeTransport.sendAudio(payload, timestampMs: timestampMs)
       } catch {
         setError("Failed to send realtime binary sweep frame: \(error.localizedDescription)")
-        break
-      }
-    }
-
-    for (index, size) in Self.realtimeDebugTextSweepSizes.enumerated() {
-      let payload = String(repeating: "A", count: size)
-      await logEvent(
-        name: "realtime.uplink.text_sweep_sent",
-        fields: [
-          "index": .number(Double(index)),
-          "payload_bytes": .number(Double(size))
-        ]
-      )
-      do {
-        try await realtimeTransport.sendControl(
-          TransportControlMessage(
-            type: "debug.payload_sweep",
-            payload: [
-              "mode": .string("text"),
-              "index": .number(Double(index)),
-              "payload_bytes": .number(Double(size)),
-              "blob": .string(payload)
-            ]
-          )
-        )
-      } catch {
-        setError("Failed to send realtime text sweep frame: \(error.localizedDescription)")
         break
       }
     }
