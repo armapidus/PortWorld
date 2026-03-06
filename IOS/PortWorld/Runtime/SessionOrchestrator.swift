@@ -514,7 +514,9 @@ final class SessionOrchestrator {
     configurePlaybackEngine()
   }
 
-  private func configureConversationServicesIfNeeded() async {
+  private func ensureConversationServicesForActiveSession() async {
+    guard activeSessionID != nil else { return }
+
     if realtimeTransport == nil {
       realtimeTransport = dependencies.makeRealtimeTransport(config)
       realtimePCMUplinkWorker = makeRealtimePCMUplinkWorker()
@@ -536,6 +538,47 @@ final class SessionOrchestrator {
 
     if rollingVideoBuffer == nil {
       rollingVideoBuffer = dependencies.makeRollingVideoBuffer(config)
+    }
+  }
+
+  private func releaseConversationResources(
+    clearSessionID: Bool,
+    disconnectTransport: Bool = true
+  ) async {
+    transportEventsTask?.cancel()
+    transportEventsTask = nil
+    realtimePCMUplinkWorker?.stopAndReset()
+    realtimePCMUplinkWorker = nil
+
+    if let visionFrameUploader {
+      await visionFrameUploader.stop()
+    }
+    if let rollingVideoBuffer {
+      await rollingVideoBuffer.clear()
+    }
+    visionFrameUploader = nil
+    rollingVideoBuffer = nil
+    if disconnectTransport, let realtimeTransport {
+      await realtimeTransport.disconnect()
+    }
+    realtimeTransport = nil
+    realtimeTransportSendSuccessLogCount = 0
+
+    wantsRealtimeStreaming = false
+    isRealtimeUplinkActive = false
+    isTransportDisconnecting = false
+    reconnectOnNetworkRestore = false
+    pendingSessionActivateForConnection = false
+    lastRealtimeConnectedAtMs = nil
+    clearRealtimePrerollBuffer()
+    resetRealtimeUplinkState(keepRecoveryAttempt: realtimeUplinkAckRecoveryAttempted)
+    lastRealtimePCMDeferralLogKey = ""
+
+    if clearSessionID {
+      activeSessionID = nil
+      snapshot.sessionID = "-"
+      snapshot.queryID = "-"
+      outboundMessageBuffer.removeAll(keepingCapacity: false)
     }
   }
 
@@ -686,30 +729,15 @@ final class SessionOrchestrator {
     snapshot.sessionState = .disconnecting
     snapshot.playbackState = "disconnecting"
     publishSnapshot()
-    transportEventsTask?.cancel()
-    transportEventsTask = nil
-    realtimePCMUplinkWorker?.stopAndReset()
-    realtimePCMUplinkWorker = nil
-    if let realtimeTransport {
-      await realtimeTransport.disconnect()
-    }
-    transportState = .disconnected
+    await disconnectRealtimeTransport(reason: "deactivate", releaseConversationOwnership: true)
     manualWakeEngine.stopListening()
     if primaryWakeEngine !== manualWakeEngine {
       primaryWakeEngine.stopListening()
-    }
-    if let visionFrameUploader {
-      await visionFrameUploader.stop()
-    }
-    if let rollingVideoBuffer {
-      await rollingVideoBuffer.clear()
     }
     playbackEngine?.shutdown()
     stopHealthLoop()
     await dependencies.stopStream()
 
-    activeSessionID = nil
-    outboundMessageBuffer.removeAll(keepingCapacity: false)
     isActivated = false
     sessionRestartCount += 1
     reconnectOnNetworkRestore = false
@@ -724,9 +752,6 @@ final class SessionOrchestrator {
     lastRealtimePCMDeferralLogKey = ""
     resetRealtimeUplinkState()
     clearRealtimePrerollBuffer()
-    realtimeTransport = nil
-    visionFrameUploader = nil
-    rollingVideoBuffer = nil
     playbackEngine = nil
 
     snapshot.sessionState = .ended
@@ -841,6 +866,46 @@ final class SessionOrchestrator {
     manualWakeEngine.triggerManualWake(timestampMs: dependencies.clock())
   }
 
+  private func startConversationFromWake(_ event: WakeWordDetectionEvent) async {
+    guard isActivated else { return }
+    guard snapshot.assistantRuntimeState == .armedListening else { return }
+
+    // Each wake starts a fresh conversation transport/session ownership scope.
+    await releaseConversationResources(clearSessionID: false)
+
+    let sessionID = "sess_\(UUID().uuidString)"
+    activeSessionID = sessionID
+
+    playbackEngine?.cancelResponse()
+    resetRealtimeUplinkTurnState()
+    clearRealtimePrerollBuffer()
+    lastRealtimePCMDeferralLogKey = ""
+    isRealtimeUplinkActive = true
+
+    playWakeChime()
+
+    snapshot.wakeState = .triggered
+    snapshot.wakeCount += 1
+    snapshot.sessionID = sessionID
+    snapshot.queryID = "-"
+    snapshot.queryState = .recording
+    snapshot.assistantRuntimeState = .connectingConversation
+    snapshot.playbackState = "streaming_connecting"
+    publishSnapshot()
+
+    await ensureConversationServicesForActiveSession()
+    await logEvent(name: "wakeword.detected")
+    _ = await sendOutbound(
+      type: .wakewordDetected,
+      payload: WakewordDetectedPayload(
+        wakePhrase: event.wakePhrase,
+        engine: event.engine,
+        confidence: event.confidence.map(Double.init)
+      )
+    )
+    await connectRealtimeTransport(reason: "wake_detected")
+  }
+
   func endConversation(reason: String = "manual_end_conversation") async {
     guard isActivated else { return }
     guard isRealtimeUplinkActive || transportState != .disconnected || wantsRealtimeStreaming else { return }
@@ -855,7 +920,7 @@ final class SessionOrchestrator {
     snapshot.playbackState = "standby_connecting"
     snapshot.assistantRuntimeState = .connectingConversation
     publishSnapshot()
-    await disconnectRealtimeTransport(reason: reason)
+    await disconnectRealtimeTransport(reason: reason, releaseConversationOwnership: true)
     snapshot.assistantRuntimeState = .armedListening
     publishSnapshot()
   }
@@ -879,45 +944,9 @@ final class SessionOrchestrator {
 
   private func handleWakeDetected(_ event: WakeWordDetectionEvent) {
     guard isActivated else { return }
-    guard !isRealtimeUplinkActive else { return }
-
-    let sessionID = "sess_\(UUID().uuidString)"
-    activeSessionID = sessionID
-
-    // Cancel any in-flight playback from previous response to avoid queue buildup
-    playbackEngine?.cancelResponse()
-    resetRealtimeUplinkTurnState()
-    clearRealtimePrerollBuffer()
-    lastRealtimePCMDeferralLogKey = ""
-    isRealtimeUplinkActive = true
-
-    // Immediate audio feedback: single beep so the user knows wake word was heard
-    playWakeChime()
-
-    snapshot.wakeState = .triggered
-    snapshot.wakeCount += 1
-    snapshot.sessionID = sessionID
-    snapshot.queryID = "-"
-    snapshot.queryState = .recording
-    snapshot.assistantRuntimeState = .connectingConversation
-    snapshot.playbackState = transportState == .connected ? "streaming_waiting_ready" : "streaming_connecting"
-    publishSnapshot()
-
+    guard snapshot.assistantRuntimeState == .armedListening else { return }
     Task { [weak self] in
-      await self?.configureConversationServicesIfNeeded()
-      await self?.connectRealtimeTransport(reason: "wake_detected")
-    }
-
-    Task {
-      await logEvent(name: "wakeword.detected")
-      await sendOutbound(
-        type: .wakewordDetected,
-        payload: WakewordDetectedPayload(
-          wakePhrase: event.wakePhrase,
-          engine: event.engine,
-          confidence: event.confidence.map(Double.init)
-        )
-      )
+      await self?.startConversationFromWake(event)
     }
   }
 
@@ -973,7 +1002,7 @@ final class SessionOrchestrator {
 
   private func connectRealtimeTransport(reason: String) async {
     guard let activeSessionID else { return }
-    await configureConversationServicesIfNeeded()
+    await ensureConversationServicesForActiveSession()
     guard let realtimeTransport else { return }
     if wantsRealtimeStreaming && (transportState == .connected || transportState == .connecting || transportState == .reconnecting) {
       return
@@ -1018,6 +1047,10 @@ final class SessionOrchestrator {
       try await realtimeTransport.connect(config: transportConfig)
       await logEvent(name: "transport.connect", fields: ["reason": .string(reason)])
     } catch {
+      await disconnectRealtimeTransport(
+        reason: "connect_failed_\(reason)",
+        releaseConversationOwnership: true
+      )
       isRealtimeUplinkActive = false
       transportState = .disconnected
       isTransportDisconnecting = false
@@ -1029,13 +1062,17 @@ final class SessionOrchestrator {
       snapshot.sessionState = .idle
       snapshot.assistantRuntimeState = .armedListening
       snapshot.queryState = .idle
+      snapshot.sessionID = "-"
       snapshot.playbackState = "idle"
       publishSnapshot()
       setError("Realtime transport connect failed: \(error.localizedDescription)")
     }
   }
 
-  private func disconnectRealtimeTransport(reason: String) async {
+  private func disconnectRealtimeTransport(
+    reason: String,
+    releaseConversationOwnership: Bool = false
+  ) async {
     guard let realtimeTransport else { return }
     guard wantsRealtimeStreaming || transportState != .disconnected else { return }
     let shouldPreservePrerollFrames =
@@ -1075,6 +1112,10 @@ final class SessionOrchestrator {
     snapshot.playbackState = "idle"
     publishSnapshot()
     await logEvent(name: "transport.disconnect", fields: ["reason": .string(reason)])
+
+    if releaseConversationOwnership {
+      await releaseConversationResources(clearSessionID: true, disconnectTransport: false)
+    }
   }
 
   private func handleTransportEvent(_ event: TransportEvent) async {
