@@ -7,6 +7,7 @@ import MWDATCore
 import SwiftUI
 
 struct HomeScreenView: View {
+  @Environment(\.dismiss) private var dismiss
   @ObservedObject var viewModel: WearablesViewModel
   @Namespace private var onboardingAnimation
 
@@ -157,11 +158,11 @@ struct HomeScreenView: View {
           .frame(maxWidth: .infinity, alignment: .leading)
 
         Button {
-          viewModel.enterPhoneOnlyAssistantMode()
+          dismiss()
         } label: {
           HStack(spacing: 10) {
             Image(systemName: "iphone")
-            Text("Continue on iPhone")
+            Text("Back to iPhone Assistant")
           }
           .font(.system(.headline, design: .rounded).weight(.semibold))
           .foregroundColor(.white)

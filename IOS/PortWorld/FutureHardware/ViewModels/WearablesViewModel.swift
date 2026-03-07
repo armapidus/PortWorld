@@ -19,7 +19,6 @@ class WearablesViewModel: ObservableObject {
   @Published var isMockModeEnabled: Bool
   @Published var isMockDeviceReady: Bool
   @Published var isPreparingMockDevice: Bool
-  @Published var isPhoneOnlyModeEnabled: Bool
 
   private var registrationTask: Task<Void, Never>?
   private var deviceStreamTask: Task<Void, Never>?
@@ -40,7 +39,6 @@ class WearablesViewModel: ObservableObject {
     self.isMockModeEnabled = false
     self.isMockDeviceReady = self.mockDeviceController.isEnabled
     self.isPreparingMockDevice = false
-    self.isPhoneOnlyModeEnabled = false
 
     setupDeviceStreamTask = Task {
       await setupDeviceStream()
@@ -182,14 +180,6 @@ class WearablesViewModel: ObservableObject {
 
   func dismissError() {
     showError = false
-  }
-
-  func enterPhoneOnlyAssistantMode() {
-    isPhoneOnlyModeEnabled = true
-  }
-
-  func exitPhoneOnlyAssistantMode() {
-    isPhoneOnlyModeEnabled = false
   }
 
   func handleMetaCallback(url: URL) async {
