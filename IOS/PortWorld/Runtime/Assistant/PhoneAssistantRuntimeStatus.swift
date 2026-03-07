@@ -25,6 +25,8 @@ struct PhoneAssistantRuntimeStatus {
   var glassesAudioModeText: String = "inactive"
   var hfpRouteText: String = "not_ready"
   var glassesAudioDetailText: String = "No glasses audio path is active."
+  var mockWorkflowText: String = "disabled"
+  var glassesDevelopmentDetailText: String = "Complete DAT setup before validating the glasses runtime."
   var canChangeRoute: Bool = true
   var canActivateSelectedRoute: Bool = true
   var activationButtonTitle: String = "Activate Assistant"

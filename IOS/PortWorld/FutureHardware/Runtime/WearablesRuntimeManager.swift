@@ -13,6 +13,13 @@ final class WearablesRuntimeManager: ObservableObject {
     case failed
   }
 
+  enum MockWorkflowState: String {
+    case disabled
+    case preparing
+    case ready
+    case failed
+  }
+
   @Published private(set) var configurationState: ConfigurationState = .idle
   @Published private(set) var configurationErrorMessage: String?
   @Published private(set) var configurationDiagnostics: [String] = []
@@ -27,6 +34,11 @@ final class WearablesRuntimeManager: ObservableObject {
   @Published private(set) var glassesAudioDetailText: String = "No glasses audio path is active."
   @Published private(set) var isGlassesSessionRequested: Bool = false
   @Published private(set) var glassesSessionErrorMessage: String?
+  @Published private(set) var mockWorkflowState: MockWorkflowState = .disabled
+  @Published private(set) var mockWorkflowDetail: String = "Mock device workflow is disabled."
+  @Published private(set) var canValidateGlassesRuntimeInDevelopment: Bool = false
+  @Published private(set) var glassesDevelopmentReadinessDetail: String =
+    "Complete DAT setup before validating the glasses runtime."
   @Published var showError: Bool = false
   @Published var errorMessage: String = ""
   @Published private(set) var isMockModeEnabled: Bool
@@ -163,7 +175,7 @@ final class WearablesRuntimeManager: ObservableObject {
 
   func setGlassesAudioMode(_ mode: AssistantAudioMode) {
     glassesAudioMode = mode
-    updateGlassesAudioDetail()
+    refreshDevelopmentReadiness()
   }
 
   func startGlassesSession() async {
@@ -177,7 +189,9 @@ final class WearablesRuntimeManager: ObservableObject {
     }
 
     guard registrationState == .registered else {
-      glassesSessionErrorMessage = "Meta registration is not complete yet."
+      glassesSessionErrorMessage = mockWorkflowState == .ready
+        ? "Meta registration is not complete yet. Mock device readiness does not bypass DAT registration."
+        : "Meta registration is not complete yet."
       return
     }
 
@@ -260,6 +274,7 @@ final class WearablesRuntimeManager: ObservableObject {
       observeWearablesStreams(using: wearables)
       monitorDeviceCompatibility(devices: wearables.devices)
       ensureGlassesSessionCoordinator(using: wearables)
+      refreshDevelopmentReadiness()
 
       #if DEBUG
         if UserDefaults.standard.bool(forKey: mockModePreferenceKey), isMockModeEnabled == false {
@@ -275,6 +290,7 @@ final class WearablesRuntimeManager: ObservableObject {
       configurationDiagnostics = Self.buildInitializationDiagnostics(from: error)
       glassesSessionCoordinator = nil
       resetGlassesSessionSnapshot()
+      refreshDevelopmentReadiness()
     }
   }
 
@@ -284,6 +300,7 @@ final class WearablesRuntimeManager: ObservableObject {
       guard let self else { return }
       for await state in wearables.registrationStateStream() {
         self.registrationState = state
+        self.refreshDevelopmentReadiness()
         if state != .registered {
           await self.stopGlassesSession()
         }
@@ -296,6 +313,7 @@ final class WearablesRuntimeManager: ObservableObject {
       for await devices in wearables.devicesStream() {
         self.devices = devices
         self.monitorDeviceCompatibility(devices: devices)
+        self.refreshDevelopmentReadiness()
       }
     }
   }
@@ -338,6 +356,7 @@ final class WearablesRuntimeManager: ObservableObject {
 
   private func updateActiveCompatibilityMessage() {
     activeCompatibilityMessage = devices.compactMap { compatibilityMessages[$0] }.first
+    refreshDevelopmentReadiness()
   }
 
   private func ensureGlassesSessionCoordinator(using wearables: WearablesInterface) {
@@ -360,6 +379,7 @@ final class WearablesRuntimeManager: ObservableObject {
     } else if snapshot.phase != .failed {
       glassesSessionErrorMessage = nil
     }
+    refreshDevelopmentReadiness()
   }
 
   private func resetGlassesSessionSnapshot() {
@@ -369,26 +389,33 @@ final class WearablesRuntimeManager: ObservableObject {
     glassesAudioMode = .inactive
     isGlassesSessionRequested = false
     glassesSessionErrorMessage = nil
-    updateGlassesAudioDetail()
+    refreshDevelopmentReadiness()
   }
 
   private func enableMockMode() async {
     guard !isPreparingMockDevice else { return }
     isPreparingMockDevice = true
+    mockWorkflowState = .preparing
+    mockWorkflowDetail = "Preparing simulated glasses for DAT development."
+    refreshDevelopmentReadiness()
     defer { isPreparingMockDevice = false }
 
     do {
       try await mockDeviceController.enableMockDevice()
       isMockModeEnabled = true
       isMockDeviceReady = mockDeviceController.isEnabled
-      updateGlassesAudioDetail()
+      mockWorkflowState = .ready
+      mockWorkflowDetail = "Mock device is paired and available for DAT development."
+      refreshDevelopmentReadiness()
       #if DEBUG
         UserDefaults.standard.set(true, forKey: mockModePreferenceKey)
       #endif
     } catch {
       isMockModeEnabled = false
       isMockDeviceReady = false
-      updateGlassesAudioDetail()
+      mockWorkflowState = .failed
+      mockWorkflowDetail = "Mock device setup failed: \(error.localizedDescription)"
+      refreshDevelopmentReadiness()
       #if DEBUG
         UserDefaults.standard.set(false, forKey: mockModePreferenceKey)
       #endif
@@ -400,7 +427,9 @@ final class WearablesRuntimeManager: ObservableObject {
     mockDeviceController.disableMockDevice()
     isMockModeEnabled = false
     isMockDeviceReady = mockDeviceController.isEnabled
-    updateGlassesAudioDetail()
+    mockWorkflowState = .disabled
+    mockWorkflowDetail = "Mock device workflow is disabled."
+    refreshDevelopmentReadiness()
     #if DEBUG
       UserDefaults.standard.set(false, forKey: mockModePreferenceKey)
     #endif
@@ -429,10 +458,17 @@ final class WearablesRuntimeManager: ObservableObject {
     let inputReady = currentRoute.inputs.contains { $0.portType == .bluetoothHFP }
     let outputReady = currentRoute.outputs.contains { $0.portType == .bluetoothHFP }
     isHFPRouteAvailable = inputReady || outputReady
-    updateGlassesAudioDetail()
+    refreshDevelopmentReadiness()
   }
 
-  private func updateGlassesAudioDetail() {
+  private func refreshDevelopmentReadiness() {
+    canValidateGlassesRuntimeInDevelopment =
+      configurationState == .ready &&
+      registrationState == .registered &&
+      devices.isEmpty == false &&
+      activeCompatibilityMessage == nil &&
+      mockWorkflowState == .ready
+
     switch glassesAudioMode {
     case .inactive:
       if isHFPRouteAvailable {
@@ -448,6 +484,62 @@ final class WearablesRuntimeManager: ObservableObject {
       glassesAudioDetailText = "Glasses lifecycle and Bluetooth HFP audio are both active."
     case .glassesMockFallback:
       glassesAudioDetailText = "Glasses lifecycle is active, but audio is using the phone fallback because no live HFP route is available."
+    }
+
+    switch configurationState {
+    case .idle, .configuring:
+      glassesDevelopmentReadinessDetail = "Shared DAT support is still initializing."
+
+    case .failed:
+      glassesDevelopmentReadinessDetail = "Wearables SDK initialization failed. Mock mode cannot validate the glasses runtime until DAT is configured."
+
+    case .ready:
+      if let activeCompatibilityMessage {
+        glassesDevelopmentReadinessDetail = activeCompatibilityMessage
+        return
+      }
+
+      if registrationState != .registered {
+        if mockWorkflowState == .ready {
+          glassesDevelopmentReadinessDetail =
+            "Mock device is ready for development, but Meta registration still must complete before the glasses runtime can activate."
+        } else {
+          glassesDevelopmentReadinessDetail =
+            "Complete Meta registration before the glasses runtime can activate. Mock mode does not bypass DAT registration."
+        }
+        return
+      }
+
+      if devices.isEmpty {
+        if mockWorkflowState == .ready {
+          glassesDevelopmentReadinessDetail =
+            "Mock device is enabled. Waiting for DAT device discovery before the glasses runtime can activate."
+        } else {
+          glassesDevelopmentReadinessDetail =
+            "Registration is complete, but no compatible glasses are currently discovered."
+        }
+        return
+      }
+
+      if glassesSessionPhase == .running {
+        glassesDevelopmentReadinessDetail = glassesAudioDetailText
+        return
+      }
+
+      if isHFPRouteAvailable {
+        glassesDevelopmentReadinessDetail =
+          "Glasses runtime can activate now. Live Bluetooth HFP audio is available."
+        return
+      }
+
+      if mockWorkflowState == .ready {
+        glassesDevelopmentReadinessDetail =
+          "Glasses runtime can activate for DAT lifecycle validation. Without physical glasses, audio will use the labeled phone fallback."
+        return
+      }
+
+      glassesDevelopmentReadinessDetail =
+        "Glasses runtime can activate, but live audio still depends on a real Bluetooth HFP route."
     }
   }
 

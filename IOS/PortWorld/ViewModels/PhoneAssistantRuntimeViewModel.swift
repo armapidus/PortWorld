@@ -170,6 +170,18 @@ final class PhoneAssistantRuntimeViewModel: ObservableObject {
     wearablesRuntimeManager.$glassesAudioDetailText
       .sink { [weak self] _ in self?.publishMergedStatus() }
       .store(in: &cancellables)
+
+    wearablesRuntimeManager.$mockWorkflowState
+      .sink { [weak self] _ in self?.publishMergedStatus() }
+      .store(in: &cancellables)
+
+    wearablesRuntimeManager.$mockWorkflowDetail
+      .sink { [weak self] _ in self?.publishMergedStatus() }
+      .store(in: &cancellables)
+
+    wearablesRuntimeManager.$glassesDevelopmentReadinessDetail
+      .sink { [weak self] _ in self?.publishMergedStatus() }
+      .store(in: &cancellables)
   }
 
   private func handleWearablesRuntimeManagerChange() {
@@ -247,6 +259,8 @@ final class PhoneAssistantRuntimeViewModel: ObservableObject {
     mergedStatus.glassesAudioModeText = glassesAudioModeText()
     mergedStatus.hfpRouteText = wearablesRuntimeManager.isHFPRouteAvailable ? "ready" : "not_ready"
     mergedStatus.glassesAudioDetailText = wearablesRuntimeManager.glassesAudioDetailText
+    mergedStatus.mockWorkflowText = mockWorkflowText()
+    mergedStatus.glassesDevelopmentDetailText = glassesRouteDetailText()
     mergedStatus.canChangeRoute =
       controllerStatus.assistantRuntimeState == .inactive &&
       pendingGlassesActivation == false &&
@@ -292,7 +306,7 @@ final class PhoneAssistantRuntimeViewModel: ObservableObject {
     guard wearablesRuntimeManager.registrationState == .registered else {
       return (
         "Glasses setup required",
-        "Meta registration is not complete yet. Open Glasses Setup to connect your glasses.",
+        wearablesRuntimeManager.glassesDevelopmentReadinessDetail,
         .neutral
       )
     }
@@ -300,7 +314,7 @@ final class PhoneAssistantRuntimeViewModel: ObservableObject {
     guard wearablesRuntimeManager.devices.isEmpty == false else {
       return (
         "Waiting for glasses",
-        "Registration is complete, but no compatible glasses are currently discovered.",
+        wearablesRuntimeManager.glassesDevelopmentReadinessDetail,
         .neutral
       )
     }
@@ -347,7 +361,7 @@ final class PhoneAssistantRuntimeViewModel: ObservableObject {
       }
       return (
         "Glasses session live",
-        wearablesRuntimeManager.glassesAudioDetailText,
+        glassesRouteDetailText(),
         .success
       )
 
@@ -423,6 +437,29 @@ final class PhoneAssistantRuntimeViewModel: ObservableObject {
       return "hfp_live"
     case .glassesMockFallback:
       return "mock_fallback_phone_audio"
+    }
+  }
+
+  private func glassesRouteDetailText() -> String {
+    if selectedRoute == .glasses &&
+      controllerStatus.assistantRuntimeState != .inactive &&
+      wearablesRuntimeManager.glassesAudioMode != .inactive {
+      return wearablesRuntimeManager.glassesAudioDetailText
+    }
+
+    return wearablesRuntimeManager.glassesDevelopmentReadinessDetail
+  }
+
+  private func mockWorkflowText() -> String {
+    switch wearablesRuntimeManager.mockWorkflowState {
+    case .disabled:
+      return "disabled"
+    case .preparing:
+      return "preparing"
+    case .ready:
+      return "ready"
+    case .failed:
+      return "failed"
     }
   }
 }

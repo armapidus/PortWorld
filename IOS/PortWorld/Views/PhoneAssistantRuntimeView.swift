@@ -79,9 +79,10 @@ struct PhoneAssistantRuntimeView: View {
             LabeledContent("Active glasses", value: status.activeGlassesDeviceText)
             LabeledContent("Glasses audio", value: status.glassesAudioModeText)
             LabeledContent("HFP route", value: status.hfpRouteText)
+            LabeledContent("Mock workflow", value: status.mockWorkflowText)
 
             if status.selectedRoute == .glasses {
-              Text(status.glassesAudioDetailText)
+              Text(status.glassesDevelopmentDetailText)
                 .font(.system(.caption, design: .rounded).weight(.medium))
                 .foregroundColor(.white.opacity(0.68))
             }

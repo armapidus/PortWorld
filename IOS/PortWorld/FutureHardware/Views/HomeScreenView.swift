@@ -120,9 +120,18 @@ struct HomeScreenView: View {
 
           HomeGlassCard {
             VStack(alignment: .leading, spacing: 10) {
-              Text("Audio readiness")
+              Text("Development readiness")
                 .font(.system(.headline, design: .rounded).weight(.semibold))
                 .foregroundColor(.white)
+
+              HomeProgressRow(
+                row: .init(
+                  id: "mock-workflow",
+                  title: "Mock workflow",
+                  detail: wearablesRuntimeManager.mockWorkflowDetail,
+                  status: mockWorkflowStatus
+                )
+              )
 
               HomeProgressRow(
                 row: .init(
@@ -142,7 +151,7 @@ struct HomeScreenView: View {
                 )
               )
 
-              Text(wearablesRuntimeManager.glassesAudioDetailText)
+              Text(wearablesRuntimeManager.glassesDevelopmentReadinessDetail)
                 .font(.system(.caption, design: .rounded).weight(.medium))
                 .foregroundColor(.white.opacity(0.76))
             }
@@ -189,7 +198,7 @@ struct HomeScreenView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
 
-        Text(wearablesRuntimeManager.glassesAudioDetailText)
+        Text(wearablesRuntimeManager.glassesDevelopmentReadinessDetail)
           .font(.system(.caption, design: .rounded).weight(.medium))
           .foregroundColor(.white.opacity(0.7))
           .multilineTextAlignment(.leading)
@@ -231,7 +240,7 @@ struct HomeScreenView: View {
           .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
           .disabled(wearablesRuntimeManager.isPreparingMockDevice)
 
-          Text("DEBUG: Pair a simulated glasses device to continue without physical hardware.")
+          Text("DEBUG: Pair a simulated glasses device for DAT development. Meta registration is still required before the glasses runtime can activate.")
             .font(.system(.caption2, design: .rounded).weight(.medium))
             .foregroundColor(.white.opacity(0.72))
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -300,6 +309,17 @@ private extension HomeScreenView {
     case .glassesMockFallback:
       return .active
     case .inactive, .phone:
+      return .pending
+    }
+  }
+
+  var mockWorkflowStatus: HomeProgressRow.RowData.Status {
+    switch wearablesRuntimeManager.mockWorkflowState {
+    case .ready:
+      return .done
+    case .preparing:
+      return .active
+    case .disabled, .failed:
       return .pending
     }
   }
