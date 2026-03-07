@@ -10,17 +10,6 @@
 		0C6663052F5351150084DE6C /* MWDATCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 0C6663042F5351150084DE6C /* MWDATCamera */; };
 		0C6663072F5351150084DE6C /* MWDATCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0C6663062F5351150084DE6C /* MWDATCore */; };
 		0C6663092F5351150084DE6C /* MWDATMockDevice in Frameworks */ = {isa = PBXBuildFile; productRef = 0C6663082F5351150084DE6C /* MWDATMockDevice */; };
-		0C70BACB2F5B5CCB0056D629 /* RuntimeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BA9C2F5B5CCB0056D629 /* RuntimeCoordinator.swift */; };
-		0C70BACC2F5B5CCB0056D629 /* GatewayTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BA9F2F5B5CCB0056D629 /* GatewayTransport.swift */; };
-		0C70BACD2F5B5CCB0056D629 /* RealtimeTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BAA02F5B5CCB0056D629 /* RealtimeTransport.swift */; };
-		0C70BAD32F5B5CCB0056D629 /* RollingVideoBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BAA72F5B5CCB0056D629 /* RollingVideoBuffer.swift */; };
-		0C70BAD72F5B5CCB0056D629 /* SessionOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BAAB2F5B5CCB0056D629 /* SessionOrchestrator.swift */; };
-		0C70BAD92F5B5CCB0056D629 /* VisionFrameUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BAAD2F5B5CCB0056D629 /* VisionFrameUploader.swift */; };
-		0C70BADE2F5B5CCB0056D629 /* SessionStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BAB42F5B5CCB0056D629 /* SessionStateStore.swift */; };
-		0C70BADF2F5B5CCB0056D629 /* SessionViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BAB52F5B5CCB0056D629 /* SessionViewModel.swift */; };
-		0C70BAE62F5B5CCB0056D629 /* NonStreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BABE2F5B5CCB0056D629 /* NonStreamView.swift */; };
-		0C70BAE82F5B5CCB0056D629 /* StreamSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BAC02F5B5CCB0056D629 /* StreamSessionView.swift */; };
-		0C70BAE92F5B5CCB0056D629 /* StreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BAC12F5B5CCB0056D629 /* StreamView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -241,17 +230,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				0C70BACB2F5B5CCB0056D629 /* RuntimeCoordinator.swift in Sources */,
-				0C70BACC2F5B5CCB0056D629 /* GatewayTransport.swift in Sources */,
-				0C70BACD2F5B5CCB0056D629 /* RealtimeTransport.swift in Sources */,
-				0C70BAD32F5B5CCB0056D629 /* RollingVideoBuffer.swift in Sources */,
-				0C70BAD72F5B5CCB0056D629 /* SessionOrchestrator.swift in Sources */,
-				0C70BAD92F5B5CCB0056D629 /* VisionFrameUploader.swift in Sources */,
-				0C70BADE2F5B5CCB0056D629 /* SessionStateStore.swift in Sources */,
-				0C70BADF2F5B5CCB0056D629 /* SessionViewModel.swift in Sources */,
-				0C70BAE62F5B5CCB0056D629 /* NonStreamView.swift in Sources */,
-				0C70BAE82F5B5CCB0056D629 /* StreamSessionView.swift in Sources */,
-				0C70BAE92F5B5CCB0056D629 /* StreamView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
