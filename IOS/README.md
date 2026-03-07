@@ -1,189 +1,139 @@
 # Port:🌍 iOS Client (PortWorld)
 
-This README describes the current state of the iOS app as it exists today.
+This README describes the current iOS app as it exists today.
 
-The main goal is clarity:
+The goal is to make the active architecture easy to understand:
 
-- what is active and working now
-- what is retained for future Meta glasses / DAT work
-- what is legacy or reference-only
+- what is active now
+- what is retained for future glasses / DAT work
+- what is historical only
 
-Do not use older archived plans or older runtime folders as the source of truth for the current assistant behavior.
+For implementation authority, prefer the docs in `../docs/` and the active code in `IOS/PortWorld/`.
 
 ## Current Status
 
-The active assistant runtime is now an iPhone-first, phone-only loop:
+The active app is an iPhone-first assistant runtime:
 
 1. User taps `Activate Assistant`
 2. App enters armed listening on iPhone
 3. Saying `Hey mario` opens a backend conversation
-4. User speech streams from the iPhone microphone
-5. Assistant speech plays through the iPhone speaker
-6. Saying `goodbye mario` or tapping the explicit end action ends only the current conversation
+4. User speech streams from the iPhone microphone to `/ws/session`
+5. Assistant audio plays through the iPhone speaker
+6. Saying `goodbye mario` or ending the turn stops only the active conversation
 7. The app returns to armed listening and can repeat the cycle
 
-This path is the current implementation authority for the iOS assistant.
+This is the current implementation authority for the assistant runtime.
 
 ## What Works Today
 
-These behaviors reflect the active, working app path:
-
-- Phone-only assistant activation from the main app flow
+- Phone-first assistant activation from the main app flow
 - Wake phrase detection on iPhone
-- First-launch wake reliability
-- Backend conversation startup through `/ws/session`
-- Realtime uplink from iPhone microphone
+- Realtime microphone uplink to the backend
 - Assistant playback through iPhone speaker
 - Spoken sleep command to end the active conversation
 - Re-arming after conversation end
 - Repeated wake -> converse -> sleep cycles
-- Local mock backend validation for the phone-only runtime
+- Assistant interruption / barge-in handling
+- Local mock-backend validation of the phone runtime
 
-## What Is Active In The App
+## Active Source Tree
 
-These files and modules reflect the current assistant path that should be trusted first when working on the app:
+The active app code lives under:
 
 ```text
 IOS/PortWorld/
 ├── PortWorldApp.swift
 ├── Views/
 │   ├── MainAppView.swift
-│   ├── HomeScreenView.swift
-│   └── PhoneAssistantRuntimeView.swift
+│   ├── PhoneAssistantRuntimeView.swift
+│   └── Components/
 ├── ViewModels/
-│   ├── PhoneAssistantRuntimeViewModel.swift
-│   └── PhoneAssistantRuntimeStore.swift
+│   └── PhoneAssistantRuntimeViewModel.swift
 ├── Runtime/
-│   ├── AssistantRuntimeController.swift
-│   ├── BackendSessionClient.swift
-│   ├── PhoneAudioIO.swift
-│   ├── AssistantPlaybackEngine.swift
-│   ├── WakePhraseDetector.swift
-│   ├── WakeWordEngine.swift
-│   ├── RuntimeConfig.swift
-│   ├── RuntimeProtocols.swift
-│   └── RuntimeTypes.swift
-└── Audio/
-    ├── AudioCollectionManager.swift
-    ├── AudioCollectionTypes.swift
-    ├── AudioSessionArbiter.swift
-    └── WavFileWriter.swift
+│   ├── Assistant/
+│   ├── AudioIO/
+│   ├── Config/
+│   ├── Playback/
+│   ├── Transport/
+│   └── Wake/
+├── Audio/
+├── FutureHardware/
+├── Utilities/
+└── Assets.xcassets/
 ```
 
-### Active Ownership Map
+## Active Ownership Map
 
 | Area | Current owner |
 |---|---|
-| App entry and top-level routing | `PortWorldApp`, `MainAppView`, `HomeScreenView` |
-| Phone assistant UI state | `PhoneAssistantRuntimeViewModel`, `PhoneAssistantRuntimeStore` |
-| Runtime state machine and conversation lifecycle | `AssistantRuntimeController` |
-| Backend websocket transport | `BackendSessionClient` |
-| Wake and sleep detection | `WakePhraseDetector`, `WakeWordEngine` |
-| Phone microphone / speaker path | `PhoneAudioIO`, `AssistantPlaybackEngine` |
-| Shared audio engine and capture support | `AudioCollectionManager` and related audio files |
-
-## What Exists But Is Not The Active Product Path
-
-These parts of the codebase still exist, but they should not be mistaken for the current working assistant architecture.
-
-### Retained For Future Hardware Work
-
-- `IOS/PortWorld/ViewModels/WearablesViewModel.swift`
-- `IOS/PortWorld/Coordinators/DeviceSessionCoordinator.swift`
-- `IOS/PortWorld/Coordinators/MockDeviceController.swift`
-- DAT SDK integration and mock-device support
-- Photo / video / wearable stream surfaces
-
-These remain useful because the forward plan is to take the cleaned phone-only runtime and layer Meta glasses compatibility on top of it.
-
-They are not the primary assistant path today.
-
-### Archived Or Legacy Runtime Artifacts
-
-- `IOS/Legacy/AssistantRuntime/`
-- older stream-oriented assistant flows
-- older coordinator/orchestrator runtime layers that predate the current simplified phone-only runtime
-
-These are historical reference only.
-
-Do not extend them for new assistant behavior unless a migration task explicitly says so.
-
-### Removed Reference Slice
-
-- `IOS/PhoneOnly/` used to exist as a temporary reduced reference snapshot of the phone-only source surface
-
-That folder has now been removed.
-
-Its purpose was to support the Phase 1 cleanup by making the active assistant path easier to reason about before the main `IOS/PortWorld/` runtime was cleaned up.
-
-The source of truth is now:
-
-- `IOS/PortWorld/` for active code
-- `docs/intermediary/PHASE1_IMPLEMENTATION.md` for the historical Phase 1 execution trace
+| App entry and top-level routing | `PortWorldApp`, `MainAppView` |
+| Assistant UI state and actions | `PhoneAssistantRuntimeView`, `PhoneAssistantRuntimeViewModel`, `PhoneAssistantRuntimeStatus` |
+| Runtime orchestration and conversation lifecycle | `Runtime/Assistant/` |
+| Backend websocket transport and wire contract | `Runtime/Transport/` |
+| Assistant playback and route/interruption handling | `Runtime/Playback/` |
+| Wake and sleep detection | `Runtime/Wake/` |
+| Phone microphone / speaker bridge | `Runtime/AudioIO/` |
+| Shared audio engine and capture support | `Audio/` |
+| Future hardware / DAT path | `FutureHardware/` |
 
 ## Architecture Snapshot
 
-The current architecture should be read in four layers.
+The current architecture is easiest to understand in four layers.
 
 ### 1. App Shell
 
 - `PortWorldApp.swift`
 - `MainAppView.swift`
-- `HomeScreenView.swift`
 
-This layer owns app startup, navigation, and the entry into the assistant experience.
+This layer owns app startup and entry into the assistant experience.
 
-### 2. Active Phone-Only Assistant Runtime
+### 2. Active Phone Runtime
 
-- `PhoneAssistantRuntimeView`
-- `PhoneAssistantRuntimeViewModel`
-- `PhoneAssistantRuntimeStore`
-- `AssistantRuntimeController`
-- `BackendSessionClient`
-- `PhoneAudioIO`
-- `AssistantPlaybackEngine`
-- `WakePhraseDetector`
-- `WakeWordEngine`
+- `Views/PhoneAssistantRuntimeView.swift`
+- `ViewModels/PhoneAssistantRuntimeViewModel.swift`
+- `Runtime/Assistant/`
+- `Runtime/Transport/`
+- `Runtime/Playback/`
+- `Runtime/Wake/`
+- `Runtime/AudioIO/`
+- `Audio/`
 
-This is the current runtime that works end-to-end and should be treated as the active product architecture.
+This is the working assistant runtime and should be treated as the active product architecture.
 
-### 3. Retained Hardware Integration Layer
+### 3. Retained Future Hardware Layer
 
-- `WearablesViewModel`
-- `DeviceSessionCoordinator`
-- `MockDeviceController`
-- DAT SDK dependency
+- `FutureHardware/ViewModels/`
+- `FutureHardware/Coordinators/`
+- `FutureHardware/Views/`
+- DAT SDK integration and mock-device support
 
-This layer exists because the long-term app direction still includes Meta glasses support and mock-device development.
+This exists because the forward product direction still includes glasses-connected runtime support, but it is not the main assistant path today.
 
-It is retained, but it is not the current runtime backbone.
+### 4. Historical / Legacy Context
 
-### 4. Archived Runtime History
+- `IOS/Legacy/`
+- `IOS/docs/archived/`
+- `../docs/archived/`
 
-- `IOS/Legacy/AssistantRuntime/`
-- archived docs in `docs/archived/`
-
-This is useful for migration context only.
+These are useful for migration context and historical reasoning only.
 
 ## Dependency Status
 
 ### Active Runtime Dependency
 
-- Backend gateway at `/ws/session` for the phone-only assistant conversation flow
+- Backend conversation gateway at `/ws/session`
 
-### Retained Dependency
+### Retained Future-Hardware Dependency
 
 - [meta-wearables-dat-ios](https://github.com/facebook/meta-wearables-dat-ios) v0.4.0
 
-The DAT SDK is still present because the app will later grow from phone-only into glasses-connected mode.
-
-That does not mean the active assistant runtime is currently glasses-first.
+The DAT SDK remains in the project because later work will extend the cleaned phone runtime toward glasses support.
 
 ## Permissions And Configuration
 
-### Active Phone-Only Runtime Needs
+### Active Runtime Needs
 
-The current working assistant path depends on:
+The active phone runtime depends on:
 
 - Microphone permission
 - Speech recognition permission
@@ -193,19 +143,20 @@ The current working assistant path depends on:
   - optional `SON_API_KEY`
   - optional `SON_BEARER_TOKEN`
 
-### Retained Hardware-Oriented Setup
+### Retained Future-Hardware Setup
 
-The codebase still contains Meta / DAT-related integration surfaces, URL schemes, and hardware-oriented configuration.
+The codebase still contains DAT-related integration surfaces, URL schemes, and hardware-oriented configuration.
 
-Those are retained because the app will move toward glasses compatibility later, but they are not the minimum required setup for understanding the working phone-only runtime.
+Those are retained for later glasses work, but they are not required to understand the current phone-first runtime.
 
 ## Local Validation
 
-For the active phone-only assistant loop, the most relevant local path is:
+For the active assistant loop, the most relevant local path is:
 
-1. run the backend gateway locally
+1. run the backend locally
 2. activate the assistant in the iOS app
 3. verify wake -> conversation -> sleep -> re-arm
+4. optionally verify interruption / barge-in behavior
 
 The local mock backend remains useful for low-cost control-flow validation of:
 
@@ -220,22 +171,27 @@ The local mock backend remains useful for low-cost control-flow validation of:
 Use these docs as the current source of truth:
 
 - [docs/IOS_AUDIO_ONLY_ASSISTANT_PLAN.md](../docs/IOS_AUDIO_ONLY_ASSISTANT_PLAN.md)
-  - current phone-only assistant behavior contract
+  current assistant-runtime behavior and implementation direction
 - [docs/IOS_PHONEONLY_TO_GLASSES_ROADMAP.md](../docs/IOS_PHONEONLY_TO_GLASSES_ROADMAP.md)
-  - sequencing from phone-only cleanup toward glasses and later vision support
+  high-level sequencing from the cleaned phone runtime toward glasses support
+- [docs/intermediary/PHASE1_IMPLEMENTATION.md](../docs/intermediary/PHASE1_IMPLEMENTATION.md)
+  detailed historical record of the completed Phase 1 cleanup
+- [docs/Wearables DAT SDK.md](docs/Wearables%20DAT%20SDK.md)
+  DAT SDK usage guidance for future-hardware work
 
 Historical context lives in:
 
+- [IOS/docs/archived/](docs/archived/)
 - [docs/archived/](../docs/archived/)
 
 Archived docs are not implementation authority for new assistant work.
 
-## Recommended Mental Model Going Forward
+## Recommended Mental Model
 
 When working in the iOS app, assume this ordering:
 
-1. trust the active phone-only runtime first
-2. treat DAT / glasses code as retained future integration work
-3. treat `IOS/Legacy/AssistantRuntime/` and `docs/archived/` as historical context only
+1. trust the active phone runtime in `IOS/PortWorld/` first
+2. treat future-hardware / DAT code as retained next-phase integration work
+3. treat `IOS/Legacy/` and archived docs as historical context only
 
-If a file or flow conflicts with the working phone-only runtime, the phone-only runtime is the one that should win unless the task is explicitly about hardware reintegration or migration.
+If a file or flow conflicts with the working phone runtime, the active phone runtime should win unless the task is explicitly about hardware reintegration or migration.
