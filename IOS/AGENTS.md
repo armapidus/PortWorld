@@ -1,177 +1,135 @@
 # IOS/AGENTS.md
 
-iOS-specific implementation guide. Applies to all work inside the `IOS/` directory.
+iOS-specific implementation guide for work under `IOS/`.
+
+---
+
+## Current Reality
+
+- `IOS/PortWorld/` is the only active iOS runtime source tree.
+- The app is currently phone-first.
+- Future hardware work should layer on top of the cleaned phone runtime, not revive legacy runtime architecture.
+- Historical / compatibility code lives under `IOS/Legacy/` and should be treated as reference or migration context unless the task explicitly says otherwise.
 
 ---
 
 ## Documentation Map
 
-For **non-trivial architecture, runtime, transport, or SDK changes**, read the relevant files below before implementing:
+Read the relevant docs before non-trivial iOS work:
 
 | File | Read when… |
 |---|---|
-| `docs/IOS_AUDIO_ONLY_ASSISTANT_PLAN.md` | Touching the active assistant runtime, wake/sleep flow, audio-only scope, transport ownership, or execution order |
-| `IOS/docs/archived/ARCHITECTURE.md` | Checking legacy architecture rationale or understanding how the current code drifted into its present shape |
-| `IOS/docs/archived/PRD.md` | Looking up historical requirements or legacy compatibility behavior |
-| `IOS/docs/archived/IMPLEMENTATION_PLAN.md` | Tracing old refactor intent or diagnosing why legacy/stabilization branches exist |
-| `IOS/docs/archived/TESTING.md` | Reusing historical test ideas selectively; not as an active phase gate |
+| `docs/IOS_AUDIO_ONLY_ASSISTANT_PLAN.md` | Touching the active assistant runtime, wake/sleep flow, audio-only scope, transport ownership, interruption, playback, or execution order |
+| `docs/IOS_PHONEONLY_TO_GLASSES_ROADMAP.md` | Checking current phase status, forward sequencing, or how glasses work should build onto the cleaned phone runtime |
+| `docs/intermediary/PHASE1_IMPLEMENTATION.md` | You need the detailed record of the completed phone-runtime cleanup and stabilization work |
 | `IOS/docs/Wearables DAT SDK.md` | Any code that touches the DAT SDK |
+| `IOS/docs/archived/ARCHITECTURE.md` | Looking up legacy architecture rationale |
+| `IOS/docs/archived/PRD.md` | Looking up historical requirements or old compatibility assumptions |
+| `IOS/docs/archived/IMPLEMENTATION_PLAN.md` | Tracing earlier refactor intent or old cleanup plans |
+| `IOS/docs/archived/TESTING.md` | Reusing historical test ideas selectively, not as the active gate |
 
-For **small, localised fixes** (single file, no API surface or concurrency change), read only the directly relevant file(s).
+For small, localized fixes, read only the directly relevant files.
 
-> `docs/IOS_AUDIO_ONLY_ASSISTANT_PLAN.md` is now the authoritative forward-looking implementation document for the assistant runtime.
-> Archived docs in `IOS/docs/archived/` are not authoritative for new runtime behavior and may describe legacy or confusing intermediate states.
+Rules of authority:
+
+1. `docs/IOS_AUDIO_ONLY_ASSISTANT_PLAN.md`
+2. `docs/IOS_PHONEONLY_TO_GLASSES_ROADMAP.md`
+3. current active code in `IOS/PortWorld/`
+4. historical docs only for context
+
+If archived docs conflict with the active runtime plan or current code, the active runtime plan wins unless the task explicitly concerns migration/history.
 
 ---
 
+## Source Tree Mental Model
 
+Use this mental model when navigating the iOS app:
 
+- `IOS/PortWorld/`
+  Active app shell, active phone runtime, active future-hardware path
+- `IOS/PortWorld/Runtime/Assistant/`
+  Assistant orchestration and runtime-owned UI state
+- `IOS/PortWorld/Runtime/Transport/`
+  Backend websocket client, wire types, transport support
+- `IOS/PortWorld/Runtime/Playback/`
+  Assistant playback engine and route/interruption handling
+- `IOS/PortWorld/Runtime/Wake/`
+  Wake/sleep detection and speech recognizer-backed wake engine
+- `IOS/PortWorld/Runtime/AudioIO/`
+  Phone microphone/playback bridge
+- `IOS/PortWorld/FutureHardware/`
+  Secondary DAT / wearables / mock-device path
+- `IOS/Legacy/`
+  Historical runtime and compatibility code, not the default implementation surface
 
+---
 
-### Simulator Launch Guard (Mandatory)
+## Verification Policy
 
-To prevent accidental multi-simulator launches during sub-agent parallelization:
+### Standard order
 
-- Do not boot/install/launch Simulator by default.
-- Simulator boot/install/launch is allowed only when the user explicitly requests UI smoke validation.
-- Sub-agents must not run simulator launch commands.
-- Only the coordinator agent may run simulator launch commands, and only once per verification cycle.
-- Default verification in parallel work is build + tests.
-
-### Session setup (run once per session)
-
+```text
+1. Build:       xcodebuild build
+2. Tests:       xcodebuild test
+3. UI smoke:    manual-only, user-requested
 ```
-1. session_show_defaults          — check any saved configuration
-2. Locate the project in IOS/
-3. Confirm available schemes
-4. Discover available simulators (only if a user-requested UI smoke run is planned)
-```
 
-Discover the project path, scheme, and simulator each session. If a local machine override file exists at the repo root (e.g. `local.xcconfig` or `.local-defaults.json`), prefer its values.
+### Practical rule
 
-Do **not** assume a fixed simulator ID or absolute local path — these change across machines and Xcode versions. The scheme is `PortWorld`.
+- Build after any non-trivial iOS change.
+- Run `xcodebuild test` only when tests are relevant and the user expects test execution.
+- For small, isolated code or docs changes, build-only verification is enough.
 
-### Common operations
+### Simulator guard
 
-```
-Build app:        xcodebuild build (scheme: PortWorld)
-Run unit tests:   xcodebuild test (target: PortWorldTests)
-Boot simulator:   xcodebuild boot → install → launch  (manual-only, user-requested)
-Screenshot:       xcodebuild screenshot  (only during explicit UI smoke validation)
-UI automation:    snapshot/tap/type tools to verify UI states
-```
+- Do not boot/install/launch Simulator unless the user explicitly asks for UI smoke validation.
+- Sub-agents must never run simulator commands.
+- In parallel work, default verification is build only.
+- `test_sim` is banned.
+
+### Xcode project defaults
+
+- Scheme: `PortWorld`
+- Discover project path, scheme, and simulator availability each session if needed.
+- Do not assume fixed simulator IDs or machine-specific local overrides.
 
 ---
 
 ## Documentation Lookup
 
-Use **Ref MCP** and **Apple Docs MCP** when available:
+Use Apple Docs MCP and Ref MCP when local knowledge might be stale or the API is unfamiliar.
 
-```swift
-// Before using an unfamiliar API:
-mcp_ref_ref_search_documentation(query: "AVAudioSession allowBluetoothHFP iOS 17")
-mcp_ref_ref_read_url(url: "<url from result>")
+Good cases:
 
-// For Apple framework reference:
-mcp_apple_docs_search_apple_docs(query: "AVAudioPlayerNode scheduleBuffer")
-mcp_apple_docs_get_platform_compatibility(apiUrl: "https://developer.apple.com/documentation/...")
-mcp_apple_docs_get_related_apis(...)  // useful when exploring deprecated API alternatives
-```
+- AVFoundation / AVAudioSession behavior
+- speech recognition / SFSpeech APIs
+- SwiftUI / observation / lifecycle APIs
+- URLSession / networking behavior
+- DAT SDK references when the local DAT doc is insufficient
 
-Key Apple frameworks for this project: `AVFoundation`, `AVAudioEngine`, `AVAudioSession`, `AVAssetWriter`, `URLSession`, `SwiftUI`, `@Observable`, `SFSpeechRecognizer`, `NWPathMonitor`.
-
-Always call `get_platform_compatibility` before using any new Apple API to verify the iOS 17.0 minimum deployment target.
+Always verify Apple API availability against the iOS 17.0 minimum deployment target before introducing new framework usage.
 
 ---
 
-## Meta Wearables DAT SDK Rules
+## DAT SDK Rules
 
-When writing any code that touches the DAT SDK:
+When touching the DAT SDK:
 
-1. **State the module:** `MWDATCore`, `MWDATCamera`, or `MWDATMockDevice`.
-2. **Read the local SDK doc first:** `IOS/docs/Wearables DAT SDK.md`.
-3. **Fetch the current API surface** if the local doc is insufficient — use `mcp_ref_ref_search_documentation` with the MWDAT SDK endpoint.
-4. **iOS lifecycle constraints to respect:**
-   - DAT camera streams are session-state driven; handle via observed stream/session transitions.
-   - DAT stream quality is Bluetooth-bandwidth constrained; requested quality is not guaranteed.
-   - HFP audio route must be configured before starting any audio workflow.
-   - DAT microphone input is 8kHz mono.
-5. **Name the source doc/path used** in your response (e.g. `IOS/docs/Wearables DAT SDK.md §3.2`). Do not generate SDK usage code without stating which section or doc informed it.
-6. **If required SDK details are missing,** stop and fetch the exact MWDAT doc link before continuing.
+1. State the module: `MWDATCore`, `MWDATCamera`, or `MWDATMockDevice`.
+2. Read `IOS/docs/Wearables DAT SDK.md` first.
+3. If the local DAT doc is insufficient, fetch the current API/docs before implementing.
+4. Respect these constraints:
+   - DAT camera streams are session-state driven
+   - requested stream quality is bandwidth-constrained and not guaranteed
+   - HFP audio route must be configured before DAT audio workflows
+   - DAT microphone input is 8kHz mono
+5. Name the doc/path used in the response.
 
----
-
-## Preferred Code Patterns
-
-### ViewModel (`@MainActor` + `@Observable`)
-
-```swift
-@MainActor
-@Observable
-final class QueryViewModel {
-    var state: QueryState = .idle
-
-    private let service: QueryService  // injected actor
-
-    func submit(query: String) async {
-        state = .loading
-        do {
-            let result = try await service.process(query)
-            state = .success(result)
-        } catch {
-            state = .failure(error)
-        }
-    }
-}
-```
-
-### Actor service
-
-```swift
-actor QueryService {
-    private var session: URLSession = .shared
-
-    func process(_ query: String) async throws -> QueryResult {
-        // All mutable state is actor-isolated.
-        // Never call DispatchQueue.sync here.
-        let request = try buildRequest(query)
-        let (data, _) = try await session.data(for: request)
-        return try JSONDecoder().decode(QueryResult.self, from: data)
-    }
-}
-```
-
-### Error handling (no silent discards)
-
-```swift
-// ✅ Correct — propagate or log explicitly
-do {
-    try await uploader.upload(file)
-} catch {
-    logger.error("Upload failed: \(error)")
-    throw error  // or handle intentionally
-}
-
-// ❌ Banned on I/O paths
-try? uploader.upload(file)
-```
-
-### Logging
-
-```swift
-import OSLog
-private let logger = Logger(subsystem: "com.portworld", category: "QueryService")
-
-// ✅ Always use os_log in production paths
-logger.info("Session started")
-
-// ❌ Banned outside #if DEBUG
-print("debug message")
-```
+Do not write DAT code from memory alone when exact API details are uncertain.
 
 ---
 
-## Concurrency Quick Reference
+## Concurrency Rules
 
 | Context | Primitive |
 |---|---|
@@ -180,7 +138,54 @@ print("debug message")
 | AVAudioEngine tap callback | dedicated `DispatchQueue` only |
 | Network calls | `async/await` + `URLSession` |
 
-**Banned everywhere:**
+Banned:
 
-- `DispatchQueue.sync` (except AVAudioEngine tap)
+- `DispatchQueue.sync` outside the AVAudioEngine tap context
+- silent `try?` on I/O paths
 - `@unchecked Sendable` without an explanatory comment
+
+---
+
+## Preferred iOS Patterns
+
+### State ownership
+
+- controller/runtime owns mutable runtime state
+- view model is a thin observation/action bridge
+- views render the published status model
+
+### Logging
+
+- use high-signal logs only
+- keep lifecycle, interruption, queue-pressure, playback-control, and real error logs
+- avoid hot-path spam in stable codepaths
+- use `print()` only inside `#if DEBUG`
+
+### Runtime evolution
+
+- add new behavior on top of the cleaned runtime
+- do not reintroduce old generic transport/runtime abstractions without a clear need
+- keep future-hardware code from reshaping the phone-first path until that phase explicitly starts
+
+---
+
+## Common Decisions
+
+When unsure:
+
+- prefer the active `IOS/PortWorld/` path over legacy code
+- prefer small, conservative refactors over broad rewrites
+- prefer one obvious ownership boundary over layered duplicate state
+- prefer docs in `docs/` over archived phase language
+
+---
+
+## Response Requirements
+
+For non-trivial iOS changes, include:
+
+1. **Docs consulted**
+2. **MWDAT module touched**
+3. **MCP tools used**
+4. **Assumptions made**
+5. **Plan / milestone**
