@@ -133,7 +133,11 @@ actor SessionWebSocketClient: SessionWebSocketClientProtocol {
       lastOutboundBytes: lastOutboundBytes,
       binarySendAttemptCount: binarySendAttemptCount,
       binarySendSuccessCount: binarySendSuccessCount,
-      lastBinaryFirstByteHex: lastBinaryFirstByteHex
+      lastBinaryFirstByteHex: lastBinaryFirstByteHex,
+      inboundServerAudioFrameCount: 0,
+      inboundServerAudioBytes: 0,
+      lastInboundServerAudioBytes: 0,
+      lastPlaybackControlCommand: "none"
     )
   }
 
@@ -477,7 +481,10 @@ actor SessionWebSocketClient: SessionWebSocketClientProtocol {
     do {
       switch request.operation {
       case .text(let text):
-        try await webSocketTask.send(.string(text))
+        try await sendWebSocketMessage(
+          .string(text),
+          using: webSocketTask
+        )
       case .data(let data):
         let firstByteHex = data.first.map { String(format: "0x%02x", $0) } ?? "none"
         binarySendAttemptCount += 1
@@ -487,7 +494,10 @@ actor SessionWebSocketClient: SessionWebSocketClientProtocol {
             "ws_binary_send_start order=\(request.enqueueOrder, privacy: .public) kind=\(request.messageKind, privacy: .public) bytes=\(data.count, privacy: .public) first_byte=\(firstByteHex, privacy: .public) connection_id=\(request.connectionID, privacy: .public) task_state=\(self.describeTaskState(taskState), privacy: .public) binary_attempts=\(self.binarySendAttemptCount, privacy: .public) binary_completions=\(self.binarySendSuccessCount, privacy: .public)"
           )
         }
-        try await webSocketTask.send(.data(data))
+        try await sendWebSocketMessage(
+          .data(data),
+          using: webSocketTask
+        )
         binarySendSuccessCount += 1
         if binarySendSuccessCount == 1 || binarySendSuccessCount % 100 == 0 {
           logger.warning(
@@ -503,6 +513,21 @@ actor SessionWebSocketClient: SessionWebSocketClientProtocol {
         "outbound_send_failed order=\(request.enqueueOrder, privacy: .public) kind=\(request.messageKind, privacy: .public) bytes=\(request.byteCount, privacy: .public) connection_id=\(request.connectionID, privacy: .public) task_state=\(self.describeTaskState(taskState), privacy: .public) detail=\(error.localizedDescription, privacy: .public)"
       )
       throw SessionWebSocketClientError.transport(error.localizedDescription)
+    }
+  }
+
+  private func sendWebSocketMessage(
+    _ message: URLSessionWebSocketTask.Message,
+    using webSocketTask: URLSessionWebSocketTask
+  ) async throws {
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+      webSocketTask.send(message) { error in
+        if let error {
+          continuation.resume(throwing: error)
+        } else {
+          continuation.resume(returning: ())
+        }
+      }
     }
   }
 

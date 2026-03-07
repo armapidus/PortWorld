@@ -2,6 +2,21 @@ import Foundation
 import Network
 import UIKit
 
+// Legacy photo-uploader contract retained only for the archived assistant runtime.
+typealias VisionFrameSessionIDProvider = () -> String?
+typealias VisionFrameUploadResultHandler = (VisionFrameUploadResult) -> Void
+
+protocol VisionFrameUploaderProtocol: Actor {
+  func bindHandlers(
+    sessionIDProvider: @escaping VisionFrameSessionIDProvider,
+    onUploadResult: VisionFrameUploadResultHandler?
+  )
+  func start()
+  func stop()
+  func consumeFrameDropCount() -> Int
+  func submitLatestFrame(_ image: UIImage, captureTimestampMs: Int64)
+}
+
 struct VisionFrameUploadResult: Sendable {
   let frameId: String
   let captureTimestampMs: Int64

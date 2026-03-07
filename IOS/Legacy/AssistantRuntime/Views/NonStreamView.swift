@@ -1,7 +1,6 @@
 // NonStreamView.swift
 //
-// Default screen to show getting started tips after app connection
-// Initiates runtime activation
+// Legacy assistant runtime screen retained only for archived hardware/runtime flows.
 
 import MWDATCore
 import SwiftUI

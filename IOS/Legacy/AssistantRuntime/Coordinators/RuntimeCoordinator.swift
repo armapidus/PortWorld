@@ -2,6 +2,8 @@ import Combine
 import MWDATCamera
 import SwiftUI
 
+// Legacy coordinator for the pre-simplification DAT/glasses runtime.
+// The active phone-only assistant path no longer instantiates this type.
 @MainActor
 final class RuntimeCoordinator {
   private let store: SessionStateStore

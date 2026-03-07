@@ -317,6 +317,7 @@ final class SFSpeechWakeWordEngine: NSObject, WakeWordEngine {
   private static let noSpeechDetectedErrorCode = 1_110
   private static let speechErrorDomain = "SFSpeechErrorDomain"
   private static let noSpeechDetectedMessageFragment = "no speech detected"
+  private static let transientLogThrottleMs: Int64 = 5_000
   private var recognizer: (any WakeWordSpeechRecognizer)?
   private var recognitionRequest: (any WakeWordSpeechRecognitionRequest)?
   private var recognitionTask: (any WakeWordSpeechRecognitionTask)?
@@ -324,6 +325,9 @@ final class SFSpeechWakeWordEngine: NSObject, WakeWordEngine {
   private var runtimeStatus: WakeWordRuntimeStatus = .idle
   private var lastDetectionTimestampMs: Int64 = 0
   private var consecutiveRecognitionErrorCount: Int = 0
+  private var lastTransientRecognitionErrorLogMs: Int64 = 0
+  private var listeningStartedAtMs: Int64 = 0
+  private var attemptedColdStartRecognizerRecovery = false
 
   init(
     wakePhrase: String,
@@ -405,7 +409,7 @@ final class SFSpeechWakeWordEngine: NSObject, WakeWordEngine {
       return
     }
 
-    configureRecognizerIfNeeded()
+    rebuildRecognizer()
     guard let recognizer, recognizer.isAvailable else {
       runtimeStatus = .fallbackManual
       publishStatus(authorization: .unavailable, runtime: .fallbackManual, detail: "Recognizer unavailable")
@@ -420,6 +424,8 @@ final class SFSpeechWakeWordEngine: NSObject, WakeWordEngine {
     }
 
     isListening = true
+    listeningStartedAtMs = nowMsProvider()
+    attemptedColdStartRecognizerRecovery = false
     lastDetectionTimestampMs = 0
     consecutiveRecognitionErrorCount = 0
     guard startRecognitionTaskLocked() else {
@@ -433,6 +439,8 @@ final class SFSpeechWakeWordEngine: NSObject, WakeWordEngine {
 
   func stopListening() {
     isListening = false
+    listeningStartedAtMs = 0
+    attemptedColdStartRecognizerRecovery = false
     consecutiveRecognitionErrorCount = 0
     stopRecognitionTaskLocked()
     runtimeStatus = .idle
@@ -448,6 +456,13 @@ final class SFSpeechWakeWordEngine: NSObject, WakeWordEngine {
 
   private func configureRecognizerIfNeeded() {
     if recognizer != nil { return }
+    recognizer = recognizerFactory(Locale(identifier: localeIdentifier))
+    recognizer?.delegate = self
+  }
+
+  private func rebuildRecognizer() {
+    stopRecognitionTaskLocked()
+    recognizer?.delegate = nil
     recognizer = recognizerFactory(Locale(identifier: localeIdentifier))
     recognizer?.delegate = self
   }
@@ -500,6 +515,7 @@ final class SFSpeechWakeWordEngine: NSObject, WakeWordEngine {
 
           if detectedSleep, update.isFinal, let sleepPhrase {
             lastDetectionTimestampMs = now
+            attemptedColdStartRecognizerRecovery = true
             onSleepDetected?(
               WakeWordDetectionEvent(
                 wakePhrase: sleepPhrase,
@@ -510,6 +526,7 @@ final class SFSpeechWakeWordEngine: NSObject, WakeWordEngine {
             )
           } else if detectedWake {
             lastDetectionTimestampMs = now
+            attemptedColdStartRecognizerRecovery = true
             onWakeDetected?(
               WakeWordDetectionEvent(
                 wakePhrase: wakePhrase,
@@ -531,9 +548,16 @@ final class SFSpeechWakeWordEngine: NSObject, WakeWordEngine {
 
     if let error {
       if let transientError = Self.transientRecognitionError(from: error) {
-        Self.debugLogTransientRecognitionError(transientError)
+        debugLogTransientRecognitionErrorIfNeeded(transientError)
         if isListening {
-          guard startRecognitionTaskLocked() else {
+          let recovered: Bool
+          if shouldAttemptColdStartRecognizerRecovery() {
+            recovered = performColdStartRecognizerRecoveryLocked()
+          } else {
+            recovered = startRecognitionTaskLocked()
+          }
+
+          guard recovered else {
             failRecognitionStartLocked(detail: "Failed to restart speech recognition task after transient recognition error")
             onError?(WakeWordEngineError.recognitionTaskCreationFailed)
             return
@@ -595,9 +619,25 @@ final class SFSpeechWakeWordEngine: NSObject, WakeWordEngine {
     return description.contains(noSpeechDetectedMessageFragment)
   }
 
-  private static func debugLogTransientRecognitionError(_ error: NSError) {
+  private func shouldAttemptColdStartRecognizerRecovery() -> Bool {
+    guard attemptedColdStartRecognizerRecovery == false else { return false }
+    guard lastDetectionTimestampMs == 0 else { return false }
+    guard listeningStartedAtMs > 0 else { return false }
+    return nowMsProvider() - listeningStartedAtMs <= 5_000
+  }
+
+  private func performColdStartRecognizerRecoveryLocked() -> Bool {
+    attemptedColdStartRecognizerRecovery = true
+    rebuildRecognizer()
+    return startRecognitionTaskLocked()
+  }
+
+  private func debugLogTransientRecognitionErrorIfNeeded(_ error: NSError) {
 #if DEBUG
-    logger.debug(
+    let now = nowMsProvider()
+    guard now - lastTransientRecognitionErrorLogMs >= Self.transientLogThrottleMs else { return }
+    lastTransientRecognitionErrorLogMs = now
+    Self.logger.debug(
       "[SFSpeechWakeWordEngine] Suppressed transient recognition error domain=\(error.domain, privacy: .public) code=\(error.code, privacy: .public) description=\(error.localizedDescription, privacy: .public)"
     )
 #endif

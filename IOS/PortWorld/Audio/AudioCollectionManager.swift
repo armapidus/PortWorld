@@ -76,11 +76,7 @@ final class AudioCollectionManager: ObservableObject {
                 ),
                 realtimePCMMaximumChunkBytes
             ),
-            logChunkEmission: { [logger] chunkIndex, byteCount, timestampMs in
-                logger.debug(
-                    "realtime_pcm_chunk_emitted index=\(chunkIndex, privacy: .public) bytes=\(byteCount, privacy: .public) timestamp_ms=\(timestampMs, privacy: .public)"
-                )
-            }
+            logChunkEmission: { _, _, _ in }
         )
         interruptionObserver = self.observerCenter.addObserver(
             forName: AVAudioSession.interruptionNotification,
@@ -120,7 +116,8 @@ final class AudioCollectionManager: ObservableObject {
             if allowBuiltInMicInput || preferSpeakerOutput {
                 categoryOptions.insert(.defaultToSpeaker)
             }
-            try audioSessionClient.setCategory(.playAndRecord, mode: .default, options: categoryOptions)
+            let sessionMode: AVAudioSession.Mode = preferSpeakerOutput ? .voiceChat : .default
+            try audioSessionClient.setCategory(.playAndRecord, mode: sessionMode, options: categoryOptions)
             try audioSessionClient.setActive(true, options: [.notifyOthersOnDeactivation])
             registerRouteObserverIfNeeded()
             isAudioSessionReady = true
@@ -148,6 +145,8 @@ final class AudioCollectionManager: ObservableObject {
             let sessionDirectory = try createSessionDirectory(sessionId: sessionId)
             let indexURL = sessionDirectory.appendingPathComponent("index.jsonl")
             FileManager.default.createFile(atPath: indexURL.path, contents: nil)
+
+            configureVoiceProcessingIfNeeded()
 
             let inputFormat = tapController.inputFormat()
 
@@ -221,6 +220,28 @@ final class AudioCollectionManager: ObservableObject {
             teardownEngineIfNeeded()
             processor.stopAndFlush()
             markFailed("Failed to start audio capture: \(error.localizedDescription)")
+        }
+    }
+
+    private func configureVoiceProcessingIfNeeded() {
+        guard preferSpeakerOutput else { return }
+
+        do {
+            if sharedAudioEngine.inputNode.isVoiceProcessingEnabled == false {
+                try sharedAudioEngine.inputNode.setVoiceProcessingEnabled(true)
+                logger.debug("Enabled voice processing on shared input node")
+            }
+        } catch {
+            logger.error("Failed to enable input voice processing: \(error.localizedDescription, privacy: .public)")
+        }
+
+        do {
+            if sharedAudioEngine.outputNode.isVoiceProcessingEnabled == false {
+                try sharedAudioEngine.outputNode.setVoiceProcessingEnabled(true)
+                logger.debug("Enabled voice processing on shared output node")
+            }
+        } catch {
+            logger.error("Failed to enable output voice processing: \(error.localizedDescription, privacy: .public)")
         }
     }
 

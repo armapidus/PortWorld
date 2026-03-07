@@ -12,6 +12,8 @@ public struct RuntimeConfig {
   public let webSocketURL: URL
   public let visionFrameURL: URL
   public let realtimeDiagnosticsEnabled: Bool
+  /// Legacy compatibility knob for explicit diagnostics only.
+  /// The active audio-only assistant uplink is binary-only and ignores this flag.
   public let realtimeForceTextAudioFallback: Bool
   /// Legacy batch `/query` endpoint retained for compatibility.
   /// In Phase 6 realtime mode this endpoint is inactive on the primary path.
@@ -235,9 +237,8 @@ public struct RuntimeConfig {
   }
 
   private static func resolveRealtimeForceTextAudioFallback(bundle: Bundle, userDefaults: UserDefaults) -> Bool {
-    #if DEBUG
-    return true
-    #endif
+    // Legacy-only config path retained for compatibility with diagnostic tooling.
+    // Active assistant runtime no longer treats text/base64 fallback as a normal mode.
     if let override = resolveUserDefaultsBool(key: "portworld.realtimeForceTextAudioFallback", userDefaults: userDefaults) {
       return override
     }

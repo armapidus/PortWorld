@@ -1,6 +1,7 @@
 import Observation
 import SwiftUI
 
+// Legacy runtime store retained only for the archived assistant runtime path.
 enum StreamingStatus {
   case streaming
   case waiting

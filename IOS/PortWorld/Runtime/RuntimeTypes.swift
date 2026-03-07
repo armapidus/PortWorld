@@ -286,7 +286,6 @@ public struct HealthStatsPayload: Codable {
   public let realtimeAudioLastSendError: String?
   public let realtimeUplinkConfirmed: Bool
   public let realtimeUplinkAckLatencyMs: Int?
-  public let realtimeForceTextAudioFallback: Bool?
   public let realtimeSocketConnectionID: Int?
   public let realtimeSocketLastOutboundKind: String?
   public let realtimeSocketLastOutboundBytes: Int?
@@ -329,7 +328,6 @@ public struct HealthStatsPayload: Codable {
     realtimeAudioLastSendError: String? = nil,
     realtimeUplinkConfirmed: Bool = false,
     realtimeUplinkAckLatencyMs: Int? = nil,
-    realtimeForceTextAudioFallback: Bool? = nil,
     realtimeSocketConnectionID: Int? = nil,
     realtimeSocketLastOutboundKind: String? = nil,
     realtimeSocketLastOutboundBytes: Int? = nil,
@@ -367,7 +365,6 @@ public struct HealthStatsPayload: Codable {
     self.realtimeAudioLastSendError = realtimeAudioLastSendError
     self.realtimeUplinkConfirmed = realtimeUplinkConfirmed
     self.realtimeUplinkAckLatencyMs = realtimeUplinkAckLatencyMs
-    self.realtimeForceTextAudioFallback = realtimeForceTextAudioFallback
     self.realtimeSocketConnectionID = realtimeSocketConnectionID
     self.realtimeSocketLastOutboundKind = realtimeSocketLastOutboundKind
     self.realtimeSocketLastOutboundBytes = realtimeSocketLastOutboundBytes
@@ -407,7 +404,6 @@ public struct HealthStatsPayload: Codable {
     case realtimeAudioLastSendError = "realtime_audio_last_send_error"
     case realtimeUplinkConfirmed = "realtime_uplink_confirmed"
     case realtimeUplinkAckLatencyMs = "realtime_uplink_ack_latency_ms"
-    case realtimeForceTextAudioFallback = "realtime_force_text_audio_fallback"
     case realtimeSocketConnectionID = "realtime_socket_connection_id"
     case realtimeSocketLastOutboundKind = "realtime_socket_last_outbound_kind"
     case realtimeSocketLastOutboundBytes = "realtime_socket_last_outbound_bytes"

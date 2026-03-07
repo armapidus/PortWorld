@@ -29,7 +29,7 @@ struct HomeScreenView: View {
   }
 
   private var registrationStatusSubtitle: String {
-    if isRegistered { return "You can continue to runtime setup." }
+    if isRegistered { return "Meta hardware features are available, but the assistant now runs phone-only by default." }
     if isRegistering {
       return "Waiting for Meta AI confirmation."
     }
@@ -150,7 +150,7 @@ struct HomeScreenView: View {
     .animation(.spring(response: 0.35, dampingFraction: 0.85), value: viewModel.devices.count)
     .safeAreaInset(edge: .bottom) {
       VStack(spacing: 10) {
-        Text("Meta onboarding is optional for phone-only assistant activation.")
+        Text("Phone-only assistant is the active runtime. Meta onboarding stays available only for future hardware features.")
           .font(.system(.caption, design: .rounded).weight(.medium))
           .foregroundColor(.white.opacity(0.7))
           .multilineTextAlignment(.leading)
@@ -258,8 +258,8 @@ private extension HomeScreenView {
       HomeProgressRow.RowData(
         id: "runtime",
         title: "Runtime activation",
-        detail: isRegistered ? "Ready on next screen" : "Phone-only mode available now",
-        status: isRegistered ? .active : .done
+        detail: "Phone-only mode available now",
+        status: .done
       ),
     ]
   }

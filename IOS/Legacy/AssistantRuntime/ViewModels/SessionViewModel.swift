@@ -1,6 +1,7 @@
 import MWDATCore
 import SwiftUI
 
+// Legacy view model retained only for the archived assistant runtime path.
 @MainActor
 final class SessionViewModel {
   let store: SessionStateStore

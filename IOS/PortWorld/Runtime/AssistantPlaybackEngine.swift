@@ -11,7 +11,6 @@ public enum AssistantPlaybackError: Error, LocalizedError {
   case formatMismatch(expected: AssistantAudioFormat, received: AssistantAudioFormat)
   case unableToBuildAudioFormat
   case unableToAllocateBuffer
-  case outputChannelMismatch(expected: Int, actual: Int)
   case engineStartFailed(String)
   case invalidAudioSessionCategory(expected: String, actual: String)
 
@@ -33,8 +32,6 @@ public enum AssistantPlaybackError: Error, LocalizedError {
       return "Unable to build AVAudioFormat for assistant playback."
     case .unableToAllocateBuffer:
       return "Unable to allocate playback audio buffer."
-    case .outputChannelMismatch(let expected, let actual):
-      return "Playback output channel mismatch. Expected \(expected), got \(actual)."
     case .engineStartFailed(let message):
       return "Failed to start playback engine: \(message)"
     case .invalidAudioSessionCategory(let expected, let actual):
@@ -145,6 +142,7 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
   private var currentFormat: AssistantAudioFormat?
   private var routeObserver: NSObjectProtocol?
   private var interruptionObserver: NSObjectProtocol?
+  private var configurationObserver: NSObjectProtocol?
   private var isPlayerNodeAttached = false
   private var isPlayerNodeConnected = false
   private static let graphFormat = AssistantAudioFormat(codec: "pcm_s16le", sampleRate: 24_000, channels: 1)
@@ -153,6 +151,11 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
     category: "AssistantPlaybackEngine"
   )
   private var queueState = AssistantPlaybackQueueState()
+  private var hasLoggedFirstAppend = false
+  private var hasLoggedFirstSchedule = false
+  private var hasLoggedFirstDrain = false
+  private var hasLoggedFirstStartResponse = false
+  private var hasLoggedFirstFailureState = false
 
   /// Threshold (ms) for detecting stuck playback. If buffers were scheduled
   /// this recently but no drain callback fired, we may be stuck.
@@ -240,6 +243,16 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
         self?.handleInterruption(interruptionType)
       }
     }
+
+    configurationObserver = NotificationCenter.default.addObserver(
+      forName: Notification.Name.AVAudioEngineConfigurationChange,
+      object: audioEngine,
+      queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated {
+        self?.handleEngineConfigurationChange()
+      }
+    }
   }
 
   deinit {
@@ -248,6 +261,9 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
     }
     if let interruptionObserver {
       NotificationCenter.default.removeObserver(interruptionObserver)
+    }
+    if let configurationObserver {
+      NotificationCenter.default.removeObserver(configurationObserver)
     }
   }
 
@@ -290,10 +306,6 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
   }
 
   public func appendPCMData(_ pcmData: Data, format incomingFormat: AssistantAudioFormat) throws {
-    debugLog("[AssistantPlaybackEngine] appendPCMData: \(pcmData.count) bytes, format: \(incomingFormat.description)")
-    debugLog("[AssistantPlaybackEngine] Current route: \(currentRouteDescription())")
-    debugLog("[AssistantPlaybackEngine] Engine running: \(audioEngine.isRunning), ownsEngine: \(ownsEngine)")
-    
     guard incomingFormat.codec == "pcm_s16le" else {
       throw AssistantPlaybackError.unsupportedCodec(incomingFormat.codec)
     }
@@ -311,15 +323,17 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
       throw AssistantPlaybackError.formatMismatch(expected: currentFormat, received: incomingFormat)
     }
 
+    if hasLoggedFirstAppend == false {
+      hasLoggedFirstAppend = true
+      debugLog("[AssistantPlaybackEngine] First appendPCMData bytes=\(pcmData.count) format=\(incomingFormat.description) route=\(currentRouteDescription()) engineRunning=\(audioEngine.isRunning)")
+    }
+
     guard audioSession.category == .playAndRecord else {
       let expectedCategory = AVAudioSession.Category.playAndRecord.rawValue
       let actualCategory = audioSession.category.rawValue
-      debugLog("[AssistantPlaybackEngine] appendPCMData aborted: AVAudioSession category is '\(actualCategory)', expected '\(expectedCategory)'")
+      logFailureStateOnce(context: "invalid_audio_session_category")
       throw AssistantPlaybackError.invalidAudioSessionCategory(expected: expectedCategory, actual: actualCategory)
     }
-
-    // Start the engine if needed before scheduling playback.
-    try startEngineIfNeeded()
 
     let sampleCount = pcmData.count / MemoryLayout<Int16>.size
     let frameCount = AVAudioFrameCount(sampleCount)
@@ -336,14 +350,6 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
     pcmData.withUnsafeBytes { rawBuffer in
       guard let source = rawBuffer.baseAddress else { return }
       memcpy(channelData.pointee, source, pcmData.count)
-    }
-
-    let outputChannels = Int(playerNode.outputFormat(forBus: 0).channelCount)
-    if outputChannels != Int(audioFormat.channelCount) {
-      throw AssistantPlaybackError.outputChannelMismatch(
-        expected: Int(audioFormat.channelCount),
-        actual: outputChannels
-      )
     }
 
     // Calculate buffer duration in milliseconds
@@ -373,19 +379,7 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
     // pendingBufferCount and calling scheduleBuffer. If reconnection is needed after
     // scheduleBuffer is called, AVAudioEngine.connect() resets the player node and discards
     // the already-queued buffer without firing its completion callback — leaking the count.
-    try ensureEngineRunning(context: "pre_play")
-
-    // Check if player node is actually connected and attempt reconnection if needed
-    if audioEngine.outputConnectionPoints(for: playerNode, outputBus: 0).isEmpty {
-      debugLog("[AssistantPlaybackEngine] Player node disconnected, attempting reconnection")
-      reconnectPlayerNode()
-
-      // Verify reconnection succeeded
-      guard !audioEngine.outputConnectionPoints(for: playerNode, outputBus: 0).isEmpty else {
-        throw AssistantPlaybackError.engineStartFailed("Player node is disconnected from output graph.")
-      }
-      debugLog("[AssistantPlaybackEngine] Reconnection successful, continuing playback")
-    }
+    try recoverAudioGraphIfNeeded(context: "pre_play")
 
     if !playerNode.isPlaying {
       debugLog("[AssistantPlaybackEngine] Starting player node")
@@ -394,13 +388,21 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
 
     // Now it is safe to count and schedule: the graph is stable.
     queueState.recordScheduledBuffer(durationMs: bufferDurationMs, nowMs: nowMs)
-    playerNode.scheduleBuffer(buffer) { [weak self, bufferDurationMs] in
+    playerNode.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self, bufferDurationMs] callbackType in
       Task { @MainActor [weak self] in
         guard let self else { return }
+        self.debugLog("[AssistantPlaybackEngine] Buffer completion callback type=\(String(describing: callbackType)) pendingCount=\(self.pendingBufferCount)")
         self.queueState.recordBufferDrained(durationMs: bufferDurationMs, nowMs: self.nowMsProvider())
+        if self.hasLoggedFirstDrain == false {
+          self.hasLoggedFirstDrain = true
+          self.debugLog("[AssistantPlaybackEngine] First buffer drain completed route=\(self.currentRouteDescription()) pendingCount=\(self.pendingBufferCount)")
+        }
       }
     }
-    debugLog("[AssistantPlaybackEngine] Buffer scheduled, playerNode.isPlaying: \(playerNode.isPlaying)")
+    if hasLoggedFirstSchedule == false {
+      hasLoggedFirstSchedule = true
+      debugLog("[AssistantPlaybackEngine] First buffer scheduled route=\(currentRouteDescription()) playerNode.isPlaying=\(playerNode.isPlaying) pendingCount=\(pendingBufferCount)")
+    }
   }
 
   public func handlePlaybackControl(_ payload: PlaybackControlPayload) {
@@ -433,7 +435,16 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
     }
 
     queueState.resetForStartResponse(nowMs: nowMsProvider())
-    debugLog("[AssistantPlaybackEngine] startResponse: counters reset, player node untouched")
+    hasLoggedFirstAppend = false
+    hasLoggedFirstSchedule = false
+    hasLoggedFirstDrain = false
+    hasLoggedFirstFailureState = false
+    if hasLoggedFirstStartResponse == false {
+      hasLoggedFirstStartResponse = true
+      debugLog("[AssistantPlaybackEngine] First startResponse received route=\(currentRouteDescription())")
+    } else {
+      debugLog("[AssistantPlaybackEngine] startResponse: counters reset, player node untouched")
+    }
   }
 
   public func stopResponse() {
@@ -446,12 +457,20 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
     playerNode.stop()
     playerNode.reset()
     queueState.resetForCancelResponse()
+    hasLoggedFirstAppend = false
+    hasLoggedFirstSchedule = false
+    hasLoggedFirstDrain = false
+    hasLoggedFirstFailureState = false
     debugLog("[AssistantPlaybackEngine] cancelResponse: flushed playback queue")
   }
 
   public func shutdown() {
     playerNode.stop()
     queueState.resetForCancelResponse()
+    hasLoggedFirstAppend = false
+    hasLoggedFirstSchedule = false
+    hasLoggedFirstDrain = false
+    hasLoggedFirstFailureState = false
     if isPlayerNodeAttached {
       audioEngine.detach(playerNode)
       isPlayerNodeAttached = false
@@ -533,28 +552,10 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
   /// Call this when the app returns to foreground to restore the audio graph.
   public func restoreFromBackground() {
     debugLog("[AssistantPlaybackEngine] Restoring from background")
-    if !isPlayerNodeActuallyConnected() {
-      reconnectPlayerNode()
-    }
-  }
-
-  private func startEngineIfNeeded() throws {
-    ensurePlayerNodeAttached()
-    
-    // Start the engine if it's not running, regardless of ownership.
-    // When using a shared engine, the greeting audio may arrive before AudioCollectionManager.start()
-    // completes. It's safe to start the shared engine from here since AVAudioEngine supports
-    // concurrent input tap and output playback.
-    if !audioEngine.isRunning {
-      debugLog("[AssistantPlaybackEngine] Engine not running, starting it now (ownsEngine: \(ownsEngine))")
-      do {
-        audioEngine.prepare()
-        try audioEngine.start()
-        debugLog("[AssistantPlaybackEngine] Engine started successfully")
-      } catch {
-        debugLog("[AssistantPlaybackEngine] Failed to start engine: \(error.localizedDescription)")
-        throw AssistantPlaybackError.engineStartFailed(error.localizedDescription)
-      }
+    do {
+      try recoverAudioGraphIfNeeded(context: "foreground_restore")
+    } catch {
+      debugLog("[AssistantPlaybackEngine] Foreground restore failed: \(error.localizedDescription)")
     }
   }
 
@@ -566,6 +567,7 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
         try audioEngine.start()
       } catch {
         debugLog("[AssistantPlaybackEngine] Failed engine start (\(context)): \(error.localizedDescription)")
+        logFailureStateOnce(context: "ensure_engine_running_failed_\(context)")
         throw AssistantPlaybackError.engineStartFailed(error.localizedDescription)
       }
     } else {
@@ -609,11 +611,15 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
     // Check and reconnect if needed
     if isPlayerNodeAttached && !isPlayerNodeActuallyConnected() {
       debugLog("[AssistantPlaybackEngine] Route change invalidated player node connection, reconnecting")
-      reconnectPlayerNode()
+      do {
+        try recoverAudioGraphIfNeeded(context: "route_change")
+      } catch {
+        debugLog("[AssistantPlaybackEngine] Route change recovery failed: \(error.localizedDescription)")
+      }
     }
 
-    if !isBluetoothRouteActive(route: audioSession.currentRoute) {
-      onRouteIssue?("Assistant playback route is not on glasses/Bluetooth output (\(route))")
+    if let routeIssue = routeIssueDescription(for: audioSession.currentRoute) {
+      onRouteIssue?(routeIssue)
     }
   }
 
@@ -649,10 +655,16 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
     }
   }
 
-  private func isBluetoothRouteActive(route: AVAudioSessionRouteDescription) -> Bool {
-    route.outputs.contains { output in
-      output.portType == .bluetoothA2DP || output.portType == .bluetoothHFP || output.portType == .bluetoothLE
+  private func routeIssueDescription(for route: AVAudioSessionRouteDescription) -> String? {
+    guard route.outputs.isEmpty == false else {
+      return "Assistant playback route is unavailable."
     }
+
+    if route.outputs.contains(where: { $0.portType == .builtInReceiver }) {
+      return "Assistant playback route resolved to receiver (\(currentRouteDescription()))"
+    }
+
+    return nil
   }
 
   private func handleInterruption(_ type: AVAudioSession.InterruptionType?) {
@@ -665,8 +677,10 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
     case .ended:
       // Interruption ended - attempt to restore the graph
       debugLog("[AssistantPlaybackEngine] Audio interruption ended, restoring graph")
-      if !isPlayerNodeActuallyConnected() {
-        reconnectPlayerNode()
+      do {
+        try recoverAudioGraphIfNeeded(context: "interruption_ended")
+      } catch {
+        debugLog("[AssistantPlaybackEngine] Interruption recovery failed: \(error.localizedDescription)")
       }
       publishRouteUpdate()
     @unknown default:
@@ -682,6 +696,34 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
       return nil
     }
     return type
+  }
+
+  private func handleEngineConfigurationChange() {
+    debugLog("[AssistantPlaybackEngine] Audio engine configuration changed")
+    isPlayerNodeConnected = false
+    do {
+      try recoverAudioGraphIfNeeded(context: "engine_configuration_change")
+    } catch {
+      debugLog("[AssistantPlaybackEngine] Engine configuration recovery failed: \(error.localizedDescription)")
+    }
+    publishRouteUpdate()
+  }
+
+  private func recoverAudioGraphIfNeeded(context: String) throws {
+    ensurePlayerNodeAttached()
+    let format = currentFormat ?? Self.graphFormat
+
+    if !isPlayerNodeActuallyConnected() {
+      debugLog("[AssistantPlaybackEngine] Recovering player node connection (\(context))")
+      try connectPlayerNodeIfNeeded(for: format)
+    }
+
+    try ensureEngineRunning(context: context)
+
+    if !isPlayerNodeActuallyConnected() {
+      logFailureStateOnce(context: "player_node_disconnected_\(context)")
+      throw AssistantPlaybackError.engineStartFailed("Player node is disconnected from output graph.")
+    }
   }
 
   /// Returns current time in milliseconds since 1970.
@@ -704,6 +746,12 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
     debugLog("[AssistantPlaybackEngine] Route outputs: [\(outputPorts)]")
   }
 
+  private func logFailureStateOnce(context: String) {
+    guard hasLoggedFirstFailureState == false else { return }
+    hasLoggedFirstFailureState = true
+    logAudioPipelineState(context: context)
+  }
+
   /// Attempts to recover from stuck playback by restarting the audio graph.
   private func attemptPlaybackRecovery() {
     logAudioPipelineState(context: "pre_recovery")
@@ -722,23 +770,11 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
     // Force reconnect the player node
     isPlayerNodeConnected = false
     do {
-      try connectPlayerNodeIfNeeded(for: currentFormat ?? Self.graphFormat)
+      try recoverAudioGraphIfNeeded(context: "stuck_playback_recovery")
     } catch {
       debugLog("[AssistantPlaybackEngine] Recovery: failed to reconnect player node: \(error.localizedDescription)")
     }
-    
-    // Restart the engine if needed
-    if !audioEngine.isRunning {
-      debugLog("[AssistantPlaybackEngine] Recovery: engine stopped, attempting restart")
-      audioEngine.prepare()
-      do {
-        try audioEngine.start()
-        debugLog("[AssistantPlaybackEngine] Recovery: engine restarted successfully")
-      } catch {
-        debugLog("[AssistantPlaybackEngine] Recovery: failed to restart engine: \(error.localizedDescription)")
-      }
-    }
-    
+
     logAudioPipelineState(context: "post_recovery")
   }
 

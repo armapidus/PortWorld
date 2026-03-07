@@ -1,16 +1,13 @@
 import Foundation
-import UIKit
 
-// Transport/media services are intentionally non-UI surfaces.
-// SessionOrchestrator is @MainActor and explicitly hops into these services.
+// Shared transport/media services are intentionally non-UI surfaces.
+// Legacy assistant-runtime-only contracts live under IOS/Legacy/AssistantRuntime.
 // Keep @MainActor off these protocol contracts to preserve background execution.
 typealias SessionWebSocketStateHandler = (SessionWebSocketConnectionState) -> Void
 typealias SessionWebSocketMessageHandler = (WSInboundMessage) -> Void
 typealias SessionWebSocketRawMessageHandler = (SessionWebSocketRawMessage) -> Void
 typealias SessionWebSocketCloseHandler = (TransportSocketCloseInfo) -> Void
 typealias SessionWebSocketErrorHandler = (SessionWebSocketClientError) -> Void
-typealias VisionFrameSessionIDProvider = () -> String?
-typealias VisionFrameUploadResultHandler = (VisionFrameUploadResult) -> Void
 
 enum SessionWebSocketRawMessage: Sendable {
   case text(String)
@@ -24,6 +21,10 @@ struct SessionWebSocketDiagnosticsSnapshot: Sendable, Equatable {
   let binarySendAttemptCount: Int
   let binarySendSuccessCount: Int
   let lastBinaryFirstByteHex: String
+  let inboundServerAudioFrameCount: Int
+  let inboundServerAudioBytes: Int
+  let lastInboundServerAudioBytes: Int
+  let lastPlaybackControlCommand: String
 }
 
 /// Actor-isolated transport contract for the websocket control plane.
@@ -81,57 +82,13 @@ extension SessionWebSocketClientProtocol {
       lastOutboundBytes: 0,
       binarySendAttemptCount: 0,
       binarySendSuccessCount: 0,
-      lastBinaryFirstByteHex: "none"
+      lastBinaryFirstByteHex: "none",
+      inboundServerAudioFrameCount: 0,
+      inboundServerAudioBytes: 0,
+      lastInboundServerAudioBytes: 0,
+      lastPlaybackControlCommand: "none"
     )
   }
-}
-
-/// Actor-isolated photo uploader contract.
-protocol VisionFrameUploaderProtocol: Actor {
-  func bindHandlers(
-    sessionIDProvider: @escaping VisionFrameSessionIDProvider,
-    onUploadResult: VisionFrameUploadResultHandler?
-  )
-  func start()
-  func stop()
-  func consumeFrameDropCount() -> Int
-  func submitLatestFrame(_ image: UIImage, captureTimestampMs: Int64)
-}
-
-/// Actor-isolated video buffer contract.
-protocol RollingVideoBufferProtocol: Actor {
-  var bufferedDurationMs: Int64 { get }
-  func append(frame: UIImage, timestampMs: Int64)
-  func clear()
-  func exportInterval(
-    startTimestampMs: Int64,
-    endTimestampMs: Int64,
-    outputURL: URL?,
-    bitrate: Int
-  ) async throws -> RollingVideoExportResult
-}
-
-extension RollingVideoBufferProtocol {
-  func exportInterval(
-    startTimestampMs: Int64,
-    endTimestampMs: Int64
-  ) async throws -> RollingVideoExportResult {
-    try await exportInterval(
-      startTimestampMs: startTimestampMs,
-      endTimestampMs: endTimestampMs,
-      outputURL: nil,
-      bitrate: 2_000_000
-    )
-  }
-}
-
-/// Bundle upload is network-bound work and should stay off the main actor.
-protocol QueryBundleBuilderProtocol: AnyObject {
-  func uploadQueryBundle(
-    metadata: QueryMetadata,
-    audioFileURL: URL,
-    videoFileURL: URL
-  ) async throws -> QueryBundleUploadResult
 }
 
 typealias WakeWordEngineProtocol = WakeWordEngine

@@ -1,8 +1,6 @@
 // StreamView.swift
 //
-// Main UI for video streaming from Meta wearable devices using the DAT SDK.
-// This view demonstrates the complete streaming API: video streaming with real-time display, photo capture,
-// and error handling.
+// Legacy assistant runtime view retained only for archived hardware/runtime flows.
 
 import MWDATCore
 import SwiftUI

@@ -4,6 +4,7 @@ import Foundation
 import OSLog
 import UIKit
 
+// Legacy orchestration layer retained only for archived hardware/runtime flows.
 private final class RealtimePCMUplinkWorker: @unchecked Sendable {
   struct Frame {
     let payload: Data
@@ -184,6 +185,8 @@ private final class RealtimePCMUplinkWorker: @unchecked Sendable {
   }
 }
 
+// Legacy orchestration layer for the older assistant runtime stack.
+// The active phone-only assistant path now uses AssistantRuntimeController instead.
 @MainActor
 final class SessionOrchestrator {
   struct Dependencies {
@@ -597,7 +600,7 @@ final class SessionOrchestrator {
     } else {
       sendLiveFrame = { frame in
         logger.warning(
-          "worker_send_live_audio dispatch=protocol_fallback payload_bytes=\(frame.payload.count, privacy: .public) timestamp_ms=\(frame.timestampMs, privacy: .public)"
+          "worker_send_live_audio dispatch=transport_protocol payload_bytes=\(frame.payload.count, privacy: .public) timestamp_ms=\(frame.timestampMs, privacy: .public)"
         )
         try await realtimeTransport.sendLiveAudio(frame.payload, timestampMs: frame.timestampMs)
       }
@@ -614,6 +617,10 @@ final class SessionOrchestrator {
           )
         }
         try await sendLiveFrame(frame)
+        let transportDiagnostics = await realtimeTransport.diagnosticsSnapshot()
+        guard transportDiagnostics.binarySendSuccessCount > 0 else {
+          throw TransportError.connectionFailed
+        }
       },
       onSendAttempt: { [weak self] _ in
         Task { @MainActor [weak self] in
@@ -1593,12 +1600,17 @@ final class SessionOrchestrator {
       realtimeTransportSendSuccessLogCount % 100 == 0
     else { return }
 
+    let socketDiagnostics = await realtimeTransport?.diagnosticsSnapshot()
+
     await logEvent(
       name: "realtime.uplink.transport_send_succeeded",
       fields: [
         "count": .number(Double(realtimeTransportSendSuccessLogCount)),
         "payload_bytes": .number(Double(frame.payload.count)),
-        "timestamp_ms": .number(Double(frame.timestampMs))
+        "timestamp_ms": .number(Double(frame.timestampMs)),
+        "socket_binary_send_completed": .number(Double(socketDiagnostics?.binarySendSuccessCount ?? 0)),
+        "socket_binary_send_attempted": .number(Double(socketDiagnostics?.binarySendAttemptCount ?? 0)),
+        "socket_last_binary_first_byte": .string(socketDiagnostics?.lastBinaryFirstByteHex ?? "none")
       ]
     )
   }
@@ -1866,11 +1878,7 @@ final class SessionOrchestrator {
       0
     }
     let realtimeUplinkMetrics = realtimePCMUplinkWorker?.metricsSnapshot()
-    let socketDiagnostics: SessionWebSocketDiagnosticsSnapshot? = if let gatewayTransport = realtimeTransport as? GatewayTransport {
-      await gatewayTransport.diagnosticsSnapshot()
-    } else {
-      nil
-    }
+    let socketDiagnostics = await realtimeTransport?.diagnosticsSnapshot()
     let realtimeAudioFrameDropCount = realtimePCMUplinkWorker?.consumeDroppedFrameCount() ?? 0
     let prerollFrameDropCount = realtimePrerollDroppedFrameCount
     realtimePrerollDroppedFrameCount = 0
@@ -1905,7 +1913,6 @@ final class SessionOrchestrator {
       realtimeAudioLastSendError: realtimeUplinkMetrics?.lastSendError,
       realtimeUplinkConfirmed: realtimeUplinkConfirmed,
       realtimeUplinkAckLatencyMs: realtimeUplinkAckLatencyMs,
-      realtimeForceTextAudioFallback: config.realtimeForceTextAudioFallback,
       realtimeSocketConnectionID: socketDiagnostics?.connectionID,
       realtimeSocketLastOutboundKind: socketDiagnostics?.lastOutboundKind,
       realtimeSocketLastOutboundBytes: socketDiagnostics?.lastOutboundBytes,
@@ -1943,7 +1950,6 @@ final class SessionOrchestrator {
       "realtime_audio_backend_confirmed_bytes": .number(Double(realtimeBackendConfirmedBytes)),
       "realtime_audio_send_failures": .number(Double(realtimeUplinkMetrics?.sendFailures ?? 0)),
       "realtime_uplink_confirmed": .bool(realtimeUplinkConfirmed),
-      "realtime_force_text_audio_fallback": .bool(config.realtimeForceTextAudioFallback),
       "realtime_socket_connection_id": .number(Double(socketDiagnostics?.connectionID ?? 0)),
       "realtime_socket_last_outbound_bytes": .number(Double(socketDiagnostics?.lastOutboundBytes ?? 0)),
       "realtime_socket_last_outbound_kind": .string(socketDiagnostics?.lastOutboundKind ?? "none"),

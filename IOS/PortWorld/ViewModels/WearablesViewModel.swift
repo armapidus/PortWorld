@@ -1,8 +1,8 @@
 // WearablesViewModel.swift
 //
-// Primary view model for the CameraAccess app that manages DAT SDK integration.
-// Demonstrates how to listen to device availability changes using the DAT SDK's
-// device stream functionality and handle permission requests.
+// Primary app view model for onboarding and optional DAT hardware integration.
+// The active assistant runtime now lives in the phone-only path and no longer
+// depends on DAT registration or mock device readiness.
 
 import Combine
 import Foundation
@@ -20,10 +20,6 @@ class WearablesViewModel: ObservableObject {
   @Published var isMockDeviceReady: Bool
   @Published var isPreparingMockDevice: Bool
   @Published var isPhoneOnlyModeEnabled: Bool
-
-  var canEnterSession: Bool {
-    registrationState == .registered || isMockDeviceReady || isPhoneOnlyModeEnabled
-  }
 
   private var registrationTask: Task<Void, Never>?
   private var deviceStreamTask: Task<Void, Never>?
@@ -190,6 +186,10 @@ class WearablesViewModel: ObservableObject {
 
   func enterPhoneOnlyAssistantMode() {
     isPhoneOnlyModeEnabled = true
+  }
+
+  func exitPhoneOnlyAssistantMode() {
+    isPhoneOnlyModeEnabled = false
   }
 
   func handleMetaCallback(url: URL) async {

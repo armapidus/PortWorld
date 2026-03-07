@@ -1,9 +1,13 @@
 // StreamSessionView.swift
+//
+// Legacy assistant runtime entry retained only for archived hardware/runtime flows.
 
 import Combine
 import MWDATCore
 import SwiftUI
 
+// Legacy runtime entry kept only for historical/hardware migration work.
+// The active assistant product flow no longer navigates here.
 @MainActor
 private final class SessionViewModelLifetime: ObservableObject {
   @Published private(set) var viewModel: SessionViewModel?

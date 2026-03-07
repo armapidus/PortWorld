@@ -3,6 +3,33 @@ import Foundation
 import OSLog
 import UIKit
 
+// Legacy rolling-video buffer contract retained only for the archived assistant runtime.
+protocol RollingVideoBufferProtocol: Actor {
+  var bufferedDurationMs: Int64 { get }
+  func append(frame: UIImage, timestampMs: Int64)
+  func clear()
+  func exportInterval(
+    startTimestampMs: Int64,
+    endTimestampMs: Int64,
+    outputURL: URL?,
+    bitrate: Int
+  ) async throws -> RollingVideoExportResult
+}
+
+extension RollingVideoBufferProtocol {
+  func exportInterval(
+    startTimestampMs: Int64,
+    endTimestampMs: Int64
+  ) async throws -> RollingVideoExportResult {
+    try await exportInterval(
+      startTimestampMs: startTimestampMs,
+      endTimestampMs: endTimestampMs,
+      outputURL: nil,
+      bitrate: 2_000_000
+    )
+  }
+}
+
 struct RollingVideoExportResult {
   let outputURL: URL
   let frameCount: Int
