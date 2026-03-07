@@ -16,9 +16,13 @@ enum GlassesReadinessKind {
 struct PhoneAssistantRuntimeStatus {
   var assistantRuntimeState: PhoneAssistantRuntimeState = .inactive
   var selectedRoute: AssistantRoute = .phone
+  var activeRouteText: String = "none"
   var glassesReadinessTitle: String = "Glasses setup required"
   var glassesReadinessDetail: String = "Open Glasses Setup to connect Meta glasses and review DAT readiness."
   var glassesReadinessKind: GlassesReadinessKind = .neutral
+  var glassesSessionText: String = "inactive"
+  var activeGlassesDeviceText: String = "-"
+  var canChangeRoute: Bool = true
   var canActivateSelectedRoute: Bool = true
   var activationButtonTitle: String = "Activate Assistant"
   var audioStatusText: String = "idle"
@@ -38,13 +42,9 @@ struct PhoneAssistantRuntimeStatus {
     assistantRuntimeState == .inactive
   }
 
-  var canChangeRoute: Bool {
-    assistantRuntimeState == .inactive
-  }
-
   var canDeactivate: Bool {
     switch assistantRuntimeState {
-    case .armedListening, .connectingConversation, .activeConversation:
+    case .armedListening, .connectingConversation, .activeConversation, .pausedByHardware:
       return true
     case .inactive, .deactivating:
       return false
@@ -55,7 +55,7 @@ struct PhoneAssistantRuntimeStatus {
     switch assistantRuntimeState {
     case .connectingConversation, .activeConversation:
       return true
-    case .inactive, .armedListening, .deactivating:
+    case .inactive, .armedListening, .pausedByHardware, .deactivating:
       return false
     }
   }

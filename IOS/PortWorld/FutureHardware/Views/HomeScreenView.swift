@@ -159,7 +159,7 @@ struct HomeScreenView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
 
-        Text("Phone-only assistant is the active runtime. Meta onboarding stays available only for future hardware features.")
+        Text("The main runtime can now activate through a glasses-owned DAT session, while voice still uses the phone audio path until the next phase.")
           .font(.system(.caption, design: .rounded).weight(.medium))
           .foregroundColor(.white.opacity(0.7))
           .multilineTextAlignment(.leading)

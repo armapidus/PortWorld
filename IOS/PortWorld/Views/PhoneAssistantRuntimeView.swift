@@ -1,4 +1,4 @@
-// Primary runtime screen for the shipping phone-only assistant flow.
+// Primary runtime screen for the assistant runtime across phone and glasses routes.
 import SwiftUI
 
 struct PhoneAssistantRuntimeView: View {
@@ -36,7 +36,7 @@ struct PhoneAssistantRuntimeView: View {
               .font(.system(.largeTitle, design: .rounded).weight(.bold))
               .foregroundColor(.white)
 
-            Text("Primary assistant runtime. Phone mode is live today; glasses route selection and readiness now surface here ahead of lifecycle integration.")
+            Text("Primary assistant runtime. Phone mode remains stable, and the glasses route now activates through DAT lifecycle while still using the phone audio path for this phase.")
               .font(.system(.subheadline, design: .rounded).weight(.medium))
               .foregroundColor(.white.opacity(0.78))
           }
@@ -75,8 +75,11 @@ struct PhoneAssistantRuntimeView: View {
               .font(.system(.caption, design: .rounded).weight(.medium))
               .foregroundColor(.white.opacity(0.74))
 
+            LabeledContent("Glasses session", value: status.glassesSessionText)
+            LabeledContent("Active glasses", value: status.activeGlassesDeviceText)
+
             if status.selectedRoute == .glasses {
-              Text("Glasses route selection is visible now, but activation remains disabled until session lifecycle is integrated in the next step.")
+              Text("Glasses lifecycle now owns activation readiness. Voice still uses the phone mic and speaker path until the dedicated glasses audio step lands.")
                 .font(.system(.caption, design: .rounded).weight(.medium))
                 .foregroundColor(.white.opacity(0.68))
             }
@@ -86,6 +89,7 @@ struct PhoneAssistantRuntimeView: View {
             LabeledContent("Lifecycle", value: status.assistantRuntimeState.rawValue)
             LabeledContent("Session", value: status.sessionID)
             LabeledContent("Selected route", value: status.selectedRoute.rawValue)
+            LabeledContent("Active route", value: status.activeRouteText)
             LabeledContent("Wake phrase", value: status.wakePhraseText)
             LabeledContent("Sleep phrase", value: status.sleepPhraseText)
           }

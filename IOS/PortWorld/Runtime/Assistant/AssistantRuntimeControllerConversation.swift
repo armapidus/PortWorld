@@ -57,7 +57,7 @@ extension AssistantRuntimeController {
       return
     case .activeConversation:
       break
-    case .inactive, .armedListening, .deactivating:
+    case .inactive, .armedListening, .pausedByHardware, .deactivating:
       return
     }
 
@@ -138,13 +138,13 @@ extension AssistantRuntimeController {
     pendingRealtimeFrames.removeAll(keepingCapacity: false)
     wakeListeningGeneration += 1
     let generation = wakeListeningGeneration
+    await backendSessionClient.disconnect(sendDeactivate: false)
     status.assistantRuntimeState = .armedListening
     status.sessionID = "-"
     status.transportStatusText = "idle"
     status.uplinkStatusText = "armed_waiting_for_wake"
     status.playbackStatusText = "armed_waiting_for_response"
     status.infoText = "Warming up wake detection."
-    await backendSessionClient.disconnect(sendDeactivate: false)
     await refreshSubsystemStatus()
     publishStatus()
     scheduleWakeListeningStart(generation: generation, readyMessage: reason)

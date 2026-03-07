@@ -18,6 +18,11 @@ final class WearablesRuntimeManager: ObservableObject {
   @Published private(set) var registrationState: RegistrationState?
   @Published private(set) var devices: [DeviceIdentifier] = []
   @Published private(set) var activeCompatibilityMessage: String?
+  @Published private(set) var glassesSessionPhase: GlassesSessionPhase = .inactive
+  @Published private(set) var glassesSessionState: SessionState?
+  @Published private(set) var activeGlassesDeviceName: String = "-"
+  @Published private(set) var isGlassesSessionRequested: Bool = false
+  @Published private(set) var glassesSessionErrorMessage: String?
   @Published var showError: Bool = false
   @Published var errorMessage: String = ""
   @Published private(set) var isMockModeEnabled: Bool
@@ -28,6 +33,7 @@ final class WearablesRuntimeManager: ObservableObject {
   private let wearablesProvider: () -> WearablesInterface
   private let mockDeviceController: MockDeviceController
   private var wearables: WearablesInterface?
+  private var glassesSessionCoordinator: GlassesSessionCoordinator?
   private var registrationTask: Task<Void, Never>?
   private var deviceStreamTask: Task<Void, Never>?
   private var compatibilityListenerTokens: [DeviceIdentifier: AnyListenerToken] = [:]
@@ -94,6 +100,7 @@ final class WearablesRuntimeManager: ObservableObject {
   func disconnectGlasses() {
     Task { @MainActor [weak self] in
       guard let self else { return }
+      await self.stopGlassesSession()
       guard let wearables = self.wearables else {
         self.presentError(self.configurationErrorMessage ?? "Wearables SDK is not configured.")
         return
@@ -141,6 +148,58 @@ final class WearablesRuntimeManager: ObservableObject {
     showError = false
   }
 
+  func startGlassesSession() async {
+    if configurationState != .ready {
+      await startIfNeeded()
+    }
+
+    guard configurationState == .ready else {
+      glassesSessionErrorMessage = configurationErrorMessage ?? "Wearables SDK is not configured."
+      return
+    }
+
+    guard registrationState == .registered else {
+      glassesSessionErrorMessage = "Meta registration is not complete yet."
+      return
+    }
+
+    guard devices.isEmpty == false else {
+      glassesSessionErrorMessage = "No compatible glasses are currently available."
+      return
+    }
+
+    guard activeCompatibilityMessage == nil else {
+      glassesSessionErrorMessage = activeCompatibilityMessage
+      return
+    }
+
+    guard let glassesSessionCoordinator else {
+      glassesSessionErrorMessage = "Glasses session support is not ready yet."
+      return
+    }
+
+    isGlassesSessionRequested = true
+    glassesSessionErrorMessage = nil
+
+    do {
+      try await glassesSessionCoordinator.start()
+    } catch {
+      isGlassesSessionRequested = false
+      glassesSessionErrorMessage = error.localizedDescription
+    }
+  }
+
+  func stopGlassesSession() async {
+    isGlassesSessionRequested = false
+    guard let glassesSessionCoordinator else {
+      resetGlassesSessionSnapshot()
+      return
+    }
+
+    await glassesSessionCoordinator.stop()
+    glassesSessionErrorMessage = nil
+  }
+
   private func configureWearables(forceRetry: Bool) async {
     switch configurationState {
     case .configuring:
@@ -165,9 +224,11 @@ final class WearablesRuntimeManager: ObservableObject {
       deviceStreamTask?.cancel()
       deviceStreamTask = nil
       compatibilityListenerTokens.removeAll(keepingCapacity: false)
+      glassesSessionCoordinator = nil
       wearables = nil
       registrationState = nil
       devices = []
+      resetGlassesSessionSnapshot()
     }
 
     do {
@@ -179,6 +240,7 @@ final class WearablesRuntimeManager: ObservableObject {
       configurationState = .ready
       observeWearablesStreams(using: wearables)
       monitorDeviceCompatibility(devices: wearables.devices)
+      ensureGlassesSessionCoordinator(using: wearables)
 
       #if DEBUG
         if UserDefaults.standard.bool(forKey: mockModePreferenceKey), isMockModeEnabled == false {
@@ -192,6 +254,8 @@ final class WearablesRuntimeManager: ObservableObject {
       configurationState = .failed
       configurationErrorMessage = error.localizedDescription
       configurationDiagnostics = Self.buildInitializationDiagnostics(from: error)
+      glassesSessionCoordinator = nil
+      resetGlassesSessionSnapshot()
     }
   }
 
@@ -201,6 +265,9 @@ final class WearablesRuntimeManager: ObservableObject {
       guard let self else { return }
       for await state in wearables.registrationStateStream() {
         self.registrationState = state
+        if state != .registered {
+          await self.stopGlassesSession()
+        }
       }
     }
 
@@ -252,6 +319,36 @@ final class WearablesRuntimeManager: ObservableObject {
 
   private func updateActiveCompatibilityMessage() {
     activeCompatibilityMessage = devices.compactMap { compatibilityMessages[$0] }.first
+  }
+
+  private func ensureGlassesSessionCoordinator(using wearables: WearablesInterface) {
+    guard glassesSessionCoordinator == nil else { return }
+
+    let coordinator = GlassesSessionCoordinator(wearables: wearables)
+    coordinator.onSnapshotUpdated = { [weak self] snapshot in
+      guard let self else { return }
+      self.applyGlassesSessionSnapshot(snapshot)
+    }
+    glassesSessionCoordinator = coordinator
+  }
+
+  private func applyGlassesSessionSnapshot(_ snapshot: GlassesSessionCoordinator.Snapshot) {
+    glassesSessionPhase = snapshot.phase
+    glassesSessionState = snapshot.sessionState
+    activeGlassesDeviceName = snapshot.activeDeviceName
+    if let errorMessage = snapshot.errorMessage {
+      glassesSessionErrorMessage = errorMessage
+    } else if snapshot.phase != .failed {
+      glassesSessionErrorMessage = nil
+    }
+  }
+
+  private func resetGlassesSessionSnapshot() {
+    glassesSessionPhase = .inactive
+    glassesSessionState = nil
+    activeGlassesDeviceName = "-"
+    isGlassesSessionRequested = false
+    glassesSessionErrorMessage = nil
   }
 
   private func enableMockMode() async {

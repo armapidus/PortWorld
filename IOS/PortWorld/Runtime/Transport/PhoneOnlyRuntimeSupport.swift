@@ -6,6 +6,7 @@ enum PhoneAssistantRuntimeState: String, Codable, Sendable {
   case armedListening = "armed_listening"
   case connectingConversation = "connecting_conversation"
   case activeConversation = "active_conversation"
+  case pausedByHardware = "paused_by_hardware"
   case deactivating
 }
 

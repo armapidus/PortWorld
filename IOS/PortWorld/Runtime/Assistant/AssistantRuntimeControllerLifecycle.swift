@@ -104,6 +104,61 @@ extension AssistantRuntimeController {
     }
   }
 
+  func suspendForExternalRoutePause() async {
+    switch status.assistantRuntimeState {
+    case .inactive, .pausedByHardware, .deactivating:
+      return
+    case .armedListening, .connectingConversation, .activeConversation:
+      await transitionToPausedByHardware(infoText: "Glasses session paused. Waiting for resume.")
+    }
+  }
+
+  func resumeFromExternalRoutePause() async {
+    guard status.assistantRuntimeState == .pausedByHardware else { return }
+
+    backendReady = false
+    firstUplinkAckReceived = false
+    hasLoggedUplinkDuringPlayback = false
+    awaitingFirstWakePCMFrame = false
+    activeSessionID = nil
+    activeConversationStartedAtMs = nil
+    pendingRealtimeFrames.removeAll(keepingCapacity: false)
+    wakeListeningGeneration += 1
+    status.assistantRuntimeState = .armedListening
+    status.sessionID = "-"
+    status.transportStatusText = "idle"
+    status.uplinkStatusText = "armed_waiting_for_wake"
+    status.playbackStatusText = "armed_waiting_for_response"
+    status.infoText = "Glasses session running. Returning to armed listening."
+    await refreshSubsystemStatus()
+    publishStatus()
+    scheduleWakeListeningStart(generation: wakeListeningGeneration)
+  }
+
+  func transitionToPausedByHardware(infoText: String) async {
+    wakePhraseDetector.stop()
+    wakeWarmupTask?.cancel()
+    wakeWarmupTask = nil
+    wakeListeningGeneration += 1
+    awaitingFirstWakePCMFrame = false
+    activeSessionID = nil
+    backendReady = false
+    firstUplinkAckReceived = false
+    hasLoggedUplinkDuringPlayback = false
+    activeConversationStartedAtMs = nil
+    pendingRealtimeFrames.removeAll(keepingCapacity: false)
+    phoneAudioIO.cancelPlayback()
+    await backendSessionClient.disconnect(sendDeactivate: false)
+    status.assistantRuntimeState = .pausedByHardware
+    status.sessionID = "-"
+    status.transportStatusText = "paused"
+    status.uplinkStatusText = "paused_by_hardware"
+    status.playbackStatusText = "paused"
+    status.infoText = infoText
+    await refreshSubsystemStatus()
+    publishStatus()
+  }
+
   func scheduleWakeListeningStart(generation: Int, readyMessage: String? = nil) {
     wakeWarmupTask?.cancel()
     wakeWarmupTask = Task { @MainActor [weak self] in
