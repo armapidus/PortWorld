@@ -33,7 +33,8 @@ final class PhoneAssistantRuntimeViewModel: ObservableObject {
     switch selectedRoute {
     case .phone:
       pendingGlassesActivation = false
-      await controller.activate()
+      wearablesRuntimeManager.setGlassesAudioMode(.inactive)
+      await controller.activate(using: .phone)
 
     case .glasses:
       guard canActivateGlassesRoute else {
@@ -72,6 +73,9 @@ final class PhoneAssistantRuntimeViewModel: ObservableObject {
     guard wearablesRuntimeManager.isGlassesSessionRequested == false else { return }
     guard selectedRoute != route else { return }
     selectedRoute = route
+    if route == .phone {
+      wearablesRuntimeManager.setGlassesAudioMode(.inactive)
+    }
     publishMergedStatus()
   }
 
@@ -105,6 +109,12 @@ final class PhoneAssistantRuntimeViewModel: ObservableObject {
       guard let self else { return }
       self.controllerStatus = status
       self.publishMergedStatus()
+    }
+    controller.onGlassesAudioModeUpdated = { [weak self] mode, _ in
+      Task { @MainActor [weak self] in
+        self?.wearablesRuntimeManager.setGlassesAudioMode(mode)
+        self?.publishMergedStatus()
+      }
     }
   }
 
@@ -148,6 +158,18 @@ final class PhoneAssistantRuntimeViewModel: ObservableObject {
     wearablesRuntimeManager.$glassesSessionErrorMessage
       .sink { [weak self] _ in self?.handleWearablesRuntimeManagerChange() }
       .store(in: &cancellables)
+
+    wearablesRuntimeManager.$isHFPRouteAvailable
+      .sink { [weak self] _ in self?.publishMergedStatus() }
+      .store(in: &cancellables)
+
+    wearablesRuntimeManager.$glassesAudioMode
+      .sink { [weak self] _ in self?.publishMergedStatus() }
+      .store(in: &cancellables)
+
+    wearablesRuntimeManager.$glassesAudioDetailText
+      .sink { [weak self] _ in self?.publishMergedStatus() }
+      .store(in: &cancellables)
   }
 
   private func handleWearablesRuntimeManagerChange() {
@@ -172,7 +194,7 @@ final class PhoneAssistantRuntimeViewModel: ObservableObject {
         isStartingPhoneRuntimeForGlassesRoute == false {
         isStartingPhoneRuntimeForGlassesRoute = true
         pendingGlassesActivation = false
-        await controller.activate()
+        await controller.activate(using: .glasses)
         isStartingPhoneRuntimeForGlassesRoute = false
         return
       }
@@ -222,6 +244,9 @@ final class PhoneAssistantRuntimeViewModel: ObservableObject {
     mergedStatus.glassesReadinessKind = readiness.kind
     mergedStatus.glassesSessionText = glassesSessionText()
     mergedStatus.activeGlassesDeviceText = wearablesRuntimeManager.activeGlassesDeviceName
+    mergedStatus.glassesAudioModeText = glassesAudioModeText()
+    mergedStatus.hfpRouteText = wearablesRuntimeManager.isHFPRouteAvailable ? "ready" : "not_ready"
+    mergedStatus.glassesAudioDetailText = wearablesRuntimeManager.glassesAudioDetailText
     mergedStatus.canChangeRoute =
       controllerStatus.assistantRuntimeState == .inactive &&
       pendingGlassesActivation == false &&
@@ -284,7 +309,7 @@ final class PhoneAssistantRuntimeViewModel: ObservableObject {
     case .starting:
       return (
         "Starting glasses session",
-        "Requesting a device-owned DAT session before the assistant arms. Audio still uses the phone path in this step.",
+        "Requesting a device-owned DAT session before the assistant arms and selects the best available glasses audio path.",
         .neutral
       )
 
@@ -299,23 +324,37 @@ final class PhoneAssistantRuntimeViewModel: ObservableObject {
       fallthrough
 
     case .inactive:
+      if wearablesRuntimeManager.isHFPRouteAvailable {
+        return (
+          "Glasses detected",
+          "Glasses lifecycle is ready and Bluetooth HFP is available for live glasses audio.",
+          .success
+        )
+      }
       return (
         "Glasses detected",
-        "Glasses lifecycle can now activate through DAT. Audio still uses the phone path until the next step.",
+        "Glasses lifecycle can now activate through DAT. Without physical HFP hardware, audio will use the labeled phone fallback for development.",
         .success
       )
 
     case .running:
+      if wearablesRuntimeManager.glassesAudioMode == .glassesHFP {
+        return (
+          "Glasses audio live",
+          "DAT lifecycle and Bluetooth HFP audio are both active for the glasses route.",
+          .success
+        )
+      }
       return (
         "Glasses session live",
-        "DAT lifecycle is active for the selected route. Audio still uses the phone path in this step.",
+        wearablesRuntimeManager.glassesAudioDetailText,
         .success
       )
 
     case .paused:
       return (
         "Glasses paused",
-        "The glasses session is paused by hardware state. The assistant will resume when DAT returns to running.",
+        "The glasses session is paused by hardware state. The assistant will resume when DAT returns to running, keeping the same audio mode.",
         .warning
       )
 
@@ -372,5 +411,18 @@ final class PhoneAssistantRuntimeViewModel: ObservableObject {
       return sessionState.description
     }
     return wearablesRuntimeManager.glassesSessionPhase.rawValue
+  }
+
+  private func glassesAudioModeText() -> String {
+    switch wearablesRuntimeManager.glassesAudioMode {
+    case .inactive:
+      return "inactive"
+    case .phone:
+      return "phone"
+    case .glassesHFP:
+      return "hfp_live"
+    case .glassesMockFallback:
+      return "mock_fallback_phone_audio"
+    }
   }
 }

@@ -10,6 +10,13 @@ enum PhoneAssistantRuntimeState: String, Codable, Sendable {
   case deactivating
 }
 
+enum AssistantAudioMode: String, Codable, Sendable {
+  case inactive
+  case phone
+  case glassesHFP = "glasses_hfp"
+  case glassesMockFallback = "glasses_mock_fallback"
+}
+
 enum PhoneOnlyTransportError: Error, LocalizedError, Sendable {
   case notConnected
   case transport(String)
@@ -59,4 +66,23 @@ protocol PhoneOnlyAssistantPlaybackControlling: AnyObject {
   func prepareForBackground()
   func restoreFromBackground()
   func currentRouteDescription() -> String
+}
+
+@MainActor
+protocol AssistantAudioIOControlling: AnyObject {
+  var onWakePCMFrame: ((WakeWordPCMFrame) -> Void)? { get set }
+  var onRealtimePCMFrame: (@Sendable (Data, Int64) -> Void)? { get set }
+  var currentAudioMode: AssistantAudioMode { get }
+  var isHFPRouteReady: Bool { get }
+
+  func prepareForArmedListening() async throws
+  func appendAssistantPCMData(_ pcmData: Data) throws
+  func handlePlaybackControl(_ payload: PhoneOnlyPlaybackControlPayload)
+  func cancelPlayback()
+  func isAssistantPlaybackActive() -> Bool
+  func prepareForBackground()
+  func restoreFromForeground()
+  func stop() async
+  func stateDescription() -> String
+  func playbackRouteDescription() -> String
 }

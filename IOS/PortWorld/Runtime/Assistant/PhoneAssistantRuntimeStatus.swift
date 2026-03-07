@@ -22,9 +22,13 @@ struct PhoneAssistantRuntimeStatus {
   var glassesReadinessKind: GlassesReadinessKind = .neutral
   var glassesSessionText: String = "inactive"
   var activeGlassesDeviceText: String = "-"
+  var glassesAudioModeText: String = "inactive"
+  var hfpRouteText: String = "not_ready"
+  var glassesAudioDetailText: String = "No glasses audio path is active."
   var canChangeRoute: Bool = true
   var canActivateSelectedRoute: Bool = true
   var activationButtonTitle: String = "Activate Assistant"
+  var audioModeText: String = "inactive"
   var audioStatusText: String = "idle"
   var backendStatusText: String = "idle"
   var wakeStatusText: String = "idle"

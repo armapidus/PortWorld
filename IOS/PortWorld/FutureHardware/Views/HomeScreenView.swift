@@ -30,11 +30,11 @@ struct HomeScreenView: View {
   }
 
   private var registrationStatusSubtitle: String {
-    if isRegistered { return "Meta hardware features are available, but the assistant now runs phone-only by default." }
+    if isRegistered { return "Meta hardware features are available, and the main runtime can now choose live glasses audio or the mock-friendly fallback path." }
     if isRegistering {
       return "Waiting for Meta AI confirmation."
     }
-    return "Connect glasses for DAT features, or continue phone-only now."
+    return "Connect glasses for DAT features, or continue with the phone route now."
   }
 
   var body: some View {
@@ -120,6 +120,36 @@ struct HomeScreenView: View {
 
           HomeGlassCard {
             VStack(alignment: .leading, spacing: 10) {
+              Text("Audio readiness")
+                .font(.system(.headline, design: .rounded).weight(.semibold))
+                .foregroundColor(.white)
+
+              HomeProgressRow(
+                row: .init(
+                  id: "hfp-route",
+                  title: "Bluetooth HFP route",
+                  detail: wearablesRuntimeManager.isHFPRouteAvailable ? "Ready for live glasses audio" : "Not detected on this phone right now",
+                  status: wearablesRuntimeManager.isHFPRouteAvailable ? .done : .pending
+                )
+              )
+
+              HomeProgressRow(
+                row: .init(
+                  id: "audio-mode",
+                  title: "Current glasses audio mode",
+                  detail: glassesAudioModeDetail,
+                  status: glassesAudioStatus
+                )
+              )
+
+              Text(wearablesRuntimeManager.glassesAudioDetailText)
+                .font(.system(.caption, design: .rounded).weight(.medium))
+                .foregroundColor(.white.opacity(0.76))
+            }
+          }
+
+          HomeGlassCard {
+            VStack(alignment: .leading, spacing: 10) {
               Text("What you unlock")
                 .font(.system(.headline, design: .rounded).weight(.semibold))
                 .foregroundColor(.white)
@@ -159,7 +189,7 @@ struct HomeScreenView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
 
-        Text("The main runtime can now activate through a glasses-owned DAT session, while voice still uses the phone audio path until the next phase.")
+        Text(wearablesRuntimeManager.glassesAudioDetailText)
           .font(.system(.caption, design: .rounded).weight(.medium))
           .foregroundColor(.white.opacity(0.7))
           .multilineTextAlignment(.leading)
@@ -248,6 +278,30 @@ private extension HomeScreenView {
     if isRegistered { return .success }
     if isRegistering { return .active }
     return .inactive
+  }
+
+  var glassesAudioModeDetail: String {
+    switch wearablesRuntimeManager.glassesAudioMode {
+    case .inactive:
+      return "Inactive"
+    case .phone:
+      return "Phone audio"
+    case .glassesHFP:
+      return "Live HFP audio"
+    case .glassesMockFallback:
+      return "Phone fallback for mock development"
+    }
+  }
+
+  var glassesAudioStatus: HomeProgressRow.RowData.Status {
+    switch wearablesRuntimeManager.glassesAudioMode {
+    case .glassesHFP:
+      return .done
+    case .glassesMockFallback:
+      return .active
+    case .inactive, .phone:
+      return .pending
+    }
   }
 
   var progressRows: [HomeProgressRow.RowData] {

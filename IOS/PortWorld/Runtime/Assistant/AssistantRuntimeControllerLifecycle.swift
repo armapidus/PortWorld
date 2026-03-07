@@ -2,10 +2,13 @@
 import SwiftUI
 
 extension AssistantRuntimeController {
-  func activate() async {
+  func activate(using route: AssistantRoute) async {
     guard status.assistantRuntimeState == .inactive else { return }
+    selectAudioIO(for: route)
     status.errorText = ""
-    status.infoText = "Preparing phone microphone, speaker playback, and wake detection."
+    status.infoText = route == .glasses
+      ? "Preparing glasses audio routing and wake detection."
+      : "Preparing phone microphone, speaker playback, and wake detection."
     publishStatus()
 
     let authorization = await wakePhraseDetector.requestAuthorizationIfNeeded()
@@ -19,7 +22,7 @@ extension AssistantRuntimeController {
     }
 
     do {
-      try await phoneAudioIO.prepareForArmedListening()
+      try await activeAudioIO.prepareForArmedListening()
     } catch {
       status.assistantRuntimeState = .inactive
       status.errorText = error.localizedDescription
@@ -51,7 +54,7 @@ extension AssistantRuntimeController {
     let previousSessionID = activeSessionID ?? "-"
     debugLog("Deactivate requested from state=\(previousState.rawValue) session=\(previousSessionID)")
     status.assistantRuntimeState = .deactivating
-    status.infoText = "Stopping phone-only assistant."
+    status.infoText = "Stopping assistant runtime."
     publishStatus()
 
     debugLog("Stopping wake recognizer and cancelling warmup tasks")
@@ -61,8 +64,8 @@ extension AssistantRuntimeController {
     wakeListeningGeneration += 1
     debugLog("Disconnecting backend session session=\(previousSessionID)")
     await backendSessionClient.disconnect()
-    debugLog("Stopping phone audio I/O")
-    await phoneAudioIO.stop()
+    debugLog("Stopping active audio I/O route=\(activeAssistantRoute.rawValue)")
+    await activeAudioIO.stop()
 
     activeSessionID = nil
     backendReady = false
@@ -86,16 +89,16 @@ extension AssistantRuntimeController {
     switch phase {
     case .background:
       guard status.assistantRuntimeState != .inactive else { return }
-      phoneAudioIO.prepareForBackground()
+      activeAudioIO.prepareForBackground()
       if status.assistantRuntimeState == .activeConversation {
         status.infoText = "Active conversation continues while app is backgrounded if audio session remains available."
-        status.playbackRouteText = phoneAudioIO.playbackRouteDescription()
+        status.playbackRouteText = activeAudioIO.playbackRouteDescription()
         publishStatus()
       }
     case .active:
       guard status.assistantRuntimeState != .inactive else { return }
-      phoneAudioIO.restoreFromForeground()
-      status.playbackRouteText = phoneAudioIO.playbackRouteDescription()
+      activeAudioIO.restoreFromForeground()
+      status.playbackRouteText = activeAudioIO.playbackRouteDescription()
       publishStatus()
     case .inactive:
       break
@@ -147,7 +150,7 @@ extension AssistantRuntimeController {
     hasLoggedUplinkDuringPlayback = false
     activeConversationStartedAtMs = nil
     pendingRealtimeFrames.removeAll(keepingCapacity: false)
-    phoneAudioIO.cancelPlayback()
+    activeAudioIO.cancelPlayback()
     await backendSessionClient.disconnect(sendDeactivate: false)
     status.assistantRuntimeState = .pausedByHardware
     status.sessionID = "-"

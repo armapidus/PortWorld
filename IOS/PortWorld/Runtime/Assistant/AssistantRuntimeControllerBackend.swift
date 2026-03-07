@@ -34,10 +34,10 @@ extension AssistantRuntimeController {
         break
       }
       do {
-        try phoneAudioIO.appendAssistantPCMData(data)
+        try activeAudioIO.appendAssistantPCMData(data)
         let diagnostics = await backendSessionClient.diagnosticsSnapshot()
         status.playbackStatusText = "scheduled frames=\(diagnostics.inboundServerAudioFrameCount) bytes=\(diagnostics.inboundServerAudioBytes)"
-        status.playbackRouteText = phoneAudioIO.playbackRouteDescription()
+        status.playbackRouteText = activeAudioIO.playbackRouteDescription()
       } catch {
         status.playbackStatusText = "playback_failed"
         status.errorText = "Failed to play assistant audio: \(error.localizedDescription)"
@@ -56,7 +56,7 @@ extension AssistantRuntimeController {
         isLocallyInterruptingAssistantPlayback = false
         consecutiveLocalBargeInFrames = 0
       }
-      phoneAudioIO.handlePlaybackControl(payload)
+      activeAudioIO.handlePlaybackControl(payload)
 
     case .closed:
       if isResettingConversationToArmedState {

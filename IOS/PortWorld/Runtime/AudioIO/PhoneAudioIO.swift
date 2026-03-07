@@ -4,7 +4,7 @@ import AVFAudio
 import Foundation
 
 @MainActor
-final class PhoneAudioIO {
+final class PhoneAudioIO: AssistantAudioIOControlling {
   enum Error: LocalizedError {
     case sessionPreparationFailed(String)
     case startFailed(String)
@@ -29,6 +29,14 @@ final class PhoneAudioIO {
     didSet {
       audioManager.onRealtimePCMFrame = onRealtimePCMFrame
     }
+  }
+
+  var currentAudioMode: AssistantAudioMode {
+    .phone
+  }
+
+  var isHFPRouteReady: Bool {
+    false
   }
 
   private let audioManager: AudioCollectionManager

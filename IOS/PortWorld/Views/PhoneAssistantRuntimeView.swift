@@ -36,7 +36,7 @@ struct PhoneAssistantRuntimeView: View {
               .font(.system(.largeTitle, design: .rounded).weight(.bold))
               .foregroundColor(.white)
 
-            Text("Primary assistant runtime. Phone mode remains stable, and the glasses route now activates through DAT lifecycle while still using the phone audio path for this phase.")
+            Text("Primary assistant runtime. Phone mode remains stable, and the glasses route now activates through DAT lifecycle with live HFP audio when available, or a labeled phone fallback while developing with the mock device path.")
               .font(.system(.subheadline, design: .rounded).weight(.medium))
               .foregroundColor(.white.opacity(0.78))
           }
@@ -54,7 +54,7 @@ struct PhoneAssistantRuntimeView: View {
 
               RuntimeRouteButton(
                 title: "Glasses",
-                subtitle: "Next step",
+                subtitle: "DAT + audio aware",
                 isSelected: status.selectedRoute == .glasses,
                 isEnabled: status.canChangeRoute
               ) {
@@ -77,9 +77,11 @@ struct PhoneAssistantRuntimeView: View {
 
             LabeledContent("Glasses session", value: status.glassesSessionText)
             LabeledContent("Active glasses", value: status.activeGlassesDeviceText)
+            LabeledContent("Glasses audio", value: status.glassesAudioModeText)
+            LabeledContent("HFP route", value: status.hfpRouteText)
 
             if status.selectedRoute == .glasses {
-              Text("Glasses lifecycle now owns activation readiness. Voice still uses the phone mic and speaker path until the dedicated glasses audio step lands.")
+              Text(status.glassesAudioDetailText)
                 .font(.system(.caption, design: .rounded).weight(.medium))
                 .foregroundColor(.white.opacity(0.68))
             }
@@ -95,7 +97,8 @@ struct PhoneAssistantRuntimeView: View {
           }
 
           PhoneAssistantPanel(title: "Subsystem Status") {
-            LabeledContent("Phone audio", value: status.audioStatusText)
+            LabeledContent("Audio mode", value: status.audioModeText)
+            LabeledContent("Audio I/O", value: status.audioStatusText)
             LabeledContent("Backend client", value: status.backendStatusText)
             LabeledContent("Transport", value: status.transportStatusText)
             LabeledContent("Uplink", value: status.uplinkStatusText)

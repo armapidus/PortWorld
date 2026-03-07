@@ -10,8 +10,11 @@ final class AssistantRuntimeController {
 
   let config: PhoneOnlyRuntimeConfig
   let phoneAudioIO: PhoneAudioIO
+  let glassesAudioIO: GlassesAudioIO
   let backendSessionClient: BackendSessionClient
   let wakePhraseDetector: WakePhraseDetector
+  var activeAudioIO: AssistantAudioIOControlling
+  var activeAssistantRoute: AssistantRoute = .phone
 
   var wakeWarmupTask: Task<Void, Never>?
   var wakeListeningGeneration: Int = 0
@@ -31,29 +34,37 @@ final class AssistantRuntimeController {
 
   var status: PhoneAssistantRuntimeStatus
   var onStatusUpdated: ((PhoneAssistantRuntimeStatus) -> Void)?
+  var onGlassesAudioModeUpdated: ((AssistantAudioMode, Bool) -> Void)?
 
   init(
     config: PhoneOnlyRuntimeConfig,
     phoneAudioIO: PhoneAudioIO? = nil,
+    glassesAudioIO: GlassesAudioIO? = nil,
     backendSessionClient: BackendSessionClient? = nil,
     wakePhraseDetector: WakePhraseDetector? = nil
   ) {
     self.config = config
-    self.phoneAudioIO = phoneAudioIO ?? PhoneAudioIO()
+    let resolvedPhoneAudioIO = phoneAudioIO ?? PhoneAudioIO()
+    let resolvedGlassesAudioIO = glassesAudioIO ?? GlassesAudioIO()
+    self.phoneAudioIO = resolvedPhoneAudioIO
+    self.glassesAudioIO = resolvedGlassesAudioIO
     self.backendSessionClient = backendSessionClient ?? BackendSessionClient(
       webSocketURL: config.webSocketURL,
       requestHeaders: config.requestHeaders
     )
     self.wakePhraseDetector = wakePhraseDetector ?? WakePhraseDetector(config: config)
+    self.activeAudioIO = resolvedPhoneAudioIO
     self.status = PhoneAssistantRuntimeStatus(
       wakePhraseText: config.wakePhrase,
       sleepPhraseText: config.sleepPhrase,
       infoText: "Phone-only assistant ready."
     )
 
-    bindPhoneAudio()
+    bindAudioIO(resolvedPhoneAudioIO)
+    bindAudioIO(resolvedGlassesAudioIO)
     bindWakePhraseDetector()
     bindBackendEvents()
+    bindGlassesAudioMode()
   }
 
   deinit {
@@ -64,8 +75,8 @@ final class AssistantRuntimeController {
     }
   }
 
-  func bindPhoneAudio() {
-    phoneAudioIO.onWakePCMFrame = { [weak self] frame in
+  func bindAudioIO(_ audioIO: AssistantAudioIOControlling) {
+    audioIO.onWakePCMFrame = { [weak self] frame in
       guard let self else { return }
       if self.awaitingFirstWakePCMFrame, self.status.assistantRuntimeState == .armedListening {
         self.awaitingFirstWakePCMFrame = false
@@ -75,9 +86,21 @@ final class AssistantRuntimeController {
       }
       self.wakePhraseDetector.processPCMFrame(frame)
     }
-    phoneAudioIO.onRealtimePCMFrame = { [weak self] payload, timestampMs in
+    audioIO.onRealtimePCMFrame = { [weak self] payload, timestampMs in
       Task { @MainActor [weak self] in
         await self?.handleRealtimePCMFrame(payload, timestampMs: timestampMs)
+      }
+    }
+  }
+
+  func bindGlassesAudioMode() {
+    glassesAudioIO.onAudioModeChanged = { [weak self] mode, isHFPRouteReady in
+      guard let self else { return }
+      self.onGlassesAudioModeUpdated?(mode, isHFPRouteReady)
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        await self.refreshSubsystemStatus()
+        self.publishStatus()
       }
     }
   }
@@ -102,10 +125,11 @@ final class AssistantRuntimeController {
   func refreshSubsystemStatus() async {
     let wakeStatus = wakePhraseDetector.statusSnapshot()
     let diagnostics = await backendSessionClient.diagnosticsSnapshot()
-    status.audioStatusText = phoneAudioIO.stateDescription()
+    status.audioStatusText = activeAudioIO.stateDescription()
+    status.audioModeText = activeAudioIO.currentAudioMode.rawValue
     status.backendStatusText = await backendSessionClient.connectionStateText()
     status.wakeStatusText = wakeStatus.runtime
-    status.playbackRouteText = phoneAudioIO.playbackRouteDescription()
+    status.playbackRouteText = activeAudioIO.playbackRouteDescription()
     if status.assistantRuntimeState == .inactive {
       status.playbackStatusText = "idle"
     } else if status.playbackStatusText == "idle" {
@@ -129,5 +153,15 @@ final class AssistantRuntimeController {
     #if DEBUG
       print("[AssistantRuntimeController] \(message)")
     #endif
+  }
+
+  func selectAudioIO(for route: AssistantRoute) {
+    activeAssistantRoute = route
+    switch route {
+    case .phone:
+      activeAudioIO = phoneAudioIO
+    case .glasses:
+      activeAudioIO = glassesAudioIO
+    }
   }
 }

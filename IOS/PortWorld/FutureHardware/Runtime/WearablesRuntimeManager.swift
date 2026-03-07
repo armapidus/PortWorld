@@ -1,4 +1,5 @@
 // Shared app-scoped owner for DAT configuration, registration, discovery, and mock-device state.
+import AVFAudio
 import Combine
 import Foundation
 import MWDATCore
@@ -21,6 +22,9 @@ final class WearablesRuntimeManager: ObservableObject {
   @Published private(set) var glassesSessionPhase: GlassesSessionPhase = .inactive
   @Published private(set) var glassesSessionState: SessionState?
   @Published private(set) var activeGlassesDeviceName: String = "-"
+  @Published private(set) var isHFPRouteAvailable: Bool = false
+  @Published private(set) var glassesAudioMode: AssistantAudioMode = .inactive
+  @Published private(set) var glassesAudioDetailText: String = "No glasses audio path is active."
   @Published private(set) var isGlassesSessionRequested: Bool = false
   @Published private(set) var glassesSessionErrorMessage: String?
   @Published var showError: Bool = false
@@ -32,10 +36,12 @@ final class WearablesRuntimeManager: ObservableObject {
   private let configure: () throws -> Void
   private let wearablesProvider: () -> WearablesInterface
   private let mockDeviceController: MockDeviceController
+  private let audioSession: AVAudioSession
   private var wearables: WearablesInterface?
   private var glassesSessionCoordinator: GlassesSessionCoordinator?
   private var registrationTask: Task<Void, Never>?
   private var deviceStreamTask: Task<Void, Never>?
+  private var audioRouteObserver: NSObjectProtocol?
   private var compatibilityListenerTokens: [DeviceIdentifier: AnyListenerToken] = [:]
   private var compatibilityMessages: [DeviceIdentifier: String] = [:]
 
@@ -46,19 +52,26 @@ final class WearablesRuntimeManager: ObservableObject {
   init(
     configure: @escaping () throws -> Void = { try Wearables.configure() },
     wearablesProvider: @escaping () -> WearablesInterface = { Wearables.shared },
-    mockDeviceController: MockDeviceController? = nil
+    mockDeviceController: MockDeviceController? = nil,
+    audioSession: AVAudioSession = .sharedInstance()
   ) {
     self.configure = configure
     self.wearablesProvider = wearablesProvider
     self.mockDeviceController = mockDeviceController ?? MockDeviceController()
+    self.audioSession = audioSession
     self.isMockModeEnabled = false
     self.isMockDeviceReady = self.mockDeviceController.isEnabled
     self.isPreparingMockDevice = false
+    refreshAudioRouteAvailability()
+    registerAudioRouteObserverIfNeeded()
   }
 
   deinit {
     registrationTask?.cancel()
     deviceStreamTask?.cancel()
+    if let audioRouteObserver {
+      NotificationCenter.default.removeObserver(audioRouteObserver)
+    }
   }
 
   func startIfNeeded() async {
@@ -148,6 +161,11 @@ final class WearablesRuntimeManager: ObservableObject {
     showError = false
   }
 
+  func setGlassesAudioMode(_ mode: AssistantAudioMode) {
+    glassesAudioMode = mode
+    updateGlassesAudioDetail()
+  }
+
   func startGlassesSession() async {
     if configurationState != .ready {
       await startIfNeeded()
@@ -180,6 +198,7 @@ final class WearablesRuntimeManager: ObservableObject {
 
     isGlassesSessionRequested = true
     glassesSessionErrorMessage = nil
+    refreshAudioRouteAvailability()
 
     do {
       try await glassesSessionCoordinator.start()
@@ -347,8 +366,10 @@ final class WearablesRuntimeManager: ObservableObject {
     glassesSessionPhase = .inactive
     glassesSessionState = nil
     activeGlassesDeviceName = "-"
+    glassesAudioMode = .inactive
     isGlassesSessionRequested = false
     glassesSessionErrorMessage = nil
+    updateGlassesAudioDetail()
   }
 
   private func enableMockMode() async {
@@ -360,12 +381,14 @@ final class WearablesRuntimeManager: ObservableObject {
       try await mockDeviceController.enableMockDevice()
       isMockModeEnabled = true
       isMockDeviceReady = mockDeviceController.isEnabled
+      updateGlassesAudioDetail()
       #if DEBUG
         UserDefaults.standard.set(true, forKey: mockModePreferenceKey)
       #endif
     } catch {
       isMockModeEnabled = false
       isMockDeviceReady = false
+      updateGlassesAudioDetail()
       #if DEBUG
         UserDefaults.standard.set(false, forKey: mockModePreferenceKey)
       #endif
@@ -377,6 +400,7 @@ final class WearablesRuntimeManager: ObservableObject {
     mockDeviceController.disableMockDevice()
     isMockModeEnabled = false
     isMockDeviceReady = mockDeviceController.isEnabled
+    updateGlassesAudioDetail()
     #if DEBUG
       UserDefaults.standard.set(false, forKey: mockModePreferenceKey)
     #endif
@@ -385,6 +409,46 @@ final class WearablesRuntimeManager: ObservableObject {
   private func presentError(_ message: String) {
     errorMessage = message
     showError = true
+  }
+
+  private func registerAudioRouteObserverIfNeeded() {
+    guard audioRouteObserver == nil else { return }
+    audioRouteObserver = NotificationCenter.default.addObserver(
+      forName: AVAudioSession.routeChangeNotification,
+      object: audioSession,
+      queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated {
+        self?.refreshAudioRouteAvailability()
+      }
+    }
+  }
+
+  private func refreshAudioRouteAvailability() {
+    let currentRoute = audioSession.currentRoute
+    let inputReady = currentRoute.inputs.contains { $0.portType == .bluetoothHFP }
+    let outputReady = currentRoute.outputs.contains { $0.portType == .bluetoothHFP }
+    isHFPRouteAvailable = inputReady || outputReady
+    updateGlassesAudioDetail()
+  }
+
+  private func updateGlassesAudioDetail() {
+    switch glassesAudioMode {
+    case .inactive:
+      if isHFPRouteAvailable {
+        glassesAudioDetailText = "Bluetooth HFP is ready for live glasses audio on the next activation."
+      } else if isMockModeEnabled {
+        glassesAudioDetailText = "Mock device flow is available. The glasses route will use phone audio fallback until real HFP hardware is connected."
+      } else {
+        glassesAudioDetailText = "No live Bluetooth HFP route is detected. The glasses route will fall back to phone audio while developing without hardware."
+      }
+    case .phone:
+      glassesAudioDetailText = "Phone audio is active."
+    case .glassesHFP:
+      glassesAudioDetailText = "Glasses lifecycle and Bluetooth HFP audio are both active."
+    case .glassesMockFallback:
+      glassesAudioDetailText = "Glasses lifecycle is active, but audio is using the phone fallback because no live HFP route is available."
+    }
   }
 
   private static func isMetaWearablesCallback(_ url: URL) -> Bool {

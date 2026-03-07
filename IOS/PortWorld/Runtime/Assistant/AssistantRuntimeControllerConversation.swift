@@ -66,7 +66,7 @@ extension AssistantRuntimeController {
       return
     }
 
-    if phoneAudioIO.isAssistantPlaybackActive() {
+    if activeAudioIO.isAssistantPlaybackActive() {
       detectLocalBargeInIfNeeded(payload)
       if hasLoggedUplinkDuringPlayback == false {
         hasLoggedUplinkDuringPlayback = true
@@ -126,7 +126,7 @@ extension AssistantRuntimeController {
     }
 
     isResettingConversationToArmedState = true
-    phoneAudioIO.cancelPlayback()
+    activeAudioIO.cancelPlayback()
     activeSessionID = nil
     backendReady = false
     firstUplinkAckReceived = false
@@ -186,7 +186,7 @@ extension AssistantRuntimeController {
   }
 
   func detectLocalBargeInIfNeeded(_ payload: Data) {
-    guard phoneAudioIO.isAssistantPlaybackActive() else {
+    guard activeAudioIO.isAssistantPlaybackActive() else {
       consecutiveLocalBargeInFrames = 0
       return
     }
@@ -209,7 +209,7 @@ extension AssistantRuntimeController {
     debugLog(
       "Local barge-in triggered rms=\(String(format: "%.4f", rms)) frames=\(consecutiveLocalBargeInFrames)"
     )
-    phoneAudioIO.cancelPlayback()
+    activeAudioIO.cancelPlayback()
   }
 
   func payloadPCM16RMS(_ payload: Data) -> Double {
