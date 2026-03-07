@@ -1,21 +1,18 @@
+// View model that bridges assistant runtime actions and published UI status.
 import Combine
 import SwiftUI
 
 @MainActor
 final class PhoneAssistantRuntimeViewModel: ObservableObject {
-  let store: PhoneAssistantRuntimeStore
+  @Published private(set) var status: PhoneAssistantRuntimeStatus
 
   private let controller: AssistantRuntimeController
 
-  init(
-    store: PhoneAssistantRuntimeStore? = nil
-  ) {
-    let runtimeStore = store ?? PhoneAssistantRuntimeStore()
+  init() {
     let config = PhoneOnlyRuntimeConfig.load()
-    self.store = runtimeStore
     self.controller = AssistantRuntimeController(config: config)
+    self.status = controller.status
     bindController()
-    apply(snapshot: controller.snapshot)
   }
 
   func activateAssistant() async {
@@ -35,26 +32,9 @@ final class PhoneAssistantRuntimeViewModel: ObservableObject {
   }
 
   private func bindController() {
-    controller.onStatusUpdated = { [weak self] snapshot in
+    controller.onStatusUpdated = { [weak self] status in
       guard let self else { return }
-      self.apply(snapshot: snapshot)
+      self.status = status
     }
-  }
-
-  private func apply(snapshot: AssistantRuntimeController.StatusSnapshot) {
-    objectWillChange.send()
-    store.assistantRuntimeState = snapshot.assistantRuntimeState
-    store.audioStatusText = snapshot.audioStatusText
-    store.backendStatusText = snapshot.backendStatusText
-    store.wakeStatusText = snapshot.wakeStatusText
-    store.wakePhraseText = snapshot.wakePhraseText
-    store.sleepPhraseText = snapshot.sleepPhraseText
-    store.sessionID = snapshot.sessionID
-    store.transportStatusText = snapshot.transportStatusText
-    store.uplinkStatusText = snapshot.uplinkStatusText
-    store.playbackStatusText = snapshot.playbackStatusText
-    store.playbackRouteText = snapshot.playbackRouteText
-    store.infoText = snapshot.infoText
-    store.errorText = snapshot.errorText
   }
 }

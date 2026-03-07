@@ -1,3 +1,5 @@
+// Route, interruption, and engine-configuration observers for the assistant playback engine.
+
 import AVFAudio
 import Foundation
 

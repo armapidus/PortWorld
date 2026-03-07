@@ -1,3 +1,4 @@
+// Backend event binding and status updates for the phone-only assistant controller.
 import Foundation
 
 extension AssistantRuntimeController {
@@ -17,17 +18,17 @@ extension AssistantRuntimeController {
   func handleBackendEvent(_ envelope: BackendSessionClient.EventEnvelope) async {
     switch envelope.event {
     case .stateChanged(let state):
-      snapshot.backendStatusText = state.rawValue
-      snapshot.transportStatusText = state.rawValue
+      status.backendStatusText = state.rawValue
+      status.transportStatusText = state.rawValue
 
     case .sessionReady:
       debugLog("Received backend session.state active event#\(envelope.id)")
-      snapshot.transportStatusText = "ready"
+      status.transportStatusText = "ready"
       markConversationReady(source: "session_state_active")
 
     case .uplinkAcknowledged(let payload):
       firstUplinkAckReceived = true
-      snapshot.uplinkStatusText = "ack frames=\(payload.framesReceived) bytes=\(payload.bytesReceived)"
+      status.uplinkStatusText = "ack frames=\(payload.framesReceived) bytes=\(payload.bytesReceived)"
       debugLog("Received uplink ack event#\(envelope.id) frames=\(payload.framesReceived) bytes=\(payload.bytesReceived)")
 
     case .serverAudio(let data):
@@ -37,23 +38,23 @@ extension AssistantRuntimeController {
         try phoneAudioIO.appendAssistantPCMData(data)
         debugLog("appendAssistantPCMData completed for event#\(envelope.id) route=\(phoneAudioIO.playbackRouteDescription())")
         let diagnostics = await backendSessionClient.diagnosticsSnapshot()
-        snapshot.playbackStatusText = "scheduled frames=\(diagnostics.inboundServerAudioFrameCount) bytes=\(diagnostics.inboundServerAudioBytes)"
-        snapshot.playbackRouteText = phoneAudioIO.playbackRouteDescription()
+        status.playbackStatusText = "scheduled frames=\(diagnostics.inboundServerAudioFrameCount) bytes=\(diagnostics.inboundServerAudioBytes)"
+        status.playbackRouteText = phoneAudioIO.playbackRouteDescription()
       } catch {
-        snapshot.playbackStatusText = "playback_failed"
-        snapshot.errorText = "Failed to play assistant audio: \(error.localizedDescription)"
+        status.playbackStatusText = "playback_failed"
+        status.errorText = "Failed to play assistant audio: \(error.localizedDescription)"
       }
 
     case .playbackControl(let payload):
       debugLog("Received playback control event#\(envelope.id) command=\(payload.command.rawValue)")
-      snapshot.playbackStatusText = payload.command.rawValue
+      status.playbackStatusText = payload.command.rawValue
       phoneAudioIO.handlePlaybackControl(payload)
 
     case .closed:
       if isResettingConversationToArmedState {
         break
       }
-      if snapshot.assistantRuntimeState == .activeConversation || snapshot.assistantRuntimeState == .connectingConversation {
+      if status.assistantRuntimeState == .activeConversation || status.assistantRuntimeState == .connectingConversation {
         await resetConversationToArmedState(reason: "Connection closed. Listening for wake phrase again.")
       }
 
@@ -62,14 +63,14 @@ extension AssistantRuntimeController {
         debugLog("Ignoring expected backend disconnect error during reset: \(message)")
         break
       }
-      snapshot.errorText = message
-      if snapshot.assistantRuntimeState == .connectingConversation || snapshot.assistantRuntimeState == .activeConversation {
+      status.errorText = message
+      if status.assistantRuntimeState == .connectingConversation || status.assistantRuntimeState == .activeConversation {
         await resetConversationToArmedState(reason: "Conversation failed. Listening for wake phrase again.")
       }
     }
 
     await refreshSubsystemStatus()
-    publishSnapshot()
+    publishStatus()
   }
 
   func isExpectedDisconnectError(_ message: String) -> Bool {

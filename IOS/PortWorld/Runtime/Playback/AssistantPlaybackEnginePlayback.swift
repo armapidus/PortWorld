@@ -1,3 +1,5 @@
+// Playback queue handling and response-control commands for the assistant playback engine.
+
 import AVFAudio
 import Foundation
 

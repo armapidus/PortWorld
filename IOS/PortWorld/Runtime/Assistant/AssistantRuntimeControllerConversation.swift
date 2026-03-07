@@ -1,18 +1,19 @@
+// Conversation flow and realtime audio uplink handling for the phone-only assistant.
 import Foundation
 
 extension AssistantRuntimeController {
   func endConversation() async {
-    guard snapshot.assistantRuntimeState == .activeConversation || snapshot.assistantRuntimeState == .connectingConversation else { return }
+    guard status.assistantRuntimeState == .activeConversation || status.assistantRuntimeState == .connectingConversation else { return }
     do {
       try await backendSessionClient.sendEndTurn()
     } catch {
-      snapshot.errorText = "Failed to send end-turn: \(error.localizedDescription)"
+      status.errorText = "Failed to send end-turn: \(error.localizedDescription)"
     }
     await resetConversationToArmedState(reason: "Conversation ended. Listening for wake phrase again.")
   }
 
   func startConversation(from event: WakeWordDetectionEvent) async {
-    guard snapshot.assistantRuntimeState == .armedListening else { return }
+    guard status.assistantRuntimeState == .armedListening else { return }
 
     wakeWarmupTask?.cancel()
     wakeWarmupTask = nil
@@ -23,14 +24,14 @@ extension AssistantRuntimeController {
     isSuppressingRealtimeUplinkForPlayback = false
     awaitingFirstWakePCMFrame = false
     activeConversationStartedAtMs = nil
-    snapshot.errorText = ""
-    snapshot.assistantRuntimeState = .connectingConversation
-    snapshot.sessionID = activeSessionID ?? "-"
-    snapshot.transportStatusText = "connecting"
-    snapshot.uplinkStatusText = "waiting_for_backend_ready"
-    snapshot.playbackStatusText = "waiting_for_server_response"
-    snapshot.infoText = "Wake detected. Opening backend conversation."
-    publishSnapshot()
+    status.errorText = ""
+    status.assistantRuntimeState = .connectingConversation
+    status.sessionID = activeSessionID ?? "-"
+    status.transportStatusText = "connecting"
+    status.uplinkStatusText = "waiting_for_backend_ready"
+    status.playbackStatusText = "waiting_for_server_response"
+    status.infoText = "Wake detected. Opening backend conversation."
+    publishStatus()
 
     guard let activeSessionID else { return }
     await backendSessionClient.connect(sessionID: activeSessionID)
@@ -41,14 +42,14 @@ extension AssistantRuntimeController {
       debugLog("Conversation control messages sent; enabling realtime uplink for session \(activeSessionID)")
       markConversationReady(source: "control_messages_sent")
     } catch {
-      snapshot.errorText = "Failed to start backend conversation: \(error.localizedDescription)"
+      status.errorText = "Failed to start backend conversation: \(error.localizedDescription)"
       await resetConversationToArmedState(reason: "Listening for wake phrase again.")
       return
     }
   }
 
   func handleRealtimePCMFrame(_ payload: Data, timestampMs: Int64) async {
-    switch snapshot.assistantRuntimeState {
+    switch status.assistantRuntimeState {
     case .connectingConversation:
       bufferRealtimeFrame(payload, timestampMs: timestampMs)
       return
@@ -66,9 +67,9 @@ extension AssistantRuntimeController {
     if phoneAudioIO.shouldSuppressRealtimeUplink() {
       if isSuppressingRealtimeUplinkForPlayback == false {
         isSuppressingRealtimeUplinkForPlayback = true
-        snapshot.uplinkStatusText = "suppressed_during_playback"
+        status.uplinkStatusText = "suppressed_during_playback"
         debugLog("Suppressing realtime uplink while assistant playback is active")
-        publishSnapshot()
+        publishStatus()
       }
       return
     }
@@ -82,24 +83,24 @@ extension AssistantRuntimeController {
       if pendingRealtimeFrames.isEmpty == false {
         await flushPendingRealtimeFrames()
       }
-      if firstUplinkAckReceived == false, snapshot.uplinkStatusText == "streaming_live_audio" {
-        snapshot.uplinkStatusText = "sending_first_live_audio"
+      if firstUplinkAckReceived == false, status.uplinkStatusText == "streaming_live_audio" {
+        status.uplinkStatusText = "sending_first_live_audio"
         debugLog("Sending first live client audio frame timestamp=\(timestampMs)")
       }
       try await backendSessionClient.sendAudioFrame(payload, timestampMs: timestampMs)
       let diagnostics = await backendSessionClient.diagnosticsSnapshot()
-      snapshot.uplinkStatusText = "binary_sent=\(diagnostics.binarySendSuccessCount) last=\(diagnostics.lastBinaryFirstByteHex)"
+      status.uplinkStatusText = "binary_sent=\(diagnostics.binarySendSuccessCount) last=\(diagnostics.lastBinaryFirstByteHex)"
       if diagnostics.binarySendSuccessCount == 1 {
         debugLog("First binary client audio send completed bytes=\(diagnostics.lastOutboundBytes)")
       }
     } catch {
-      snapshot.errorText = "Failed to send client audio: \(error.localizedDescription)"
+      status.errorText = "Failed to send client audio: \(error.localizedDescription)"
     }
-    publishSnapshot()
+    publishStatus()
   }
 
   func handleSleepDetected(_ event: WakeWordDetectionEvent) async {
-    guard snapshot.assistantRuntimeState == .activeConversation else {
+    guard status.assistantRuntimeState == .activeConversation else {
       return
     }
 
@@ -137,15 +138,15 @@ extension AssistantRuntimeController {
     pendingRealtimeFrames.removeAll(keepingCapacity: false)
     wakeListeningGeneration += 1
     let generation = wakeListeningGeneration
-    snapshot.assistantRuntimeState = .armedListening
-    snapshot.sessionID = "-"
-    snapshot.transportStatusText = "idle"
-    snapshot.uplinkStatusText = "armed_waiting_for_wake"
-    snapshot.playbackStatusText = "armed_waiting_for_response"
-    snapshot.infoText = "Warming up wake detection."
+    status.assistantRuntimeState = .armedListening
+    status.sessionID = "-"
+    status.transportStatusText = "idle"
+    status.uplinkStatusText = "armed_waiting_for_wake"
+    status.playbackStatusText = "armed_waiting_for_response"
+    status.infoText = "Warming up wake detection."
     await backendSessionClient.disconnect(sendDeactivate: false)
     await refreshSubsystemStatus()
-    publishSnapshot()
+    publishStatus()
     scheduleWakeListeningStart(generation: generation, readyMessage: reason)
     isResettingConversationToArmedState = false
   }
@@ -154,9 +155,9 @@ extension AssistantRuntimeController {
     backendReady = true
     activeConversationStartedAtMs = Clocks.nowMs()
     awaitingFirstWakePCMFrame = false
-    snapshot.assistantRuntimeState = .activeConversation
-    snapshot.uplinkStatusText = firstUplinkAckReceived ? snapshot.uplinkStatusText : "streaming_live_audio"
-    snapshot.infoText = "Conversation active."
+    status.assistantRuntimeState = .activeConversation
+    status.uplinkStatusText = firstUplinkAckReceived ? status.uplinkStatusText : "streaming_live_audio"
+    status.infoText = "Conversation active."
     debugLog("Conversation active via \(source); pendingFrames=\(pendingRealtimeFrames.count)")
   }
 
@@ -176,11 +177,11 @@ extension AssistantRuntimeController {
       do {
         try await backendSessionClient.sendAudioFrame(frame.payload, timestampMs: frame.timestampMs)
       } catch {
-        snapshot.errorText = "Failed to flush client audio: \(error.localizedDescription)"
+        status.errorText = "Failed to flush client audio: \(error.localizedDescription)"
         return
       }
     }
     let diagnostics = await backendSessionClient.diagnosticsSnapshot()
-    snapshot.uplinkStatusText = "binary_sent=\(diagnostics.binarySendSuccessCount) last=\(diagnostics.lastBinaryFirstByteHex)"
+    status.uplinkStatusText = "binary_sent=\(diagnostics.binarySendSuccessCount) last=\(diagnostics.lastBinaryFirstByteHex)"
   }
 }

@@ -1,3 +1,4 @@
+// Shared clock helpers for producing runtime timestamps.
 import Foundation
 
 enum Clocks {

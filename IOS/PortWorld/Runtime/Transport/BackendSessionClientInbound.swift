@@ -1,3 +1,4 @@
+// Inbound receive loop and message decoding for the phone-only backend session client.
 import Foundation
 
 extension BackendSessionClient {

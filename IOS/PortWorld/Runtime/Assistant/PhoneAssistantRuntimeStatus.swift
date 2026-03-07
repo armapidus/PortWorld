@@ -1,5 +1,7 @@
-@MainActor
-final class PhoneAssistantRuntimeStore {
+// Shared UI-facing status model for the phone-only assistant runtime.
+import Foundation
+
+struct PhoneAssistantRuntimeStatus {
   var assistantRuntimeState: PhoneAssistantRuntimeState = .inactive
   var audioStatusText: String = "idle"
   var backendStatusText: String = "idle"

@@ -1,3 +1,5 @@
+// Bridges phone microphone capture and assistant playback for the active phone-only runtime.
+
 import AVFAudio
 import Foundation
 

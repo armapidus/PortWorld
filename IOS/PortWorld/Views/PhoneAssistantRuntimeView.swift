@@ -15,7 +15,7 @@ struct PhoneAssistantRuntimeView: View {
   }
 
   var body: some View {
-    let store = viewModel.store
+    let status = viewModel.status
 
     ZStack {
       LinearGradient(
@@ -42,28 +42,28 @@ struct PhoneAssistantRuntimeView: View {
           }
 
           PhoneAssistantPanel(title: "Assistant State") {
-            LabeledContent("Lifecycle", value: store.assistantRuntimeState.rawValue)
-            LabeledContent("Session", value: store.sessionID)
-            LabeledContent("Wake phrase", value: store.wakePhraseText)
-            LabeledContent("Sleep phrase", value: store.sleepPhraseText)
+            LabeledContent("Lifecycle", value: status.assistantRuntimeState.rawValue)
+            LabeledContent("Session", value: status.sessionID)
+            LabeledContent("Wake phrase", value: status.wakePhraseText)
+            LabeledContent("Sleep phrase", value: status.sleepPhraseText)
           }
 
           PhoneAssistantPanel(title: "Subsystem Status") {
-            LabeledContent("Phone audio", value: store.audioStatusText)
-            LabeledContent("Backend client", value: store.backendStatusText)
-            LabeledContent("Transport", value: store.transportStatusText)
-            LabeledContent("Uplink", value: store.uplinkStatusText)
-            LabeledContent("Playback", value: store.playbackStatusText)
-            LabeledContent("Wake detector", value: store.wakeStatusText)
-            LabeledContent("Playback route", value: store.playbackRouteText)
+            LabeledContent("Phone audio", value: status.audioStatusText)
+            LabeledContent("Backend client", value: status.backendStatusText)
+            LabeledContent("Transport", value: status.transportStatusText)
+            LabeledContent("Uplink", value: status.uplinkStatusText)
+            LabeledContent("Playback", value: status.playbackStatusText)
+            LabeledContent("Wake detector", value: status.wakeStatusText)
+            LabeledContent("Playback route", value: status.playbackRouteText)
           }
 
           PhoneAssistantPanel(title: "Notes") {
-            Text(store.infoText.isEmpty ? "No runtime notes." : store.infoText)
+            Text(status.infoText.isEmpty ? "No runtime notes." : status.infoText)
               .font(.system(.body, design: .rounded))
               .foregroundColor(.white.opacity(0.82))
-            if !store.errorText.isEmpty {
-              Text(store.errorText)
+            if !status.errorText.isEmpty {
+              Text(status.errorText)
                 .font(.system(.footnote, design: .rounded).weight(.semibold))
                 .foregroundColor(.red.opacity(0.9))
             }
@@ -76,7 +76,7 @@ struct PhoneAssistantRuntimeView: View {
     }
     .safeAreaInset(edge: .bottom) {
       VStack(spacing: 10) {
-        if store.canActivate {
+        if status.canActivate {
           Button {
             Task {
               await viewModel.activateAssistant()
@@ -93,7 +93,7 @@ struct PhoneAssistantRuntimeView: View {
           .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
 
-        if store.canDeactivate {
+        if status.canDeactivate {
           Button {
             Task {
               await viewModel.deactivateAssistant()
@@ -110,7 +110,7 @@ struct PhoneAssistantRuntimeView: View {
           .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
 
-        if store.canEndConversation {
+        if status.canEndConversation {
           Button {
             Task {
               await viewModel.endConversation()

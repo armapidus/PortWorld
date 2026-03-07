@@ -1,3 +1,4 @@
+// Outbound control and audio send path for the phone-only backend session client.
 import Foundation
 
 extension BackendSessionClient {

@@ -1,3 +1,4 @@
+// Phone-only facade that configures and bridges the active wake-word engine.
 import Foundation
 
 @MainActor

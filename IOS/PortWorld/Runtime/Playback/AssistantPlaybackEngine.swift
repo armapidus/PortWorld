@@ -1,3 +1,5 @@
+// Core assistant playback engine types and shared state for streamed phone-only audio responses.
+
 import AVFAudio
 import Foundation
 import OSLog

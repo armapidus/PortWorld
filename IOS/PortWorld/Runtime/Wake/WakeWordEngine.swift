@@ -1,3 +1,4 @@
+// Shared wake-word types and engine protocol for the phone-only assistant runtime.
 import Foundation
 
 struct WakeWordDetectionEvent {

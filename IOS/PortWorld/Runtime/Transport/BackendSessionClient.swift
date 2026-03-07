@@ -1,3 +1,4 @@
+// Phone-only websocket session actor that owns transport state and event delivery.
 import Foundation
 
 actor BackendSessionClient {

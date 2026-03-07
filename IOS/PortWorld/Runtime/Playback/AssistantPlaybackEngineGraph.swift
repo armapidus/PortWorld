@@ -1,3 +1,5 @@
+// Audio-graph connection and recovery helpers for the assistant playback engine.
+
 import AVFAudio
 import Foundation
 

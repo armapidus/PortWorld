@@ -1,3 +1,4 @@
+// Main-actor coordinator that owns phone-only assistant runtime state and service bindings.
 import Foundation
 
 @MainActor
@@ -5,22 +6,6 @@ final class AssistantRuntimeController {
   struct PendingRealtimeFrame {
     let payload: Data
     let timestampMs: Int64
-  }
-
-  struct StatusSnapshot {
-    var assistantRuntimeState: PhoneAssistantRuntimeState = .inactive
-    var audioStatusText: String = "idle"
-    var backendStatusText: String = "idle"
-    var wakeStatusText: String = "idle"
-    var wakePhraseText: String = ""
-    var sleepPhraseText: String = ""
-    var sessionID: String = "-"
-    var transportStatusText: String = "disconnected"
-    var uplinkStatusText: String = "idle"
-    var playbackStatusText: String = "idle"
-    var playbackRouteText: String = "-"
-    var infoText: String = ""
-    var errorText: String = ""
   }
 
   let config: PhoneOnlyRuntimeConfig
@@ -40,8 +25,8 @@ final class AssistantRuntimeController {
   var pendingRealtimeFrames: [PendingRealtimeFrame] = []
   let maxPendingRealtimeFrames = 24
 
-  var snapshot: StatusSnapshot
-  var onStatusUpdated: ((StatusSnapshot) -> Void)?
+  var status: PhoneAssistantRuntimeStatus
+  var onStatusUpdated: ((PhoneAssistantRuntimeStatus) -> Void)?
 
   init(
     config: PhoneOnlyRuntimeConfig,
@@ -56,7 +41,7 @@ final class AssistantRuntimeController {
       requestHeaders: config.requestHeaders
     )
     self.wakePhraseDetector = wakePhraseDetector ?? WakePhraseDetector(config: config)
-    self.snapshot = StatusSnapshot(
+    self.status = PhoneAssistantRuntimeStatus(
       wakePhraseText: config.wakePhrase,
       sleepPhraseText: config.sleepPhrase,
       infoText: "Phone-only assistant ready."
@@ -78,11 +63,11 @@ final class AssistantRuntimeController {
   func bindPhoneAudio() {
     phoneAudioIO.onWakePCMFrame = { [weak self] frame in
       guard let self else { return }
-      if self.awaitingFirstWakePCMFrame, self.snapshot.assistantRuntimeState == .armedListening {
+      if self.awaitingFirstWakePCMFrame, self.status.assistantRuntimeState == .armedListening {
         self.awaitingFirstWakePCMFrame = false
-        self.snapshot.infoText = "Say \"\(self.config.wakePhrase)\" to start a conversation."
+        self.status.infoText = "Say \"\(self.config.wakePhrase)\" to start a conversation."
         self.debugLog("Received first wake PCM frame after arming")
-        self.publishSnapshot()
+        self.publishStatus()
       }
       self.wakePhraseDetector.processPCMFrame(frame)
     }
@@ -105,35 +90,35 @@ final class AssistantRuntimeController {
       }
     }
     wakePhraseDetector.onError = { [weak self] message in
-      self?.snapshot.errorText = message
-      self?.publishSnapshot()
+      self?.status.errorText = message
+      self?.publishStatus()
     }
   }
 
   func refreshSubsystemStatus() async {
     let wakeStatus = wakePhraseDetector.statusSnapshot()
     let diagnostics = await backendSessionClient.diagnosticsSnapshot()
-    snapshot.audioStatusText = phoneAudioIO.stateDescription()
-    snapshot.backendStatusText = await backendSessionClient.connectionStateText()
-    snapshot.wakeStatusText = wakeStatus.runtime
-    snapshot.playbackRouteText = phoneAudioIO.playbackRouteDescription()
-    if snapshot.assistantRuntimeState == .inactive {
-      snapshot.playbackStatusText = "idle"
-    } else if snapshot.playbackStatusText == "idle" {
+    status.audioStatusText = phoneAudioIO.stateDescription()
+    status.backendStatusText = await backendSessionClient.connectionStateText()
+    status.wakeStatusText = wakeStatus.runtime
+    status.playbackRouteText = phoneAudioIO.playbackRouteDescription()
+    if status.assistantRuntimeState == .inactive {
+      status.playbackStatusText = "idle"
+    } else if status.playbackStatusText == "idle" {
       let inboundFrames = diagnostics.inboundServerAudioFrameCount
       if inboundFrames > 0 {
-        snapshot.playbackStatusText = "received frames=\(inboundFrames) bytes=\(diagnostics.inboundServerAudioBytes)"
+        status.playbackStatusText = "received frames=\(inboundFrames) bytes=\(diagnostics.inboundServerAudioBytes)"
       } else if diagnostics.lastPlaybackControlCommand != "none" {
-        snapshot.playbackStatusText = diagnostics.lastPlaybackControlCommand
+        status.playbackStatusText = diagnostics.lastPlaybackControlCommand
       }
     }
-    if !firstUplinkAckReceived && (snapshot.transportStatusText == "ready" || snapshot.transportStatusText == "connected") {
-      snapshot.uplinkStatusText = "binary_completed=\(diagnostics.binarySendSuccessCount)"
+    if !firstUplinkAckReceived && (status.transportStatusText == "ready" || status.transportStatusText == "connected") {
+      status.uplinkStatusText = "binary_completed=\(diagnostics.binarySendSuccessCount)"
     }
   }
 
-  func publishSnapshot() {
-    onStatusUpdated?(snapshot)
+  func publishStatus() {
+    onStatusUpdated?(status)
   }
 
   func debugLog(_ message: String) {

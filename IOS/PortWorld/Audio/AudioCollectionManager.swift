@@ -1,3 +1,5 @@
+// Coordinates the shared audio engine, microphone capture, and realtime frame delivery for the phone-only assistant.
+
 @preconcurrency import AVFAudio
 import Combine
 import Foundation

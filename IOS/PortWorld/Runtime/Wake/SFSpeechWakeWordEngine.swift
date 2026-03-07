@@ -1,3 +1,4 @@
+// Speech-recognition-backed wake-word engine for the phone-only assistant runtime.
 import AVFAudio
 import Foundation
 import OSLog

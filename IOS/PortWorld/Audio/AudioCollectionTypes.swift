@@ -1,3 +1,5 @@
+// Shared audio collection state, statistics, and frame types used by the phone-only capture pipeline.
+
 import Foundation
 
 enum AudioCollectionState: Equatable {

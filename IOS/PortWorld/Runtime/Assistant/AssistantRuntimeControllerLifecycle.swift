@@ -1,30 +1,31 @@
+// Lifecycle operations for activation, deactivation, and scene-phase handling.
 import SwiftUI
 
 extension AssistantRuntimeController {
   func activate() async {
-    guard snapshot.assistantRuntimeState == .inactive else { return }
-    snapshot.errorText = ""
-    snapshot.infoText = "Preparing phone microphone, speaker playback, and wake detection."
-    publishSnapshot()
+    guard status.assistantRuntimeState == .inactive else { return }
+    status.errorText = ""
+    status.infoText = "Preparing phone microphone, speaker playback, and wake detection."
+    publishStatus()
 
     let authorization = await wakePhraseDetector.requestAuthorizationIfNeeded()
     if authorization != .authorized && authorization != .notRequired {
-      snapshot.assistantRuntimeState = .inactive
-      snapshot.errorText = "Wake phrase authorization unavailable: \(authorization.rawValue)"
-      snapshot.infoText = ""
+      status.assistantRuntimeState = .inactive
+      status.errorText = "Wake phrase authorization unavailable: \(authorization.rawValue)"
+      status.infoText = ""
       await refreshSubsystemStatus()
-      publishSnapshot()
+      publishStatus()
       return
     }
 
     do {
       try await phoneAudioIO.prepareForArmedListening()
     } catch {
-      snapshot.assistantRuntimeState = .inactive
-      snapshot.errorText = error.localizedDescription
-      snapshot.infoText = ""
+      status.assistantRuntimeState = .inactive
+      status.errorText = error.localizedDescription
+      status.infoText = ""
       await refreshSubsystemStatus()
-      publishSnapshot()
+      publishStatus()
       return
     }
 
@@ -34,21 +35,21 @@ extension AssistantRuntimeController {
     awaitingFirstWakePCMFrame = false
     activeConversationStartedAtMs = nil
     wakeListeningGeneration += 1
-    snapshot.assistantRuntimeState = .armedListening
-    snapshot.transportStatusText = "idle"
-    snapshot.uplinkStatusText = "armed_waiting_for_wake"
-    snapshot.playbackStatusText = "armed_waiting_for_response"
-    snapshot.infoText = "Warming up wake detection."
+    status.assistantRuntimeState = .armedListening
+    status.transportStatusText = "idle"
+    status.uplinkStatusText = "armed_waiting_for_wake"
+    status.playbackStatusText = "armed_waiting_for_response"
+    status.infoText = "Warming up wake detection."
     await refreshSubsystemStatus()
-    publishSnapshot()
+    publishStatus()
     scheduleWakeListeningStart(generation: wakeListeningGeneration)
   }
 
   func deactivate() async {
-    guard snapshot.assistantRuntimeState != .inactive else { return }
-    snapshot.assistantRuntimeState = .deactivating
-    snapshot.infoText = "Stopping phone-only assistant."
-    publishSnapshot()
+    guard status.assistantRuntimeState != .inactive else { return }
+    status.assistantRuntimeState = .deactivating
+    status.infoText = "Stopping phone-only assistant."
+    publishStatus()
 
     wakePhraseDetector.stop()
     wakeWarmupTask?.cancel()
@@ -64,31 +65,31 @@ extension AssistantRuntimeController {
     awaitingFirstWakePCMFrame = false
     activeConversationStartedAtMs = nil
     isResettingConversationToArmedState = false
-    snapshot.assistantRuntimeState = .inactive
-    snapshot.sessionID = "-"
-    snapshot.transportStatusText = "disconnected"
-    snapshot.uplinkStatusText = "idle"
-    snapshot.playbackStatusText = "idle"
-    snapshot.infoText = "Assistant inactive."
+    status.assistantRuntimeState = .inactive
+    status.sessionID = "-"
+    status.transportStatusText = "disconnected"
+    status.uplinkStatusText = "idle"
+    status.playbackStatusText = "idle"
+    status.infoText = "Assistant inactive."
     await refreshSubsystemStatus()
-    publishSnapshot()
+    publishStatus()
   }
 
   func handleScenePhaseChange(_ phase: ScenePhase) {
     switch phase {
     case .background:
-      guard snapshot.assistantRuntimeState != .inactive else { return }
+      guard status.assistantRuntimeState != .inactive else { return }
       phoneAudioIO.prepareForBackground()
-      if snapshot.assistantRuntimeState == .activeConversation {
-        snapshot.infoText = "Active conversation continues while app is backgrounded if audio session remains available."
-        snapshot.playbackRouteText = phoneAudioIO.playbackRouteDescription()
-        publishSnapshot()
+      if status.assistantRuntimeState == .activeConversation {
+        status.infoText = "Active conversation continues while app is backgrounded if audio session remains available."
+        status.playbackRouteText = phoneAudioIO.playbackRouteDescription()
+        publishStatus()
       }
     case .active:
-      guard snapshot.assistantRuntimeState != .inactive else { return }
+      guard status.assistantRuntimeState != .inactive else { return }
       phoneAudioIO.restoreFromForeground()
-      snapshot.playbackRouteText = phoneAudioIO.playbackRouteDescription()
-      publishSnapshot()
+      status.playbackRouteText = phoneAudioIO.playbackRouteDescription()
+      publishStatus()
     case .inactive:
       break
     @unknown default:
@@ -100,20 +101,20 @@ extension AssistantRuntimeController {
     wakeWarmupTask?.cancel()
     wakeWarmupTask = Task { @MainActor [weak self] in
       guard let self else { return }
-      guard wakeListeningGeneration == generation, snapshot.assistantRuntimeState == .armedListening else { return }
+      guard wakeListeningGeneration == generation, status.assistantRuntimeState == .armedListening else { return }
       if wakePhraseDetector.isListening == false {
         awaitingFirstWakePCMFrame = true
-        snapshot.infoText = "Starting wake detection."
-        publishSnapshot()
+        status.infoText = "Starting wake detection."
+        publishStatus()
         debugLog("Starting wake recognizer for generation \(generation)")
         wakePhraseDetector.startArmedListening()
-        snapshot.infoText = readyMessage ?? "Listening for microphone frames."
+        status.infoText = readyMessage ?? "Listening for microphone frames."
       } else {
         awaitingFirstWakePCMFrame = false
-        snapshot.infoText = readyMessage ?? "Say \"\(config.wakePhrase)\" to start a conversation."
+        status.infoText = readyMessage ?? "Say \"\(config.wakePhrase)\" to start a conversation."
       }
       await refreshSubsystemStatus()
-      publishSnapshot()
+      publishStatus()
     }
   }
 }

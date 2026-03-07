@@ -1,3 +1,5 @@
+// Writes PCM audio buffers to WAV files for diagnostics and local capture workflows.
+
 import Foundation
 
 enum WavFileWriterError: Error {

@@ -1,3 +1,4 @@
+// Manual wake-word engine used when speech recognition is unavailable or disabled.
 import Foundation
 
 @MainActor
