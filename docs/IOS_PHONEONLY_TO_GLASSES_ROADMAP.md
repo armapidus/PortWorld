@@ -9,6 +9,7 @@ It is not a detailed implementation spec. It is a short process map for how we w
 ## Current Position
 
 - The phone-only assistant runtime now works end-to-end.
+- Wake and spoken sleep behavior are now working in the active runtime.
 - `IOS/PhoneOnly/` exists as a personal-reference source slice.
 - `IOS/PhoneOnly/` is not the production app target and should remain reference-only.
 - It exists to show what code is actually required for the current phone-only assistant to function.
@@ -42,27 +43,6 @@ We should not rebuild the product by re-expanding the old legacy assistant stack
 
 Every next layer should be added on top of a cleaner, smaller, better-owned codebase.
 
-## Pre-Refactor Blockers
-
-Before the phone-only cleanup/refactor phase starts in earnest, the current runtime still needs to close two behavior gaps:
-
-1. wake phrase reliability is still not fully stable
-2. the spoken sleep command path does not work yet
-
-These should be treated as pre-refactor blockers for the phone-only runtime.
-
-Reason:
-
-- we should avoid doing structural cleanup while core runtime behavior is still changing
-- the phone-only assistant loop should be stable before we optimize file ownership and reduce active-path surface further
-
-Practical implication:
-
-- fix wake
-- fix sleep
-- verify the complete phone-only loop
-- then begin the cleanup/refactor pass
-
 ## Planned Sequence
 
 ### 1. Stabilize and clean the phone-only runtime
@@ -84,6 +64,26 @@ Expected result:
 
 - files have clear ownership
 - the phone-only path can be understood without tracing through legacy DAT/runtime layers
+
+Status:
+
+- complete
+
+Evidence / outcome:
+
+- the shipping app is now phone-first and launches into the active assistant path in `IOS/PortWorld/`
+- `IOS/PhoneOnly/` is frozen reference-only instead of acting like a second maintained implementation
+- future-hardware / DAT setup is isolated as a secondary path rather than shaping app launch and the main runtime
+- the active runtime has been reduced, reorganized by subsystem, and stripped of the main legacy compatibility surfaces
+- state ownership is simpler:
+  - one runtime-owned UI status model
+  - no duplicate `PhoneAssistantRuntimeStore` layer
+- active files now carry purpose headers and the main Xcode/runtime logs have been trimmed back to higher-signal lifecycle, interruption, queue-pressure, and error events
+- targeted build and runtime verification confirmed that activate, armed listening, wake, realtime mic -> backend -> speaker, sleep, and deactivate behavior still work after the cleanup
+
+Execution trace:
+
+- full Phase 1 step-by-step record lives in `docs/intermediary/PHASE1_IMPLEMENTATION.md`
 
 ### 2. Turn the phone-only foundation into a glasses-capable runtime
 
