@@ -10,23 +10,24 @@ It is not a detailed implementation spec. It is a short process map for how we w
 
 - The phone-only assistant runtime now works end-to-end.
 - Wake and spoken sleep behavior are now working in the active runtime.
-- `IOS/PhoneOnly/` exists as a personal-reference source slice.
-- `IOS/PhoneOnly/` is not the production app target and should remain reference-only.
-- It exists to show what code is actually required for the current phone-only assistant to function.
+- the old `IOS/PhoneOnly/` reference slice has now been removed.
+- its purpose was to help reduce and clarify the active runtime during Phase 1.
+- that historical reasoning now lives in docs rather than in a parallel code tree.
 
-## Why `IOS/PhoneOnly/` Exists
+## Why `IOS/PhoneOnly/` Existed
 
-`IOS/PhoneOnly/` gives us a reduced view of the runtime so we can:
+`IOS/PhoneOnly/` gave us a reduced view of the runtime so we could:
 
 - see the minimum set of files involved in the phone-only assistant
 - reason about the active path without DAT, camera, or legacy runtime noise
 - improve code quality on the working assistant before adding more hardware and media complexity
 
-This folder is a reference and cleanup aid first, not the primary shipping app structure yet.
+That cleanup role is now complete.
+
+The source of truth is the active `IOS/PortWorld/` runtime plus the accompanying implementation notes in `docs/intermediary/PHASE1_IMPLEMENTATION.md`.
 
 ## Locked Decisions
 
-- `IOS/PhoneOnly/` stays reference-only.
 - The next cleanup priority is:
   - smallest possible active code surface
   - better file and folder ownership
@@ -72,7 +73,7 @@ Status:
 Evidence / outcome:
 
 - the shipping app is now phone-first and launches into the active assistant path in `IOS/PortWorld/`
-- `IOS/PhoneOnly/` is frozen reference-only instead of acting like a second maintained implementation
+- the old `IOS/PhoneOnly/` slice has been removed so there is no second phone-only code tree
 - future-hardware / DAT setup is isolated as a secondary path rather than shaping app launch and the main runtime
 - the active runtime has been reduced, reorganized by subsystem, and stripped of the main legacy compatibility surfaces
 - state ownership is simpler:
