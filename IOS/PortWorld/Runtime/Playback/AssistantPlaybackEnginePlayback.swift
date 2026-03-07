@@ -1,0 +1,160 @@
+import AVFAudio
+import Foundation
+
+extension AssistantPlaybackEngine {
+  public func appendPCMData(_ pcmData: Data, format incomingFormat: AssistantAudioFormat) throws {
+    guard incomingFormat.codec == "pcm_s16le" else {
+      throw AssistantPlaybackError.unsupportedCodec(incomingFormat.codec)
+    }
+    guard incomingFormat.sampleRate == Self.graphFormat.sampleRate else {
+      throw AssistantPlaybackError.unsupportedSampleRate(incomingFormat.sampleRate)
+    }
+    guard incomingFormat.channels == 1 else {
+      throw AssistantPlaybackError.unsupportedChannelCount(incomingFormat.channels)
+    }
+    guard pcmData.count % MemoryLayout<Int16>.size == 0 else {
+      throw AssistantPlaybackError.invalidPCMByteCount(pcmData.count)
+    }
+
+    if let currentFormat, currentFormat != incomingFormat {
+      throw AssistantPlaybackError.formatMismatch(expected: currentFormat, received: incomingFormat)
+    }
+
+    if hasLoggedFirstAppend == false {
+      hasLoggedFirstAppend = true
+      debugLog("[AssistantPlaybackEngine] First appendPCMData bytes=\(pcmData.count) format=\(incomingFormat.description) route=\(currentRouteDescription()) engineRunning=\(audioEngine.isRunning)")
+    }
+
+    guard audioSession.category == .playAndRecord else {
+      let expectedCategory = AVAudioSession.Category.playAndRecord.rawValue
+      let actualCategory = audioSession.category.rawValue
+      logFailureStateOnce(context: "invalid_audio_session_category")
+      throw AssistantPlaybackError.invalidAudioSessionCategory(expected: expectedCategory, actual: actualCategory)
+    }
+
+    let sampleCount = pcmData.count / MemoryLayout<Int16>.size
+    let frameCount = AVAudioFrameCount(sampleCount)
+
+    guard
+      let audioFormat = avAudioFormat(for: incomingFormat),
+      let buffer = AVAudioPCMBuffer(pcmFormat: audioFormat, frameCapacity: frameCount),
+      let channelData = buffer.int16ChannelData
+    else {
+      throw AssistantPlaybackError.unableToAllocateBuffer
+    }
+
+    buffer.frameLength = frameCount
+    pcmData.withUnsafeBytes { rawBuffer in
+      guard let source = rawBuffer.baseAddress else { return }
+      memcpy(channelData.pointee, source, pcmData.count)
+    }
+
+    let bufferDurationMs = Double(frameCount) / Double(incomingFormat.sampleRate) * 1000.0
+    let nowMs = nowMsProvider()
+
+    if queueState.shouldAttemptRecovery(
+      nowMs: nowMs,
+      thresholdMs: stuckDetectionThresholdMs,
+      maxConsecutiveChecks: Self.maxStuckChecksBeforeRecovery
+    ) {
+      let timeSinceLastDrain = nowMs - queueState.lastBufferDrainedAtMs
+      debugLog("[AssistantPlaybackEngine] Stuck playback detected: pendingCount=\(pendingBufferCount), timeSinceLastDrain=\(timeSinceLastDrain)ms, consecutiveChecks=\(queueState.consecutiveStuckChecks)")
+      debugLog("[AssistantPlaybackEngine] Attempting stuck playback recovery")
+      attemptPlaybackRecovery()
+    }
+
+    if pendingBufferDurationMs >= Self.maxPendingDurationMs || pendingBufferCount >= Self.maxPendingBuffers {
+      debugLog("[AssistantPlaybackEngine] Backpressure: high queue depth, pendingBufferCount=\(pendingBufferCount), pendingDurationMs=\(Int(pendingBufferDurationMs)), chunkDurationMs=\(Int(bufferDurationMs))")
+    }
+
+    try recoverAudioGraphIfNeeded(context: "pre_play")
+
+    if !playerNode.isPlaying {
+      debugLog("[AssistantPlaybackEngine] Starting player node")
+      playerNode.play()
+    }
+
+    queueState.recordScheduledBuffer(durationMs: bufferDurationMs, nowMs: nowMs)
+    playerNode.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self, bufferDurationMs] callbackType in
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        self.debugLog("[AssistantPlaybackEngine] Buffer completion callback type=\(String(describing: callbackType)) pendingCount=\(self.pendingBufferCount)")
+        self.queueState.recordBufferDrained(durationMs: bufferDurationMs, nowMs: self.nowMsProvider())
+        if self.hasLoggedFirstDrain == false {
+          self.hasLoggedFirstDrain = true
+          self.debugLog("[AssistantPlaybackEngine] First buffer drain completed route=\(self.currentRouteDescription()) pendingCount=\(self.pendingBufferCount)")
+        }
+      }
+    }
+    if hasLoggedFirstSchedule == false {
+      hasLoggedFirstSchedule = true
+      debugLog("[AssistantPlaybackEngine] First buffer scheduled route=\(currentRouteDescription()) playerNode.isPlaying=\(playerNode.isPlaying) pendingCount=\(pendingBufferCount)")
+    }
+  }
+
+  func handlePlaybackControl(_ payload: PhoneOnlyPlaybackControlPayload) {
+    switch payload.command {
+    case .startResponse:
+      startResponse()
+    case .stopResponse:
+      stopResponse()
+    case .cancelResponse:
+      cancelResponse()
+    }
+  }
+
+  public func startResponse() {
+    if pendingBufferCount > 0 {
+      debugLog(
+        "[AssistantPlaybackEngine] startResponse: resetting \(pendingBufferCount) pending buffers - possible orphaned completions from chime"
+      )
+    }
+
+    queueState.resetForStartResponse(nowMs: nowMsProvider())
+    hasLoggedFirstAppend = false
+    hasLoggedFirstSchedule = false
+    hasLoggedFirstDrain = false
+    hasLoggedFirstFailureState = false
+    if hasLoggedFirstStartResponse == false {
+      hasLoggedFirstStartResponse = true
+      debugLog("[AssistantPlaybackEngine] First startResponse received route=\(currentRouteDescription())")
+    } else {
+      debugLog("[AssistantPlaybackEngine] startResponse: counters reset, player node untouched")
+    }
+  }
+
+  public func stopResponse() {
+    // `stop_response` indicates the server has finished streaming chunks.
+    // Do not hard-stop here; stopping immediately can truncate queued audio
+    // before it reaches the Bluetooth route.
+  }
+
+  public func cancelResponse() {
+    playerNode.stop()
+    playerNode.reset()
+    queueState.resetForCancelResponse()
+    hasLoggedFirstAppend = false
+    hasLoggedFirstSchedule = false
+    hasLoggedFirstDrain = false
+    hasLoggedFirstFailureState = false
+    debugLog("[AssistantPlaybackEngine] cancelResponse: flushed playback queue")
+  }
+
+  public func shutdown() {
+    playerNode.stop()
+    queueState.resetForCancelResponse()
+    hasLoggedFirstAppend = false
+    hasLoggedFirstSchedule = false
+    hasLoggedFirstDrain = false
+    hasLoggedFirstFailureState = false
+    if isPlayerNodeAttached {
+      audioEngine.detach(playerNode)
+      isPlayerNodeAttached = false
+      isPlayerNodeConnected = false
+    }
+    if ownsEngine {
+      audioEngine.stop()
+    }
+    currentFormat = nil
+  }
+}

@@ -3,103 +3,6 @@ import Foundation
 import OSLog
 import Speech
 
-struct WakeWordDetectionEvent {
-  let wakePhrase: String
-  let timestampMs: Int64
-  let engine: String
-  let confidence: Float?
-}
-
-enum WakeWordEngineKind: String, Codable {
-  case manual
-  case sfspeechKeyword = "sfspeech_keyword"
-}
-
-enum WakeWordAuthorizationState: String, Codable {
-  case notRequired = "not_required"
-  case notDetermined = "not_determined"
-  case authorized
-  case denied
-  case restricted
-  case unavailable
-}
-
-enum WakeWordRuntimeStatus: String, Codable {
-  case idle
-  case requestingAuthorization = "requesting_authorization"
-  case listening
-  case fallbackManual = "fallback_manual"
-  case failed
-}
-
-struct WakeWordStatusSnapshot: Codable {
-  let engine: WakeWordEngineKind
-  let authorization: WakeWordAuthorizationState
-  let runtime: WakeWordRuntimeStatus
-  let detail: String?
-}
-
-struct WakeWordPCMFrame {
-  let samples: [Int16]
-  let sampleRateHz: Double
-  let channelCount: Int
-  let timestampMs: Int64
-}
-
-@MainActor
-protocol WakeWordEngine: AnyObject {
-  var onWakeDetected: ((WakeWordDetectionEvent) -> Void)? { get set }
-  var onSleepDetected: ((WakeWordDetectionEvent) -> Void)? { get set }
-  var onError: ((Error) -> Void)? { get set }
-  var onStatusChanged: ((WakeWordStatusSnapshot) -> Void)? { get set }
-  var isListening: Bool { get }
-  var engineKind: WakeWordEngineKind { get }
-
-  func currentAuthorizationStatus() -> WakeWordAuthorizationState
-  func requestAuthorizationIfNeeded() async -> WakeWordAuthorizationState
-  func startListening()
-  func stopListening()
-  func processPCMFrame(_ frame: WakeWordPCMFrame)
-}
-
-extension WakeWordEngine {
-  func processPCMFrame(
-    _ samples: [Int16],
-    timestampMs: Int64,
-    sampleRateHz: Double = 8_000,
-    channelCount: Int = 1
-  ) {
-    processPCMFrame(
-      WakeWordPCMFrame(
-        samples: samples,
-        sampleRateHz: sampleRateHz,
-        channelCount: channelCount,
-        timestampMs: timestampMs
-      )
-    )
-  }
-}
-
-enum WakeWordEngineError: LocalizedError {
-  case notListening
-  case recognizerUnavailable
-  case onDeviceRecognitionUnavailable
-  case recognitionTaskCreationFailed
-
-  var errorDescription: String? {
-    switch self {
-    case .notListening:
-      return "Wake engine is not listening"
-    case .recognizerUnavailable:
-      return "Speech recognizer is unavailable"
-    case .onDeviceRecognitionUnavailable:
-      return "On-device speech recognition is unavailable for this locale/device"
-    case .recognitionTaskCreationFailed:
-      return "Unable to start speech recognition task"
-    }
-  }
-}
-
 struct WakeWordRecognitionUpdate {
   let transcript: String
   let isFinal: Bool
@@ -190,9 +93,7 @@ private final class SFSpeechRecognizerAdapter: WakeWordSpeechRecognizer {
     with request: any WakeWordSpeechRecognitionRequest,
     resultHandler: @escaping (WakeWordRecognitionUpdate?, Error?) -> Void
   ) -> (any WakeWordSpeechRecognitionTask)? {
-    guard
-      let requestAdapter = request as? SFSpeechAudioBufferRecognitionRequestAdapter
-    else {
+    guard let requestAdapter = request as? SFSpeechAudioBufferRecognitionRequestAdapter else {
       resultHandler(
         nil,
         AdapterError.unsupportedRecognitionRequest(String(describing: type(of: request)))
@@ -209,75 +110,6 @@ private final class SFSpeechRecognizerAdapter: WakeWordSpeechRecognizer {
       }
       resultHandler(update, error)
     }
-  }
-}
-
-@MainActor
-final class ManualWakeWordEngine: WakeWordEngine {
-  var onWakeDetected: ((WakeWordDetectionEvent) -> Void)?
-  var onSleepDetected: ((WakeWordDetectionEvent) -> Void)?
-  var onError: ((Error) -> Void)?
-  var onStatusChanged: ((WakeWordStatusSnapshot) -> Void)?
-
-  private(set) var isListening: Bool = false
-  let engineKind: WakeWordEngineKind = .manual
-  private let defaultPhrase: String
-
-  init(defaultPhrase: String = "hey mario") {
-    self.defaultPhrase = defaultPhrase
-  }
-
-  func currentAuthorizationStatus() -> WakeWordAuthorizationState {
-    .notRequired
-  }
-
-  func requestAuthorizationIfNeeded() async -> WakeWordAuthorizationState {
-    .notRequired
-  }
-
-  func startListening() {
-    isListening = true
-    publishStatus(runtime: .listening)
-  }
-
-  func stopListening() {
-    isListening = false
-    publishStatus(runtime: .idle)
-  }
-
-  func processPCMFrame(_ frame: WakeWordPCMFrame) {
-    _ = frame
-  }
-
-  func triggerManualWake(
-    wakePhrase: String? = nil,
-    timestampMs: Int64,
-    confidence: Float = 1.0
-  ) {
-    guard isListening else {
-      onError?(WakeWordEngineError.notListening)
-      return
-    }
-
-    onWakeDetected?(
-      WakeWordDetectionEvent(
-        wakePhrase: wakePhrase ?? defaultPhrase,
-        timestampMs: timestampMs,
-        engine: engineKind.rawValue,
-        confidence: confidence
-      )
-    )
-  }
-
-  private func publishStatus(runtime: WakeWordRuntimeStatus, detail: String? = nil) {
-    onStatusChanged?(
-      WakeWordStatusSnapshot(
-        engine: engineKind,
-        authorization: .notRequired,
-        runtime: runtime,
-        detail: detail
-      )
-    )
   }
 }
 
@@ -649,7 +481,8 @@ final class SFSpeechWakeWordEngine: NSObject, WakeWordEngine {
       return nsError
     }
     if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError,
-       isTransientRecognitionNSError(underlying) {
+       isTransientRecognitionNSError(underlying)
+    {
       return underlying
     }
     return nil
