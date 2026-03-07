@@ -7,9 +7,20 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-			0C6663052F5351150084DE6C /* MWDATCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 0C6663042F5351150084DE6C /* MWDATCamera */; };
-			0C6663072F5351150084DE6C /* MWDATCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0C6663062F5351150084DE6C /* MWDATCore */; };
-			0C6663092F5351150084DE6C /* MWDATMockDevice in Frameworks */ = {isa = PBXBuildFile; productRef = 0C6663082F5351150084DE6C /* MWDATMockDevice */; };
+		0C6663052F5351150084DE6C /* MWDATCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 0C6663042F5351150084DE6C /* MWDATCamera */; };
+		0C6663072F5351150084DE6C /* MWDATCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0C6663062F5351150084DE6C /* MWDATCore */; };
+		0C6663092F5351150084DE6C /* MWDATMockDevice in Frameworks */ = {isa = PBXBuildFile; productRef = 0C6663082F5351150084DE6C /* MWDATMockDevice */; };
+		0C70BACB2F5B5CCB0056D629 /* RuntimeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BA9C2F5B5CCB0056D629 /* RuntimeCoordinator.swift */; };
+		0C70BACC2F5B5CCB0056D629 /* GatewayTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BA9F2F5B5CCB0056D629 /* GatewayTransport.swift */; };
+		0C70BACD2F5B5CCB0056D629 /* RealtimeTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BAA02F5B5CCB0056D629 /* RealtimeTransport.swift */; };
+		0C70BAD32F5B5CCB0056D629 /* RollingVideoBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BAA72F5B5CCB0056D629 /* RollingVideoBuffer.swift */; };
+		0C70BAD72F5B5CCB0056D629 /* SessionOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BAAB2F5B5CCB0056D629 /* SessionOrchestrator.swift */; };
+		0C70BAD92F5B5CCB0056D629 /* VisionFrameUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BAAD2F5B5CCB0056D629 /* VisionFrameUploader.swift */; };
+		0C70BADE2F5B5CCB0056D629 /* SessionStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BAB42F5B5CCB0056D629 /* SessionStateStore.swift */; };
+		0C70BADF2F5B5CCB0056D629 /* SessionViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BAB52F5B5CCB0056D629 /* SessionViewModel.swift */; };
+		0C70BAE62F5B5CCB0056D629 /* NonStreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BABE2F5B5CCB0056D629 /* NonStreamView.swift */; };
+		0C70BAE82F5B5CCB0056D629 /* StreamSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BAC02F5B5CCB0056D629 /* StreamSessionView.swift */; };
+		0C70BAE92F5B5CCB0056D629 /* StreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70BAC12F5B5CCB0056D629 /* StreamView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -19,6 +30,17 @@
 		0C66636B2F5361000084DE6C /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		0C66636C2F5361000084DE6C /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		0C66636D2F5361000084DE6C /* Config.xcconfig.template */ = {isa = PBXFileReference; lastKnownFileType = text; path = Config.xcconfig.template; sourceTree = "<group>"; };
+		0C70BA9C2F5B5CCB0056D629 /* RuntimeCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeCoordinator.swift; sourceTree = "<group>"; };
+		0C70BA9F2F5B5CCB0056D629 /* GatewayTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayTransport.swift; sourceTree = "<group>"; };
+		0C70BAA02F5B5CCB0056D629 /* RealtimeTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeTransport.swift; sourceTree = "<group>"; };
+		0C70BAA72F5B5CCB0056D629 /* RollingVideoBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RollingVideoBuffer.swift; sourceTree = "<group>"; };
+		0C70BAAB2F5B5CCB0056D629 /* SessionOrchestrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionOrchestrator.swift; sourceTree = "<group>"; };
+		0C70BAAD2F5B5CCB0056D629 /* VisionFrameUploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionFrameUploader.swift; sourceTree = "<group>"; };
+		0C70BAB42F5B5CCB0056D629 /* SessionStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStateStore.swift; sourceTree = "<group>"; };
+		0C70BAB52F5B5CCB0056D629 /* SessionViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionViewModel.swift; sourceTree = "<group>"; };
+		0C70BABE2F5B5CCB0056D629 /* NonStreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NonStreamView.swift; sourceTree = "<group>"; };
+		0C70BAC02F5B5CCB0056D629 /* StreamSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamSessionView.swift; sourceTree = "<group>"; };
+		0C70BAC12F5B5CCB0056D629 /* StreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -45,22 +67,23 @@
 /* Begin PBXGroup section */
 		0C6662D32F534F350084DE6C = {
 			isa = PBXGroup;
-				children = (
-					0C6662DE2F534F350084DE6C /* PortWorld */,
-					0C6662DD2F534F350084DE6C /* Products */,
-					0C66636E2F5361000084DE6C /* Config */,
-					0C66630A2F5353540084DE6C /* Info.plist */,
+			children = (
+				0C6662DE2F534F350084DE6C /* PortWorld */,
+				0C6662DD2F534F350084DE6C /* Products */,
+				0C66636E2F5361000084DE6C /* Config */,
+				0C66630A2F5353540084DE6C /* Info.plist */,
 				0C66635A2F535F2D0084DE6C /* PortWorld.entitlements */,
+				0C70BAFA2F5B9FC70056D629 /* Legacy */,
 			);
 			sourceTree = "<group>";
 		};
 		0C6662DD2F534F350084DE6C /* Products */ = {
-				isa = PBXGroup;
-				children = (
-					0C6662DC2F534F350084DE6C /* PortWorld.app */,
-				);
-				name = Products;
-				sourceTree = "<group>";
+			isa = PBXGroup;
+			children = (
+				0C6662DC2F534F350084DE6C /* PortWorld.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
 		};
 		0C66636E2F5361000084DE6C /* Config */ = {
 			isa = PBXGroup;
@@ -70,6 +93,72 @@
 				0C66636D2F5361000084DE6C /* Config.xcconfig.template */,
 			);
 			path = Config;
+			sourceTree = "<group>";
+		};
+		0C70BAFA2F5B9FC70056D629 /* Legacy */ = {
+			isa = PBXGroup;
+			children = (
+				0C70BAFB2F5B9FCC0056D629 /* AssistantRuntime */,
+			);
+			path = Legacy;
+			sourceTree = "<group>";
+		};
+		0C70BAFB2F5B9FCC0056D629 /* AssistantRuntime */ = {
+			isa = PBXGroup;
+			children = (
+				0C70BAFC2F5B9FCC0056D629 /* Views */,
+				0C70BAFD2F5B9FCC0056D629 /* ViewModels */,
+				0C70BAFE2F5B9FCC0056D629 /* Coordinators */,
+				0C70BAFF2F5B9FCC0056D629 /* Runtime */,
+			);
+			path = AssistantRuntime;
+			sourceTree = "<group>";
+		};
+		0C70BAFC2F5B9FCC0056D629 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				0C70BAC02F5B5CCB0056D629 /* StreamSessionView.swift */,
+				0C70BAC12F5B5CCB0056D629 /* StreamView.swift */,
+				0C70BABE2F5B5CCB0056D629 /* NonStreamView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		0C70BAFD2F5B9FCC0056D629 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				0C70BAB52F5B5CCB0056D629 /* SessionViewModel.swift */,
+				0C70BAB42F5B5CCB0056D629 /* SessionStateStore.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		0C70BAFE2F5B9FCC0056D629 /* Coordinators */ = {
+			isa = PBXGroup;
+			children = (
+				0C70BA9C2F5B5CCB0056D629 /* RuntimeCoordinator.swift */,
+			);
+			path = Coordinators;
+			sourceTree = "<group>";
+		};
+		0C70BAFF2F5B9FCC0056D629 /* Runtime */ = {
+			isa = PBXGroup;
+			children = (
+				0C70BAAB2F5B5CCB0056D629 /* SessionOrchestrator.swift */,
+				0C70BB002F5BA03E0056D629 /* Transport */,
+				0C70BAAD2F5B5CCB0056D629 /* VisionFrameUploader.swift */,
+				0C70BAA72F5B5CCB0056D629 /* RollingVideoBuffer.swift */,
+			);
+			path = Runtime;
+			sourceTree = "<group>";
+		};
+		0C70BB002F5BA03E0056D629 /* Transport */ = {
+			isa = PBXGroup;
+			children = (
+				0C70BA9F2F5B5CCB0056D629 /* GatewayTransport.swift */,
+				0C70BAA02F5B5CCB0056D629 /* RealtimeTransport.swift */,
+			);
+			path = Transport;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -113,8 +202,8 @@
 					0C6662DB2F534F350084DE6C = {
 						CreatedOnToolsVersion = 26.3;
 					};
-					};
 				};
+			};
 			buildConfigurationList = 0C6662D72F534F350084DE6C /* Build configuration list for PBXProject "PortWorld" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -126,16 +215,15 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				0C6663032F5351150084DE6C /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */,
-				9F13A0012F70000100C0FFEE /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0C6662DD2F534F350084DE6C /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-				targets = (
-					0C6662DB2F534F350084DE6C /* PortWorld */,
-				);
-			};
+			targets = (
+				0C6662DB2F534F350084DE6C /* PortWorld */,
+			);
+		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
@@ -153,6 +241,17 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0C70BACB2F5B5CCB0056D629 /* RuntimeCoordinator.swift in Sources */,
+				0C70BACC2F5B5CCB0056D629 /* GatewayTransport.swift in Sources */,
+				0C70BACD2F5B5CCB0056D629 /* RealtimeTransport.swift in Sources */,
+				0C70BAD32F5B5CCB0056D629 /* RollingVideoBuffer.swift in Sources */,
+				0C70BAD72F5B5CCB0056D629 /* SessionOrchestrator.swift in Sources */,
+				0C70BAD92F5B5CCB0056D629 /* VisionFrameUploader.swift in Sources */,
+				0C70BADE2F5B5CCB0056D629 /* SessionStateStore.swift in Sources */,
+				0C70BADF2F5B5CCB0056D629 /* SessionViewModel.swift in Sources */,
+				0C70BAE62F5B5CCB0056D629 /* NonStreamView.swift in Sources */,
+				0C70BAE82F5B5CCB0056D629 /* StreamSessionView.swift in Sources */,
+				0C70BAE92F5B5CCB0056D629 /* StreamView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
