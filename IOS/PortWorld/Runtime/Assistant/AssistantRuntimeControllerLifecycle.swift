@@ -47,15 +47,21 @@ extension AssistantRuntimeController {
 
   func deactivate() async {
     guard status.assistantRuntimeState != .inactive else { return }
+    let previousState = status.assistantRuntimeState
+    let previousSessionID = activeSessionID ?? "-"
+    debugLog("Deactivate requested from state=\(previousState.rawValue) session=\(previousSessionID)")
     status.assistantRuntimeState = .deactivating
     status.infoText = "Stopping phone-only assistant."
     publishStatus()
 
+    debugLog("Stopping wake recognizer and cancelling warmup tasks")
     wakePhraseDetector.stop()
     wakeWarmupTask?.cancel()
     wakeWarmupTask = nil
     wakeListeningGeneration += 1
+    debugLog("Disconnecting backend session session=\(previousSessionID)")
     await backendSessionClient.disconnect()
+    debugLog("Stopping phone audio I/O")
     await phoneAudioIO.stop()
 
     activeSessionID = nil
@@ -73,6 +79,7 @@ extension AssistantRuntimeController {
     status.infoText = "Assistant inactive."
     await refreshSubsystemStatus()
     publishStatus()
+    debugLog("Deactivate completed; runtime state=\(status.assistantRuntimeState.rawValue)")
   }
 
   func handleScenePhaseChange(_ phase: ScenePhase) {

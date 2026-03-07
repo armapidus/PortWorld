@@ -143,6 +143,9 @@ extension AssistantPlaybackEngine {
   }
 
   public func shutdown() {
+    debugLog(
+      "[AssistantPlaybackEngine] shutdown: pendingBufferCount=\(pendingBufferCount) pendingDurationMs=\(Int(pendingBufferDurationMs)) engineRunning=\(audioEngine.isRunning)"
+    )
     playerNode.stop()
     queueState.resetForCancelResponse()
     hasLoggedFirstAppend = false
@@ -158,5 +161,6 @@ extension AssistantPlaybackEngine {
       audioEngine.stop()
     }
     currentFormat = nil
+    debugLog("[AssistantPlaybackEngine] shutdown complete")
   }
 }

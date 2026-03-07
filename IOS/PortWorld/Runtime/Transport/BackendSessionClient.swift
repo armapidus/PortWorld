@@ -88,6 +88,10 @@ actor BackendSessionClient {
       connectionState == .connecting ||
       connectionState == .connected
 
+    debugLog(
+      "Disconnect requested session=\(activeSessionID ?? "-") sendDeactivate=\(sendDeactivate) emitLifecycleEvents=\(emitLifecycleEvents) hadActiveConnection=\(hadActiveConnection)"
+    )
+
     if sendDeactivate, let sessionID {
       Task {
         try? await self.sendTextEnvelope(type: .sessionDeactivate, sessionID: sessionID)
@@ -104,9 +108,13 @@ actor BackendSessionClient {
     connectionState = .disconnected
     sessionID = nil
 
-    guard emitLifecycleEvents, hadActiveConnection else { return }
+    guard emitLifecycleEvents, hadActiveConnection else {
+      debugLog("Disconnect completed without lifecycle events")
+      return
+    }
     yieldEvent(.stateChanged(.disconnected), sessionID: activeSessionID)
     yieldEvent(.closed, sessionID: activeSessionID)
+    debugLog("Disconnect completed with disconnected/closed lifecycle events")
   }
 
   func connectionStateText() -> String {

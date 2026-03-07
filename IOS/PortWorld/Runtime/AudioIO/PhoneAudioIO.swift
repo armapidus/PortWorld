@@ -142,10 +142,14 @@ final class PhoneAudioIO {
   }
 
   func stop() async {
+    debugLog(
+      "Stopping phone audio I/O responseStreaming=\(isResponseStreaming) playbackPending=\(playbackEngine.hasActivePendingPlayback()) state=\(stateDescription())"
+    )
     cancelPlayback()
     playbackEngine.shutdown()
     await audioManager.stop()
     try? await audioSessionLeaseManager.releaseIfNeeded()
+    debugLog("Phone audio I/O stopped state=\(stateDescription()) route=\(playbackRouteDescription())")
   }
 
   func stateDescription() -> String {
