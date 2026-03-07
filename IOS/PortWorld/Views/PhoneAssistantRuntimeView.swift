@@ -32,18 +32,60 @@ struct PhoneAssistantRuntimeView: View {
       ScrollView(showsIndicators: false) {
         VStack(alignment: .leading, spacing: 18) {
           VStack(alignment: .leading, spacing: 8) {
-            Text("Phone-Only Assistant")
+            Text("Assistant Runtime")
               .font(.system(.largeTitle, design: .rounded).weight(.bold))
               .foregroundColor(.white)
 
-            Text("Primary assistant runtime. Phone mic, speaker, wake, and backend conversation run without the legacy DAT session stack.")
+            Text("Primary assistant runtime. Phone mode is live today; glasses route selection and readiness now surface here ahead of lifecycle integration.")
               .font(.system(.subheadline, design: .rounded).weight(.medium))
               .foregroundColor(.white.opacity(0.78))
+          }
+
+          PhoneAssistantPanel(title: "Runtime Route") {
+            HStack(spacing: 10) {
+              RuntimeRouteButton(
+                title: "Phone",
+                subtitle: "Live now",
+                isSelected: status.selectedRoute == .phone,
+                isEnabled: status.canChangeRoute
+              ) {
+                viewModel.selectRoute(.phone)
+              }
+
+              RuntimeRouteButton(
+                title: "Glasses",
+                subtitle: "Next step",
+                isSelected: status.selectedRoute == .glasses,
+                isEnabled: status.canChangeRoute
+              ) {
+                viewModel.selectRoute(.glasses)
+              }
+            }
+
+            HStack(spacing: 8) {
+              Circle()
+                .fill(glassesReadinessColor(status.glassesReadinessKind))
+                .frame(width: 10, height: 10)
+              Text(status.glassesReadinessTitle)
+                .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                .foregroundColor(.white.opacity(0.95))
+            }
+
+            Text(status.glassesReadinessDetail)
+              .font(.system(.caption, design: .rounded).weight(.medium))
+              .foregroundColor(.white.opacity(0.74))
+
+            if status.selectedRoute == .glasses {
+              Text("Glasses route selection is visible now, but activation remains disabled until session lifecycle is integrated in the next step.")
+                .font(.system(.caption, design: .rounded).weight(.medium))
+                .foregroundColor(.white.opacity(0.68))
+            }
           }
 
           PhoneAssistantPanel(title: "Assistant State") {
             LabeledContent("Lifecycle", value: status.assistantRuntimeState.rawValue)
             LabeledContent("Session", value: status.sessionID)
+            LabeledContent("Selected route", value: status.selectedRoute.rawValue)
             LabeledContent("Wake phrase", value: status.wakePhraseText)
             LabeledContent("Sleep phrase", value: status.sleepPhraseText)
           }
@@ -76,21 +118,22 @@ struct PhoneAssistantRuntimeView: View {
     }
     .safeAreaInset(edge: .bottom) {
       VStack(spacing: 10) {
-        if status.canActivate {
+        if status.assistantRuntimeState == .inactive {
           Button {
             Task {
               await viewModel.activateAssistant()
             }
           } label: {
-            Text("Activate Assistant")
+            Text(status.activationButtonTitle)
               .font(.system(.headline, design: .rounded).weight(.semibold))
               .foregroundColor(.white)
               .frame(maxWidth: .infinity)
               .frame(height: 52)
           }
           .buttonStyle(.plain)
-          .background(Color.appPrimary)
+          .background(status.canActivateSelectedRoute ? Color.appPrimary : Color.gray.opacity(0.55))
           .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+          .disabled(status.canActivateSelectedRoute == false)
         }
 
         if status.canDeactivate {
@@ -154,6 +197,21 @@ struct PhoneAssistantRuntimeView: View {
   }
 }
 
+private extension PhoneAssistantRuntimeView {
+  func glassesReadinessColor(_ kind: GlassesReadinessKind) -> Color {
+    switch kind {
+    case .neutral:
+      return Color.white.opacity(0.75)
+    case .success:
+      return Color.green.opacity(0.9)
+    case .warning:
+      return Color.orange.opacity(0.92)
+    case .error:
+      return Color.red.opacity(0.92)
+    }
+  }
+}
+
 private struct PhoneAssistantPanel<Content: View>: View {
   let title: String
   @ViewBuilder let content: Content
@@ -170,5 +228,38 @@ private struct PhoneAssistantPanel<Content: View>: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(Color.white.opacity(0.1))
     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+  }
+}
+
+private struct RuntimeRouteButton: View {
+  let title: String
+  let subtitle: String
+  let isSelected: Bool
+  let isEnabled: Bool
+  let action: () -> Void
+
+  var body: some View {
+    Button(action: action) {
+      VStack(alignment: .leading, spacing: 4) {
+        Text(title)
+          .font(.system(.subheadline, design: .rounded).weight(.semibold))
+          .foregroundColor(.white)
+        Text(subtitle)
+          .font(.system(.caption, design: .rounded).weight(.medium))
+          .foregroundColor(.white.opacity(0.72))
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.vertical, 12)
+      .padding(.horizontal, 14)
+      .background(isSelected ? Color.appPrimary.opacity(0.9) : Color.white.opacity(0.12))
+      .overlay(
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+          .stroke(isSelected ? Color.white.opacity(0.36) : Color.white.opacity(0.12), lineWidth: 1)
+      )
+      .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+    .buttonStyle(.plain)
+    .disabled(isEnabled == false)
+    .opacity(isEnabled ? 1 : 0.65)
   }
 }
