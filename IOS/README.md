@@ -108,22 +108,18 @@ These are historical reference only.
 
 Do not extend them for new assistant behavior unless a migration task explicitly says so.
 
-### Reference-Only Phone Slice
+### Removed Reference Slice
 
-- `IOS/PhoneOnly/`
+- `IOS/PhoneOnly/` used to exist as a temporary reduced reference snapshot of the phone-only source surface
 
-This folder exists as a personal reference snapshot of the reduced phone-only source surface.
+That folder has now been removed.
 
-It is:
+Its purpose was to support the Phase 1 cleanup by making the active assistant path easier to reason about before the main `IOS/PortWorld/` runtime was cleaned up.
 
-- useful for understanding what files the phone-only assistant depends on
-- useful for future cleanup and code-quality work
+The source of truth is now:
 
-It is not:
-
-- the production app target
-- a standalone shipping app
-- the implementation authority over `IOS/PortWorld/`
+- `IOS/PortWorld/` for active code
+- `docs/intermediary/PHASE1_IMPLEMENTATION.md` for the historical Phase 1 execution trace
 
 ## Architecture Snapshot
 
@@ -240,8 +236,6 @@ When working in the iOS app, assume this ordering:
 
 1. trust the active phone-only runtime first
 2. treat DAT / glasses code as retained future integration work
-3. treat `IOS/PhoneOnly/` as reference-only
-4. treat `IOS/Legacy/AssistantRuntime/` and `docs/archived/` as historical context only
+3. treat `IOS/Legacy/AssistantRuntime/` and `docs/archived/` as historical context only
 
 If a file or flow conflicts with the working phone-only runtime, the phone-only runtime is the one that should win unless the task is explicitly about hardware reintegration or migration.
-
