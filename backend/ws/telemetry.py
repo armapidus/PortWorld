@@ -26,6 +26,8 @@ class SessionTelemetry:
         has_bytes_payload = isinstance(
             message.get("bytes"), (bytes, bytearray, memoryview)
         )
+        if has_bytes_payload and not has_text_payload:
+            return
         logger.warning(
             "WS_RECEIVE_SHAPE connection_id=%s type=%s has_text=%s has_bytes=%s text_len=%s byte_len=%s",
             self.connection_id,
@@ -95,38 +97,19 @@ class SessionTelemetry:
                 self.client_audio_total_bytes,
                 frame_ts_ms,
             )
-        elif self.client_audio_frame_count <= 10:
-            logger.warning(
-                "Client audio frame received connection_id=%s session=%s frame=%s bytes=%s total_bytes=%s ts_ms=%s",
-                self.connection_id,
-                active_session.session_id,
-                self.client_audio_frame_count,
-                len(payload_bytes),
-                self.client_audio_total_bytes,
-                frame_ts_ms,
-            )
-        elif self.client_audio_frame_count % self.uplink_ack_every_n_frames == 0:
-            logger.warning(
-                "Client audio frame count connection_id=%s session=%s frames=%s total_bytes=%s ts_ms=%s",
-                self.connection_id,
-                active_session.session_id,
-                self.client_audio_frame_count,
-                self.client_audio_total_bytes,
-                frame_ts_ms,
-            )
-
         if (
             self.client_audio_frame_count == 1
             or self.client_audio_frame_count % self.uplink_ack_every_n_frames == 0
         ):
-            logger.warning(
-                "WS_UPLINK_ACK_PREP connection_id=%s session=%s frames_received=%s bytes_received=%s probe_acknowledged=%s",
-                self.connection_id,
-                active_session.session_id,
-                self.client_audio_frame_count,
-                self.client_audio_total_bytes,
-                False,
-            )
+            if self.client_audio_frame_count == 1:
+                logger.warning(
+                    "WS_UPLINK_ACK_PREP connection_id=%s session=%s frames_received=%s bytes_received=%s probe_acknowledged=%s",
+                    self.connection_id,
+                    active_session.session_id,
+                    self.client_audio_frame_count,
+                    self.client_audio_total_bytes,
+                    False,
+                )
             self.did_emit_uplink_ack = True
             self.uplink_ack_count += 1
             return {

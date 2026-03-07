@@ -57,6 +57,7 @@ class OpenAIRealtimeClient:
         instructions: str,
         voice: str,
         include_turn_detection: bool = False,
+        trace_events: bool = False,
         base_url: str = "wss://api.openai.com/v1/realtime",
     ) -> None:
         if not api_key.strip():
@@ -69,12 +70,15 @@ class OpenAIRealtimeClient:
         self._instructions = instructions
         self._voice = voice
         self._include_turn_detection = include_turn_detection
+        self._trace_events = trace_events
         self._base_url = base_url
 
         self._ws: Any | None = None
         self.audio_event_names = RealtimeAudioEventNames()
         self._session_init_schema_mode = "current"
         self._legacy_schema_retry_attempted = False
+        self._input_audio_append_count = 0
+        self._output_audio_delta_count = 0
 
     @property
     def is_connected(self) -> bool:
@@ -120,6 +124,13 @@ class OpenAIRealtimeClient:
                 f"Failed to connect to realtime endpoint: {self.websocket_url}"
             ) from exc
 
+        if self._trace_events:
+            logger.warning(
+                "Realtime websocket connected endpoint=%s model=%s",
+                self.websocket_url,
+                self._model,
+            )
+
     async def send_json(self, event: dict[str, Any]) -> None:
         """Serialize and send a JSON event over websocket."""
         ws = self._ws
@@ -137,6 +148,20 @@ class OpenAIRealtimeClient:
             raise RealtimeClosedError("Websocket is closed") from exc
         except Exception as exc:
             raise RealtimeSendError("Failed to send event") from exc
+
+        if self._trace_events:
+            event_type = event.get("type")
+            if event_type == "input_audio_buffer.append":
+                self._input_audio_append_count += 1
+                count = self._input_audio_append_count
+                if count == 1:
+                    logger.warning(
+                        "Upstream send type=%s count=%s",
+                        event_type,
+                        count,
+                    )
+            else:
+                logger.warning("Upstream send type=%s", event_type)
 
     async def recv_json(self) -> dict[str, Any]:
         """Read one websocket message and parse it as JSON event."""
@@ -172,7 +197,28 @@ class OpenAIRealtimeClient:
         if not isinstance(event, dict):
             raise RealtimeProtocolError("Realtime event must be a JSON object")
 
-        return self.normalize_event(event)
+        normalized = self.normalize_event(event)
+        if self._trace_events:
+            event_type = normalized.get("type")
+            if event_type == self.audio_event_names.delta:
+                self._output_audio_delta_count += 1
+                delta_len = len(normalized.get("delta", ""))
+                if self._output_audio_delta_count == 1:
+                    logger.warning(
+                        "Upstream recv type=%s delta_b64_len=%s",
+                        event_type,
+                        delta_len,
+                    )
+            elif event_type == self.audio_event_names.done:
+                logger.warning("Upstream recv type=%s", event_type)
+                self._output_audio_delta_count = 0
+            elif event_type == "response.output_audio_transcript.delta":
+                pass
+            elif event_type == "response.output_audio_transcript.done":
+                logger.warning("Upstream recv type=%s", event_type)
+            else:
+                logger.warning("Upstream recv type=%s", event_type)
+        return normalized
 
     async def iter_events(self) -> AsyncIterator[dict[str, Any]]:
         """Async iterator yielding parsed events until websocket closure."""

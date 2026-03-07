@@ -46,6 +46,7 @@ def build_session_bridge(
         voice=settings.openai_realtime_voice,
         instructions=settings.openai_realtime_instructions,
         include_turn_detection=settings.openai_realtime_include_turn_detection,
+        trace_events=settings.openai_debug_trace_ws_messages,
     )
     bridge = IOSRealtimeBridge(
         session_id=session_id,
@@ -57,6 +58,7 @@ def build_session_bridge(
             fallback_session_id=session_id,
         ),
         send_binary_frame=send_server_audio,
+        server_turn_detection_enabled=settings.openai_realtime_include_turn_detection,
         manual_turn_fallback_enabled=settings.openai_realtime_enable_manual_turn_fallback,
         manual_turn_fallback_delay_ms=settings.openai_realtime_manual_turn_fallback_delay_ms,
         dump_input_audio_enabled=settings.openai_debug_dump_input_audio,

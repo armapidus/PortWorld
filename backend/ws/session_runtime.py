@@ -158,13 +158,6 @@ def trace_ws_message(
         )
         return
     if isinstance(raw_bytes, (bytes, bytearray, memoryview)):
-        logger.warning(
-            "WS_TRACE connection_id=%s type=%s session=%s byte_len=%s",
-            connection_id,
-            message_type,
-            session_id,
-            len(raw_bytes),
-        )
         return
     logger.warning(
         "WS_TRACE connection_id=%s type=%s session=%s code=%s reason=%s keys=%s",

@@ -26,6 +26,8 @@ async def ws_session(websocket: WebSocket) -> None:
     connection_id = next(_connection_ids)
 
     active_session: SessionRecord | None = None
+    server_audio_frame_count = 0
+    server_audio_total_bytes = 0
     telemetry = SessionTelemetry(
         connection_id=connection_id,
         uplink_ack_every_n_frames=settings.openai_realtime_uplink_ack_every_n_frames,
@@ -53,11 +55,53 @@ async def ws_session(websocket: WebSocket) -> None:
                 seq=session.next_seq(),
                 payload=payload,
             )
-        await websocket.send_json(envelope.model_dump())
+        if message_type in {"assistant.playback.control", "error"}:
+            logger.warning(
+                "WS_SEND_CONTROL connection_id=%s session=%s type=%s payload=%s",
+                connection_id,
+                envelope.session_id,
+                message_type,
+                payload,
+            )
+        try:
+            await websocket.send_json(envelope.model_dump())
+        except Exception:
+            logger.exception(
+                "WS_SEND_CONTROL_FAILED connection_id=%s session=%s type=%s",
+                connection_id,
+                envelope.session_id,
+                message_type,
+            )
+            raise
 
     async def send_server_audio(frame_type: int, ts_ms: int, payload_bytes: bytes) -> None:
+        nonlocal server_audio_frame_count
+        nonlocal server_audio_total_bytes
         encoded = encode_frame(frame_type, ts_ms, payload_bytes)
-        await websocket.send_bytes(encoded)
+        server_audio_frame_count += 1
+        server_audio_total_bytes += len(payload_bytes)
+        if server_audio_frame_count == 1 or server_audio_frame_count % 50 == 0:
+            session_id = active_session.session_id if active_session is not None else "unknown"
+            logger.warning(
+                "WS_SEND_SERVER_AUDIO connection_id=%s session=%s frame=%s payload_bytes=%s total_bytes=%s ts_ms=%s",
+                connection_id,
+                session_id,
+                server_audio_frame_count,
+                len(payload_bytes),
+                server_audio_total_bytes,
+                ts_ms,
+            )
+        try:
+            await websocket.send_bytes(encoded)
+        except Exception:
+            session_id = active_session.session_id if active_session is not None else "unknown"
+            logger.exception(
+                "WS_SEND_SERVER_AUDIO_FAILED connection_id=%s session=%s frame=%s",
+                connection_id,
+                session_id,
+                server_audio_frame_count,
+            )
+            raise
 
     try:
         while True:

@@ -98,6 +98,10 @@ async def dispatch_control_envelope(
         if active_session is None:
             logger.info("Ignoring session.end_turn before session.activate")
             return ControlDispatchResult(active_session=active_session, handled=True)
+        logger.warning(
+            "Client requested session.end_turn session=%s",
+            active_session.session_id,
+        )
         try:
             await active_session.bridge.finalize_turn(reason="client_end_turn")
         except RealtimeClientError as exc:

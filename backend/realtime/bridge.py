@@ -33,6 +33,7 @@ class IOSRealtimeBridge:
         upstream_client: OpenAIRealtimeClient,
         send_envelope: EnvelopeSender,
         send_binary_frame: BinarySender,
+        server_turn_detection_enabled: bool = False,
         manual_turn_fallback_enabled: bool = True,
         manual_turn_fallback_delay_ms: int = 900,
         client_audio_queue_maxsize: int = 32,
@@ -55,6 +56,7 @@ class IOSRealtimeBridge:
         self._started_response_ids: set[str] = set()
         self._last_stopped_response_id: str | None = None
         self._current_response_id: str | None = None
+        self._server_turn_detection_enabled = server_turn_detection_enabled
         self._manual_turn_fallback_enabled = manual_turn_fallback_enabled
         self._manual_turn_fallback_delay_s = (
             max(100, manual_turn_fallback_delay_ms) / 1000.0
@@ -63,6 +65,7 @@ class IOSRealtimeBridge:
         self._current_turn_response_started = False
         self._manual_response_sent_for_turn = False
         self._current_turn_started_at_monotonic: float | None = None
+        self._server_vad_speaking = False
         self._dump_input_audio_enabled = dump_input_audio_enabled
         self._closed = False
         self._session_ready_confirmed = False
@@ -80,14 +83,21 @@ class IOSRealtimeBridge:
         self._session_ready_confirmed = False
         self._session_ready_error = None
         self._session_ready_event.clear()
+        logger.warning("Connecting upstream realtime session=%s", self._session_id)
         await self._upstream_client.connect()
         self._ensure_client_audio_sender_task()
         self._upstream_task = asyncio.create_task(
             self._run_upstream_loop(),
             name=f"upstream_loop:{self._session_id}",
         )
+        logger.warning("Initializing upstream realtime session=%s", self._session_id)
         await self._upstream_client.initialize_session()
+        logger.warning(
+            "Waiting for upstream session readiness session=%s",
+            self._session_id,
+        )
         await self._wait_for_upstream_session_ready()
+        logger.warning("Upstream session ready session=%s", self._session_id)
 
     async def append_client_audio(self, payload_bytes: bytes) -> None:
         if not payload_bytes:
@@ -272,27 +282,32 @@ class IOSRealtimeBridge:
             return
 
         if event_type == "input_audio_buffer.speech_started":
-            logger.info("Upstream VAD speech_started session=%s", self._session_id)
+            self._server_vad_speaking = True
+            logger.warning("Upstream VAD speech_started session=%s", self._session_id)
             await self._send_envelope("assistant.thinking", {"status": "thinking"})
             return
 
         if event_type == "input_audio_buffer.speech_stopped":
-            logger.info("Upstream VAD speech_stopped session=%s", self._session_id)
+            self._server_vad_speaking = False
+            logger.warning("Upstream VAD speech_stopped session=%s", self._session_id)
             await self._finalize_turn_if_needed(reason="speech_stopped")
             return
 
         if event_type == "response.created":
-            logger.info("Upstream response.created session=%s", self._session_id)
+            logger.warning("Upstream response.created session=%s", self._session_id)
             self._current_turn_response_started = True
             return
 
         if event_type in SESSION_READY_EVENT_TYPES:
-            logger.info("Upstream %s session=%s", event_type, self._session_id)
+            logger.warning("Upstream %s session=%s", event_type, self._session_id)
             self._mark_session_ready()
             return
 
         if event_type == "input_audio_buffer.committed":
-            logger.info("Upstream input_audio_buffer.committed session=%s", self._session_id)
+            logger.warning(
+                "Upstream input_audio_buffer.committed session=%s",
+                self._session_id,
+            )
             return
 
         if event_type == "error":
@@ -520,14 +535,49 @@ class IOSRealtimeBridge:
 
     async def _finalize_turn_if_needed(self, *, reason: str) -> None:
         if not self._manual_turn_fallback_enabled:
+            if reason == "client_end_turn":
+                logger.warning(
+                    "Skipping turn finalize session=%s reason=%s manual_fallback=%s",
+                    self._session_id,
+                    reason,
+                    self._manual_turn_fallback_enabled,
+                )
+            return
+        if (
+            reason in {"continuous_uplink_timeout", "speech_stopped"}
+            and self._server_turn_detection_enabled
+        ):
             return
         if not self._current_turn_audio_seen:
+            if reason == "client_end_turn":
+                logger.warning(
+                    "Skipping turn finalize session=%s reason=%s audio_seen=%s",
+                    self._session_id,
+                    reason,
+                    self._current_turn_audio_seen,
+                )
             return
         if self._current_turn_response_started:
+            if reason == "client_end_turn":
+                logger.warning(
+                    "Skipping turn finalize session=%s reason=%s response_started=%s",
+                    self._session_id,
+                    reason,
+                    self._current_turn_response_started,
+                )
             return
         if self._manual_response_sent_for_turn:
+            if reason == "client_end_turn":
+                logger.warning(
+                    "Skipping turn finalize session=%s reason=%s manual_response_sent=%s",
+                    self._session_id,
+                    reason,
+                    self._manual_response_sent_for_turn,
+                )
             return
         if reason == "continuous_uplink_timeout":
+            if self._server_vad_speaking:
+                return
             if self._current_turn_started_at_monotonic is None:
                 return
             elapsed = time.monotonic() - self._current_turn_started_at_monotonic
@@ -535,10 +585,12 @@ class IOSRealtimeBridge:
                 return
 
         self._manual_response_sent_for_turn = True
-        logger.info(
-            "Manual turn finalize session=%s reason=%s",
+        logger.warning(
+            "Manual turn finalize session=%s reason=%s queued_frames=%s sent_frames=%s",
             self._session_id,
             reason,
+            self._client_audio_queue.qsize(),
+            self._client_audio_sent_count,
         )
         await self._wait_for_client_audio_queue_drain()
         await self._upstream_client.send_json({"type": "input_audio_buffer.commit"})
