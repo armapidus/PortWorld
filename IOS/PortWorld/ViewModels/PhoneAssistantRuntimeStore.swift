@@ -1,6 +1,6 @@
 @MainActor
 final class PhoneAssistantRuntimeStore {
-  var assistantRuntimeState: AssistantRuntimeState = .inactive
+  var assistantRuntimeState: PhoneAssistantRuntimeState = .inactive
   var audioStatusText: String = "idle"
   var backendStatusText: String = "idle"
   var wakeStatusText: String = "idle"

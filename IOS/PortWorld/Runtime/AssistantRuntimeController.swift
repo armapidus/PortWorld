@@ -9,7 +9,7 @@ final class AssistantRuntimeController {
   }
 
   struct StatusSnapshot {
-    var assistantRuntimeState: AssistantRuntimeState = .inactive
+    var assistantRuntimeState: PhoneAssistantRuntimeState = .inactive
     var audioStatusText: String = "idle"
     var backendStatusText: String = "idle"
     var wakeStatusText: String = "idle"
@@ -24,7 +24,7 @@ final class AssistantRuntimeController {
     var errorText: String = ""
   }
 
-  private let config: RuntimeConfig
+  private let config: PhoneOnlyRuntimeConfig
   private let phoneAudioIO: PhoneAudioIO
   private let backendSessionClient: BackendSessionClient
   private let wakePhraseDetector: WakePhraseDetector
@@ -45,7 +45,7 @@ final class AssistantRuntimeController {
   var onStatusUpdated: ((StatusSnapshot) -> Void)?
 
   init(
-    config: RuntimeConfig,
+    config: PhoneOnlyRuntimeConfig,
     phoneAudioIO: PhoneAudioIO? = nil,
     backendSessionClient: BackendSessionClient? = nil,
     wakePhraseDetector: WakePhraseDetector? = nil

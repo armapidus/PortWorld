@@ -31,7 +31,7 @@ final class PhoneAudioIO {
 
   private let audioManager: AudioCollectionManager
   private let audioSession: AVAudioSession
-  private let playbackEngine: AssistantPlaybackEngineProtocol
+  private let playbackEngine: PhoneOnlyAssistantPlaybackControlling
   private let audioSessionLeaseManager: AudioSessionLeaseManager
   private var isResponseStreaming = false
 
@@ -95,7 +95,7 @@ final class PhoneAudioIO {
     try playbackEngine.appendPCMData(pcmData, format: format)
   }
 
-  func handlePlaybackControl(_ payload: PlaybackControlPayload) {
+  func handlePlaybackControl(_ payload: PhoneOnlyPlaybackControlPayload) {
     switch payload.command {
     case .startResponse:
       isResponseStreaming = true

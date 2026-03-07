@@ -11,7 +11,7 @@ final class PhoneAssistantRuntimeViewModel: ObservableObject {
     store: PhoneAssistantRuntimeStore? = nil
   ) {
     let runtimeStore = store ?? PhoneAssistantRuntimeStore()
-    let config = RuntimeConfig.load()
+    let config = PhoneOnlyRuntimeConfig.load()
     self.store = runtimeStore
     self.controller = AssistantRuntimeController(config: config)
     bindController()

@@ -22,7 +22,7 @@ final class WakePhraseDetector {
     engine.isListening
   }
 
-  init(config: RuntimeConfig) {
+  init(config: PhoneOnlyRuntimeConfig) {
     if config.wakeWordMode == .onDevicePreferred {
       self.engine = SFSpeechWakeWordEngine(
         wakePhrase: config.wakePhrase,

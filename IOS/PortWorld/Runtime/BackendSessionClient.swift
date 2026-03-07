@@ -16,9 +16,9 @@ actor BackendSessionClient {
   enum Event: Sendable {
     case stateChanged(ConnectionState)
     case sessionReady
-    case uplinkAcknowledged(RealtimeUplinkAckPayload)
+    case uplinkAcknowledged(PhoneOnlyRealtimeUplinkAckPayload)
     case serverAudio(Data)
-    case playbackControl(PlaybackControlPayload)
+    case playbackControl(PhoneOnlyPlaybackControlPayload)
     case closed
     case error(String)
   }
@@ -115,38 +115,34 @@ actor BackendSessionClient {
   func sendSessionActivate() async throws {
     guard let sessionID else { return }
     let sequence = nextOutboundSequence()
-    let text = try await MainActor.run {
-      let payload = SessionActivatePayload(
-        session: .init(type: "realtime"),
-        audioFormat: .init(encoding: "pcm_s16le", channels: 1, sampleRate: 24_000)
-      )
-      return try Self.encodeEnvelopeText(
-        type: .sessionActivate,
-        sessionID: sessionID,
-        sequence: sequence,
-        payload: payload
-      )
-    }
-    try await sendPreencodedText(text, kind: WSOutboundType.sessionActivate.rawValue)
+    let payload = PhoneOnlySessionActivatePayload(
+      session: .init(type: "realtime"),
+      audioFormat: .init(encoding: "pcm_s16le", channels: 1, sampleRate: 24_000)
+    )
+    let text = try Self.encodeEnvelopeText(
+      type: .sessionActivate,
+      sessionID: sessionID,
+      sequence: sequence,
+      payload: payload
+    )
+    try await sendPreencodedText(text, kind: PhoneOnlyWSOutboundType.sessionActivate.rawValue)
   }
 
   func sendWakewordDetected(_ event: WakeWordDetectionEvent) async throws {
     guard let sessionID else { return }
     let sequence = nextOutboundSequence()
-    let text = try await MainActor.run {
-      let payload = WakewordDetectedPayload(
-        wakePhrase: event.wakePhrase,
-        engine: event.engine,
-        confidence: event.confidence.map(Double.init)
-      )
-      return try Self.encodeEnvelopeText(
-        type: .wakewordDetected,
-        sessionID: sessionID,
-        sequence: sequence,
-        payload: payload
-      )
-    }
-    try await sendPreencodedText(text, kind: WSOutboundType.wakewordDetected.rawValue)
+    let payload = PhoneOnlyWakewordDetectedPayload(
+      wakePhrase: event.wakePhrase,
+      engine: event.engine,
+      confidence: event.confidence.map(Double.init)
+    )
+    let text = try Self.encodeEnvelopeText(
+      type: .wakewordDetected,
+      sessionID: sessionID,
+      sequence: sequence,
+      payload: payload
+    )
+    try await sendPreencodedText(text, kind: PhoneOnlyWSOutboundType.wakewordDetected.rawValue)
   }
 
   func sendEndTurn() async throws {
@@ -155,12 +151,10 @@ actor BackendSessionClient {
   }
 
   func sendAudioFrame(_ payload: Data, timestampMs: Int64) async throws {
-    guard let webSocketTask else { throw SessionWebSocketClientError.notConnected }
-    let encodedFrame = await MainActor.run {
-      TransportBinaryFrameCodec.encode(
-        TransportBinaryFrame(frameType: .clientAudio, timestampMs: timestampMs, payload: payload)
-      )
-    }
+    guard let webSocketTask else { throw PhoneOnlyTransportError.notConnected }
+    let encodedFrame = PhoneOnlyBinaryFrameCodec.encode(
+      PhoneOnlyBinaryFrame(frameType: .clientAudio, timestampMs: timestampMs, payload: payload)
+    )
     binarySendAttemptCount += 1
     lastOutboundKind = "client_audio"
     lastOutboundBytes = encodedFrame.count
@@ -169,8 +163,8 @@ actor BackendSessionClient {
     binarySendSuccessCount += 1
   }
 
-  func diagnosticsSnapshot() -> SessionWebSocketDiagnosticsSnapshot {
-    SessionWebSocketDiagnosticsSnapshot(
+  func diagnosticsSnapshot() -> PhoneOnlyTransportDiagnosticsSnapshot {
+    PhoneOnlyTransportDiagnosticsSnapshot(
       connectionID: connectionState == .idle ? 0 : 1,
       lastOutboundKind: lastOutboundKind,
       lastOutboundBytes: lastOutboundBytes,
@@ -222,37 +216,27 @@ actor BackendSessionClient {
   }
 
   private func handleControlMessage(_ data: Data) async throws {
-    let rawEnvelope = try await MainActor.run {
-      try WSMessageCodec.decodeRawEnvelope(from: data)
-    }
-    debugLog("Inbound control type=\(rawEnvelope.type)")
+    let rawEnvelope = try PhoneOnlyWSMessageCodec.decodeRawEnvelopeType(from: data)
+    debugLog("Inbound control type=\(rawEnvelope)")
 
-    switch rawEnvelope.type {
-    case WSInboundType.sessionState.rawValue:
-      let envelope = try await MainActor.run {
-        try JSONDecoder().decode(WSMessageEnvelope<SessionStatePayload>.self, from: data)
-      }
+    switch rawEnvelope {
+    case PhoneOnlyWSInboundType.sessionState.rawValue:
+      let envelope = try PhoneOnlyWSMessageCodec.decodeEnvelope(PhoneOnlySessionStatePayload.self, from: data)
       debugLog("Inbound session.state=\(envelope.payload.state.rawValue)")
       if envelope.payload.state == .active {
         yieldEvent(.sessionReady)
       }
-    case "transport.uplink.ack":
-      let envelope = try await MainActor.run {
-        try JSONDecoder().decode(WSMessageEnvelope<RealtimeUplinkAckPayload>.self, from: data)
-      }
+    case PhoneOnlyWSInboundType.transportUplinkAcknowledged.rawValue:
+      let envelope = try PhoneOnlyWSMessageCodec.decodeEnvelope(PhoneOnlyRealtimeUplinkAckPayload.self, from: data)
       debugLog("Inbound transport.uplink.ack frames=\(envelope.payload.framesReceived) bytes=\(envelope.payload.bytesReceived)")
       yieldEvent(.uplinkAcknowledged(envelope.payload))
-    case WSInboundType.assistantPlaybackControl.rawValue:
-      let envelope = try await MainActor.run {
-        try JSONDecoder().decode(WSMessageEnvelope<PlaybackControlPayload>.self, from: data)
-      }
+    case PhoneOnlyWSInboundType.assistantPlaybackControl.rawValue:
+      let envelope = try PhoneOnlyWSMessageCodec.decodeEnvelope(PhoneOnlyPlaybackControlPayload.self, from: data)
       lastPlaybackControlCommand = envelope.payload.command.rawValue
       debugLog("Inbound assistant.playback.control command=\(envelope.payload.command.rawValue)")
       yieldEvent(.playbackControl(envelope.payload))
-    case WSInboundType.error.rawValue:
-      let envelope = try await MainActor.run {
-        try JSONDecoder().decode(WSMessageEnvelope<RuntimeErrorPayload>.self, from: data)
-      }
+    case PhoneOnlyWSInboundType.error.rawValue:
+      let envelope = try PhoneOnlyWSMessageCodec.decodeEnvelope(PhoneOnlyRuntimeErrorPayload.self, from: data)
       debugLog("Inbound error code=\(envelope.payload.code) message=\(envelope.payload.message)")
       yieldEvent(.error(envelope.payload.message))
     default:
@@ -261,9 +245,7 @@ actor BackendSessionClient {
   }
 
   private func handleBinaryMessage(_ data: Data) async throws {
-    let frame = try await MainActor.run {
-      try TransportBinaryFrameCodec.decode(data)
-    }
+    let frame = try PhoneOnlyBinaryFrameCodec.decode(data)
     guard frame.frameType == .serverAudio else { return }
     inboundServerAudioFrameCount += 1
     inboundServerAudioBytes += frame.payload.count
@@ -275,21 +257,19 @@ actor BackendSessionClient {
     yieldEvent(.serverAudio(frame.payload))
   }
 
-  private func sendTextEnvelope(type: WSOutboundType, sessionID: String) async throws {
+  private func sendTextEnvelope(type: PhoneOnlyWSOutboundType, sessionID: String) async throws {
     let sequence = nextOutboundSequence()
-    let text = try await MainActor.run {
-      try Self.encodeEnvelopeText(
-        type: type,
-        sessionID: sessionID,
-        sequence: sequence,
-        payload: EmptyPayload()
-      )
-    }
+    let text = try Self.encodeEnvelopeText(
+      type: type,
+      sessionID: sessionID,
+      sequence: sequence,
+      payload: PhoneOnlyEmptyPayload()
+    )
     try await sendPreencodedText(text, kind: type.rawValue)
   }
 
   private func sendPreencodedText(_ text: String, kind: String) async throws {
-    guard let webSocketTask else { throw SessionWebSocketClientError.notConnected }
+    guard let webSocketTask else { throw PhoneOnlyTransportError.notConnected }
     let encoded = Data(text.utf8)
     lastOutboundKind = kind
     lastOutboundBytes = encoded.count
@@ -301,22 +281,21 @@ actor BackendSessionClient {
     return outboundSequence
   }
 
-  @MainActor
   private static func encodeEnvelopeText<Payload: Encodable>(
-    type: WSOutboundType,
+    type: PhoneOnlyWSOutboundType,
     sessionID: String,
     sequence: Int,
     payload: Payload
   ) throws -> String {
-    let envelope = WSMessageEnvelope(
+    let envelope = PhoneOnlyWSControlEnvelope(
       type: type.rawValue,
       sessionID: sessionID,
       seq: sequence,
       payload: payload
     )
-    let encoded = try WSMessageCodec.encodeEnvelope(envelope)
+    let encoded = try PhoneOnlyWSMessageCodec.encodeEnvelope(envelope)
     guard let text = String(data: encoded, encoding: .utf8) else {
-      throw SessionWebSocketClientError.encoding("Unable to encode websocket text envelope.")
+      throw PhoneOnlyTransportError.encoding("Unable to encode websocket text envelope.")
     }
     return text
   }

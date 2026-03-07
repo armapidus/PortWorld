@@ -131,7 +131,7 @@ struct AssistantPlaybackQueueState {
 }
 
 @MainActor
-public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
+public final class AssistantPlaybackEngine: PhoneOnlyAssistantPlaybackControlling {
   public var onRouteChanged: ((String) -> Void)?
   public var onRouteIssue: ((String) -> Void)?
 
@@ -284,27 +284,6 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
     debugLog("[AssistantPlaybackEngine] Route state (\(context)): category=\(category), mode=\(mode), inputs=[\(inputPorts)], outputs=[\(outputPorts)]")
   }
 
-  public func appendChunk(_ payload: AssistantAudioChunkPayload) throws {
-    guard payload.codec.lowercased() == "pcm_s16le" else {
-      throw AssistantPlaybackError.unsupportedCodec(payload.codec)
-    }
-    guard payload.channels == 1 else {
-      throw AssistantPlaybackError.unsupportedChannelCount(payload.channels)
-    }
-    guard let pcmData = Data(base64Encoded: payload.bytesB64) else {
-      throw AssistantPlaybackError.invalidBase64Chunk
-    }
-
-    try appendPCMData(
-      pcmData,
-      format: AssistantAudioFormat(
-        codec: payload.codec.lowercased(),
-        sampleRate: payload.sampleRate,
-        channels: payload.channels
-      )
-    )
-  }
-
   public func appendPCMData(_ pcmData: Data, format incomingFormat: AssistantAudioFormat) throws {
     guard incomingFormat.codec == "pcm_s16le" else {
       throw AssistantPlaybackError.unsupportedCodec(incomingFormat.codec)
@@ -405,7 +384,7 @@ public final class AssistantPlaybackEngine: AssistantPlaybackEngineProtocol {
     }
   }
 
-  public func handlePlaybackControl(_ payload: PlaybackControlPayload) {
+  func handlePlaybackControl(_ payload: PhoneOnlyPlaybackControlPayload) {
     switch payload.command {
     case .startResponse:
       startResponse()
