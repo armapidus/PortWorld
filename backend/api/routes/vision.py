@@ -65,25 +65,44 @@ async def vision_frame(request: Request, payload: VisionFramePayload) -> dict[st
     file_stem = _sanitize_path_component(payload.frame_id)
     frame_path = session_dir / f"{file_stem}.jpg"
     metadata_path = session_dir / f"{file_stem}.json"
+    artifact_metadata = {
+        "session_id": payload.session_id,
+        "frame_id": payload.frame_id,
+        "ts_ms": payload.ts_ms,
+        "capture_ts_ms": payload.capture_ts_ms,
+        "width": payload.width,
+        "height": payload.height,
+        "stored_bytes": len(frame_bytes),
+    }
 
     frame_path.write_bytes(frame_bytes)
     metadata_path.write_text(
         json.dumps(
             {
-                "session_id": payload.session_id,
-                "frame_id": payload.frame_id,
-                "ts_ms": payload.ts_ms,
-                "capture_ts_ms": payload.capture_ts_ms,
-                "width": payload.width,
-                "height": payload.height,
+                **artifact_metadata,
                 "stored_path": str(frame_path),
-                "stored_bytes": len(frame_bytes),
             },
             ensure_ascii=True,
             indent=2,
         )
         + "\n",
         encoding="utf-8",
+    )
+    runtime.storage.register_artifact(
+        artifact_id=f"{payload.session_id}:vision_frame_jpeg:{payload.frame_id}",
+        session_id=payload.session_id,
+        artifact_kind="vision_frame_jpeg",
+        artifact_path=frame_path,
+        content_type="image/jpeg",
+        metadata=artifact_metadata,
+    )
+    runtime.storage.register_artifact(
+        artifact_id=f"{payload.session_id}:vision_frame_metadata:{payload.frame_id}",
+        session_id=payload.session_id,
+        artifact_kind="vision_frame_metadata",
+        artifact_path=metadata_path,
+        content_type="application/json",
+        metadata=artifact_metadata,
     )
 
     logger.info(

@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 
 from fastapi import WebSocket
 
+from backend.core.storage import BackendStorage
 from backend.realtime.client import RealtimeClientError
 from backend.realtime.factory import BridgeBinding
 from backend.ws.contracts import IOSEnvelope
@@ -29,6 +30,7 @@ async def activate_session(
     send_control: SendControl,
     send_server_audio: SendBinary,
     build_session_bridge: BuildSessionBridge,
+    storage: BackendStorage,
 ) -> SessionRecord | None:
     if active_session is not None:
         await deactivate_and_unregister_session(
@@ -93,6 +95,12 @@ async def activate_session(
             websocket=websocket,
         )
         return None
+
+    storage.ensure_session_storage(session_id=envelope.session_id)
+    storage.upsert_session_status(
+        session_id=envelope.session_id,
+        status="active",
+    )
 
     await send_control(
         "session.state",

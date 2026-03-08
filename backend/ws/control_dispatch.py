@@ -10,6 +10,7 @@ from fastapi import WebSocket
 from pydantic import ValidationError
 
 from backend.core.settings import Settings
+from backend.core.storage import BackendStorage
 from backend.realtime.client import RealtimeClientError
 from backend.realtime.factory import BridgeBinding
 from backend.ws.contracts import IOSEnvelope
@@ -69,6 +70,7 @@ async def dispatch_control_envelope(
     telemetry: SessionTelemetry,
     settings: Settings,
     build_session_bridge: Callable[..., BridgeBinding],
+    storage: BackendStorage,
 ) -> ControlDispatchResult:
     logger.warning(
         "Inbound control type=%s session=%s seq=%s",
@@ -85,6 +87,7 @@ async def dispatch_control_envelope(
             send_control=send_control,
             send_server_audio=send_server_audio,
             build_session_bridge=build_session_bridge,
+            storage=storage,
         )
         return ControlDispatchResult(active_session=next_active_session, handled=True)
 
@@ -95,6 +98,7 @@ async def dispatch_control_envelope(
             active_session=active_session,
             websocket=websocket,
             send_control=send_control,
+            storage=storage,
         )
         return ControlDispatchResult(active_session=None, handled=True)
 
