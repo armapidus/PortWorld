@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from backend.core.settings import Settings
 from backend.core.storage import BackendStorage, StorageBootstrapResult, StoragePaths
+from backend.realtime.factory import RealtimeProviderFactory, build_debug_mock_capture_bridge
 
 if TYPE_CHECKING:
     from backend.realtime.factory import BridgeBinding
@@ -28,6 +29,7 @@ class AppRuntime:
     settings: Settings
     storage_paths: RuntimeStoragePaths
     storage: BackendStorage
+    realtime_provider: RealtimeProviderFactory
 
     @classmethod
     def from_env(cls) -> "AppRuntime":
@@ -60,6 +62,7 @@ class AppRuntime:
                     user_profile_json_path=storage_paths.user_profile_json_path,
                 )
             ),
+            realtime_provider=RealtimeProviderFactory(settings=settings),
         )
 
     def bootstrap_storage(self) -> StorageBootstrapResult:
@@ -72,10 +75,12 @@ class AppRuntime:
         send_control: Any,
         send_server_audio: Any,
     ) -> "BridgeBinding":
-        from backend.realtime.factory import build_session_bridge
-
-        return build_session_bridge(
-            settings=self.settings,
+        if self.settings.backend_debug_mock_capture_mode:
+            return build_debug_mock_capture_bridge(
+                settings=self.settings,
+                session_id=session_id,
+            )
+        return self.realtime_provider.build_session_bridge(
             session_id=session_id,
             send_control=send_control,
             send_server_audio=send_server_audio,
