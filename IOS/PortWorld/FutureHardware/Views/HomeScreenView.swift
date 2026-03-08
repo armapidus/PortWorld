@@ -137,7 +137,7 @@ struct HomeScreenView: View {
                 row: .init(
                   id: "hfp-route",
                   title: "Bluetooth HFP route",
-                  detail: wearablesRuntimeManager.isHFPRouteAvailable ? "Ready for live glasses audio" : "Not detected on this phone right now",
+                  detail: wearablesRuntimeManager.isHFPRouteAvailable ? "Bidirectional HFP is available on this phone" : "Bidirectional HFP is not detected on this phone right now",
                   status: wearablesRuntimeManager.isHFPRouteAvailable ? .done : .pending
                 )
               )

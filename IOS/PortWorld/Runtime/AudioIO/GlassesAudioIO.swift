@@ -44,8 +44,10 @@ final class GlassesAudioIO: AssistantAudioIOControlling {
   private let hfpPlaybackEngine: AssistantPlaybackEngine
   private let hfpAudioSessionLeaseManager: AudioSessionLeaseManager
   private let fallbackPhoneAudioIO: PhoneAudioIO
+  private var audioRouteObserver: NSObjectProtocol?
   private var activePipeline: ActivePipeline = .none
   private var isResponseStreaming = false
+  private var isDowngradingToFallback = false
 
   init() {
     let manager = AudioCollectionManager(
@@ -69,6 +71,22 @@ final class GlassesAudioIO: AssistantAudioIOControlling {
     hfpPlaybackEngine.onRouteIssue = { [weak self] _ in
       self?.publishAudioModeChange()
     }
+
+    audioRouteObserver = NotificationCenter.default.addObserver(
+      forName: AVAudioSession.routeChangeNotification,
+      object: audioSession,
+      queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor [weak self] in
+        await self?.handleAudioRouteChange()
+      }
+    }
+  }
+
+  deinit {
+    if let audioRouteObserver {
+      NotificationCenter.default.removeObserver(audioRouteObserver)
+    }
   }
 
   var currentAudioMode: AssistantAudioMode {
@@ -86,7 +104,7 @@ final class GlassesAudioIO: AssistantAudioIOControlling {
     let currentRoute = audioSession.currentRoute
     let inputReady = currentRoute.inputs.contains { $0.portType == .bluetoothHFP }
     let outputReady = currentRoute.outputs.contains { $0.portType == .bluetoothHFP }
-    return inputReady || outputReady
+    return inputReady && outputReady
   }
 
   func prepareForArmedListening() async throws {
@@ -207,6 +225,16 @@ final class GlassesAudioIO: AssistantAudioIOControlling {
 }
 
 private extension GlassesAudioIO {
+  func handleAudioRouteChange() async {
+    publishAudioModeChange()
+
+    guard activePipeline == .hfp else { return }
+    guard isHFPRouteReady == false else { return }
+    guard isDowngradingToFallback == false else { return }
+
+    await downgradeToFallbackPhoneAudio()
+  }
+
   func prepareHFPPipelineIfPossible() async throws -> Bool {
     try await hfpAudioSessionLeaseManager.acquire(configuration: .playAndRecordHFP)
     await hfpAudioManager.prepareAudioSession()
@@ -254,6 +282,27 @@ private extension GlassesAudioIO {
       try? await hfpAudioSessionLeaseManager.releaseIfNeeded()
       throw Error.startFailed("Audio manager entered unexpected state: \(hfpStateDescription())")
     }
+  }
+
+  func downgradeToFallbackPhoneAudio() async {
+    guard activePipeline == .hfp else { return }
+
+    isDowngradingToFallback = true
+    cancelPlayback()
+    hfpPlaybackEngine.shutdown()
+    await hfpAudioManager.stop()
+    try? await hfpAudioSessionLeaseManager.releaseIfNeeded()
+
+    do {
+      try await fallbackPhoneAudioIO.prepareForArmedListening()
+      activePipeline = .mockFallback
+    } catch {
+      activePipeline = .none
+    }
+
+    isResponseStreaming = false
+    isDowngradingToFallback = false
+    publishAudioModeChange()
   }
 
   func stopActivePipelineIfNeeded(resetMode: Bool) async {

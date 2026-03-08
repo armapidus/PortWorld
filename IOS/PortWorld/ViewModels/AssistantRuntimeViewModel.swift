@@ -304,7 +304,7 @@ final class AssistantRuntimeViewModel: ObservableObject {
     mergedStatus.glassesSessionText = glassesSessionText()
     mergedStatus.activeGlassesDeviceText = wearablesRuntimeManager.activeGlassesDeviceName
     mergedStatus.glassesAudioModeText = glassesAudioModeText()
-    mergedStatus.hfpRouteText = wearablesRuntimeManager.isHFPRouteAvailable ? "ready" : "not_ready"
+    mergedStatus.hfpRouteText = wearablesRuntimeManager.isHFPRouteAvailable ? "bidirectional_ready" : "not_ready"
     mergedStatus.glassesAudioDetailText = wearablesRuntimeManager.glassesAudioDetailText
     mergedStatus.mockWorkflowText = mockWorkflowText()
     mergedStatus.glassesDevelopmentDetailText = glassesRouteDetailText()
@@ -388,7 +388,7 @@ final class AssistantRuntimeViewModel: ObservableObject {
       if wearablesRuntimeManager.isHFPRouteAvailable {
         return (
           "Glasses detected",
-          "Glasses lifecycle is ready and Bluetooth HFP is available for live glasses audio.",
+          "Glasses lifecycle is ready and bidirectional Bluetooth HFP is currently available on this phone.",
           .success
         )
       }

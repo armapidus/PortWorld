@@ -49,6 +49,7 @@ final class WearablesRuntimeManager: ObservableObject {
   private let wearablesProvider: () -> WearablesInterface
   private let mockDeviceController: MockDeviceController
   private let audioSession: AVAudioSession
+  private let appLinkURLScheme: String?
   private var wearables: WearablesInterface?
   private var glassesSessionCoordinator: GlassesSessionCoordinator?
   private var registrationTask: Task<Void, Never>?
@@ -56,6 +57,7 @@ final class WearablesRuntimeManager: ObservableObject {
   private var audioRouteObserver: NSObjectProtocol?
   private var compatibilityListenerTokens: [DeviceIdentifier: AnyListenerToken] = [:]
   private var compatibilityMessages: [DeviceIdentifier: String] = [:]
+  private var activeGlassesDeviceID: DeviceIdentifier?
 
   #if DEBUG
     private let mockModePreferenceKey = "portworld.debug.mockModeEnabled"
@@ -65,12 +67,14 @@ final class WearablesRuntimeManager: ObservableObject {
     configure: @escaping () throws -> Void = { try Wearables.configure() },
     wearablesProvider: @escaping () -> WearablesInterface = { Wearables.shared },
     mockDeviceController: MockDeviceController? = nil,
-    audioSession: AVAudioSession = .sharedInstance()
+    audioSession: AVAudioSession = .sharedInstance(),
+    appLinkURLScheme: String? = WearablesRuntimeManager.configuredAppLinkURLScheme()
   ) {
     self.configure = configure
     self.wearablesProvider = wearablesProvider
     self.mockDeviceController = mockDeviceController ?? MockDeviceController()
     self.audioSession = audioSession
+    self.appLinkURLScheme = appLinkURLScheme?.lowercased()
     self.isMockModeEnabled = false
     self.isMockDeviceReady = self.mockDeviceController.isEnabled
     self.isPreparingMockDevice = false
@@ -142,7 +146,7 @@ final class WearablesRuntimeManager: ObservableObject {
   }
 
   func handleIncomingURL(_ url: URL) async {
-    guard Self.isMetaWearablesCallback(url) else { return }
+    guard Self.matchesAppLinkURLScheme(url, expectedScheme: appLinkURLScheme) else { return }
 
     if configurationState != .ready {
       await configureWearables(forceRetry: configurationState == .failed)
@@ -154,7 +158,10 @@ final class WearablesRuntimeManager: ObservableObject {
     }
 
     do {
-      _ = try await wearables.handleUrl(url)
+      let handled = try await wearables.handleUrl(url)
+      if handled == false {
+        debugLog("Ignoring DAT callback URL because the SDK did not claim it: \(url.absoluteString)")
+      }
     } catch {
       presentError(error.localizedDescription)
     }
@@ -355,7 +362,17 @@ final class WearablesRuntimeManager: ObservableObject {
   }
 
   private func updateActiveCompatibilityMessage() {
-    activeCompatibilityMessage = devices.compactMap { compatibilityMessages[$0] }.first
+    if let activeGlassesDeviceID, let activeMessage = compatibilityMessages[activeGlassesDeviceID] {
+      activeCompatibilityMessage = activeMessage
+      refreshDevelopmentReadiness()
+      return
+    }
+
+    if hasCompatibleDiscoveredDevice {
+      activeCompatibilityMessage = nil
+    } else {
+      activeCompatibilityMessage = devices.compactMap { compatibilityMessages[$0] }.first
+    }
     refreshDevelopmentReadiness()
   }
 
@@ -374,6 +391,7 @@ final class WearablesRuntimeManager: ObservableObject {
     let previousPhase = glassesSessionPhase
     glassesSessionPhase = snapshot.phase
     glassesSessionState = snapshot.sessionState
+    activeGlassesDeviceID = snapshot.activeDeviceID
     activeGlassesDeviceName = snapshot.activeDeviceName
     if let errorMessage = snapshot.errorMessage {
       glassesSessionErrorMessage = errorMessage
@@ -394,6 +412,7 @@ final class WearablesRuntimeManager: ObservableObject {
   private func resetGlassesSessionSnapshot() {
     glassesSessionPhase = .inactive
     glassesSessionState = nil
+    activeGlassesDeviceID = nil
     activeGlassesDeviceName = "-"
     glassesAudioMode = .inactive
     isGlassesSessionRequested = false
@@ -466,7 +485,7 @@ final class WearablesRuntimeManager: ObservableObject {
     let currentRoute = audioSession.currentRoute
     let inputReady = currentRoute.inputs.contains { $0.portType == .bluetoothHFP }
     let outputReady = currentRoute.outputs.contains { $0.portType == .bluetoothHFP }
-    isHFPRouteAvailable = inputReady || outputReady
+    isHFPRouteAvailable = inputReady && outputReady
     refreshDevelopmentReadiness()
   }
 
@@ -474,14 +493,14 @@ final class WearablesRuntimeManager: ObservableObject {
     canValidateGlassesRuntimeInDevelopment =
       configurationState == .ready &&
       registrationState == .registered &&
-      devices.isEmpty == false &&
+      hasCompatibleDiscoveredDevice &&
       activeCompatibilityMessage == nil &&
       mockWorkflowState == .ready
 
     switch glassesAudioMode {
     case .inactive:
       if isHFPRouteAvailable {
-        glassesAudioDetailText = "Bluetooth HFP is ready for live glasses audio on the next activation."
+        glassesAudioDetailText = "Bidirectional Bluetooth HFP is available on this phone for the next glasses activation."
       } else if isMockModeEnabled {
         glassesAudioDetailText = "Mock device flow is available. The glasses route will use phone audio fallback until real HFP hardware is connected."
       } else {
@@ -537,7 +556,7 @@ final class WearablesRuntimeManager: ObservableObject {
 
       if isHFPRouteAvailable {
         glassesDevelopmentReadinessDetail =
-          "Glasses runtime can activate now. Live Bluetooth HFP audio is available."
+          "Glasses runtime can activate now. Bidirectional Bluetooth HFP is currently available on this phone."
         return
       }
 
@@ -565,7 +584,7 @@ final class WearablesRuntimeManager: ObservableObject {
       return
     }
 
-    guard devices.isEmpty == false else {
+    guard hasCompatibleDiscoveredDevice else {
       await stopGlassesSession()
       return
     }
@@ -576,11 +595,38 @@ final class WearablesRuntimeManager: ObservableObject {
     }
   }
 
-  private static func isMetaWearablesCallback(_ url: URL) -> Bool {
-    guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+  private var hasCompatibleDiscoveredDevice: Bool {
+    devices.contains { compatibilityMessages[$0] == nil }
+  }
+
+  private func debugLog(_ message: String) {
+    #if DEBUG
+      print("[WearablesRuntimeManager] \(message)")
+    #endif
+  }
+
+  private nonisolated static func matchesAppLinkURLScheme(_ url: URL, expectedScheme: String?) -> Bool {
+    guard let expectedScheme else { return false }
+    guard let actualScheme = url.scheme?.lowercased() else {
       return false
     }
-    return components.queryItems?.contains(where: { $0.name == "metaWearablesAction" }) == true
+    return actualScheme == expectedScheme
+  }
+
+  private nonisolated static func configuredAppLinkURLScheme() -> String? {
+    guard
+      let mwdat = Bundle.main.object(forInfoDictionaryKey: "MWDAT") as? [String: Any],
+      let rawScheme = mwdat["AppLinkURLScheme"] as? String
+    else {
+      return nil
+    }
+
+    let normalizedScheme = rawScheme
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .replacingOccurrences(of: "://", with: "")
+      .lowercased()
+
+    return normalizedScheme.isEmpty ? nil : normalizedScheme
   }
 
   private static func buildInitializationDiagnostics(from error: Error) -> [String] {
