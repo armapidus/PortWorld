@@ -106,9 +106,12 @@ final class AssistantRuntimeViewModel: ObservableObject {
 
   private func bindController() {
     controller.onStatusUpdated = { [weak self] status in
-      guard let self else { return }
-      self.controllerStatus = status
-      self.publishMergedStatus()
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        self.controllerStatus = status
+        await self.synchronizeVisionCaptureIfNeeded()
+        self.publishMergedStatus()
+      }
     }
     controller.onGlassesAudioModeUpdated = { [weak self] mode, _ in
       Task { @MainActor [weak self] in
@@ -187,8 +190,25 @@ final class AssistantRuntimeViewModel: ObservableObject {
   private func handleWearablesRuntimeManagerChange() {
     Task { @MainActor [weak self] in
       await self?.synchronizeGlassesRouteIfNeeded()
+      await self?.synchronizeVisionCaptureIfNeeded()
       self?.publishMergedStatus()
     }
+  }
+
+  private func synchronizeVisionCaptureIfNeeded() async {
+    let shouldCaptureVision =
+      selectedRoute == .glasses &&
+      controllerStatus.assistantRuntimeState == .activeConversation &&
+      wearablesRuntimeManager.glassesSessionPhase == .running &&
+      controllerStatus.sessionID != "-"
+
+    await wearablesRuntimeManager.setVisionCaptureActive(
+      shouldCaptureVision,
+      sessionID: shouldCaptureVision ? controllerStatus.sessionID : nil,
+      endpointURL: controller.config.visionFrameURL,
+      requestHeaders: controller.config.requestHeaders,
+      photoFps: controller.config.photoFps
+    )
   }
 
   private func synchronizeGlassesRouteIfNeeded() async {
@@ -306,6 +326,10 @@ final class AssistantRuntimeViewModel: ObservableObject {
     mergedStatus.glassesAudioModeText = glassesAudioModeText()
     mergedStatus.hfpRouteText = wearablesRuntimeManager.isHFPRouteAvailable ? "bidirectional_ready" : "not_ready"
     mergedStatus.glassesAudioDetailText = wearablesRuntimeManager.glassesAudioDetailText
+    mergedStatus.visionCaptureStateText = wearablesRuntimeManager.visionCaptureStateText
+    mergedStatus.visionUploadCount = wearablesRuntimeManager.visionUploadCount
+    mergedStatus.visionUploadFailureCount = wearablesRuntimeManager.visionUploadFailureCount
+    mergedStatus.visionLastErrorText = wearablesRuntimeManager.visionLastErrorText
     mergedStatus.mockWorkflowText = mockWorkflowText()
     mergedStatus.glassesDevelopmentDetailText = glassesRouteDetailText()
     mergedStatus.canChangeRoute =

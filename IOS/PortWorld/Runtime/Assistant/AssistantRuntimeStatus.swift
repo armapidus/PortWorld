@@ -41,6 +41,10 @@ struct AssistantRuntimeStatus {
   var uplinkStatusText: String = "idle"
   var playbackStatusText: String = "idle"
   var playbackRouteText: String = "-"
+  var visionCaptureStateText: String = "inactive"
+  var visionUploadCount: Int = 0
+  var visionUploadFailureCount: Int = 0
+  var visionLastErrorText: String = ""
   var infoText: String = ""
   var errorText: String = ""
 

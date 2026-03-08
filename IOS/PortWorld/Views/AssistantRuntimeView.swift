@@ -106,12 +106,20 @@ struct AssistantRuntimeView: View {
             LabeledContent("Playback", value: status.playbackStatusText)
             LabeledContent("Wake detector", value: status.wakeStatusText)
             LabeledContent("Playback route", value: status.playbackRouteText)
+            LabeledContent("Vision capture", value: status.visionCaptureStateText)
+            LabeledContent("Vision uploads", value: "\(status.visionUploadCount)")
+            LabeledContent("Vision failures", value: "\(status.visionUploadFailureCount)")
           }
 
           PhoneAssistantPanel(title: "Notes") {
             Text(status.infoText.isEmpty ? "No runtime notes." : status.infoText)
               .font(.system(.body, design: .rounded))
               .foregroundColor(.white.opacity(0.82))
+            if !status.visionLastErrorText.isEmpty {
+              Text(status.visionLastErrorText)
+                .font(.system(.footnote, design: .rounded).weight(.semibold))
+                .foregroundColor(.orange.opacity(0.92))
+            }
             if !status.errorText.isEmpty {
               Text(status.errorText)
                 .font(.system(.footnote, design: .rounded).weight(.semibold))

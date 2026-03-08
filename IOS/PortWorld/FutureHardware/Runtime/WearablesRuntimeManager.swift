@@ -3,6 +3,7 @@ import AVFAudio
 import Combine
 import Foundation
 import MWDATCore
+import UIKit
 
 @MainActor
 final class WearablesRuntimeManager: ObservableObject {
@@ -39,6 +40,10 @@ final class WearablesRuntimeManager: ObservableObject {
   @Published private(set) var canValidateGlassesRuntimeInDevelopment: Bool = false
   @Published private(set) var glassesDevelopmentReadinessDetail: String =
     "Complete DAT setup before validating the glasses runtime."
+  @Published private(set) var visionCaptureStateText: String = "inactive"
+  @Published private(set) var visionUploadCount: Int = 0
+  @Published private(set) var visionUploadFailureCount: Int = 0
+  @Published private(set) var visionLastErrorText: String = ""
   @Published var showError: Bool = false
   @Published var errorMessage: String = ""
   @Published private(set) var isMockModeEnabled: Bool
@@ -52,12 +57,19 @@ final class WearablesRuntimeManager: ObservableObject {
   private let appLinkURLScheme: String?
   private var wearables: WearablesInterface?
   private var glassesSessionCoordinator: GlassesSessionCoordinator?
+  private var glassesPhotoCaptureController: GlassesPhotoCaptureController?
+  private var visionFrameUploader: VisionFrameUploaderProtocol?
   private var registrationTask: Task<Void, Never>?
   private var deviceStreamTask: Task<Void, Never>?
   private var audioRouteObserver: NSObjectProtocol?
   private var compatibilityListenerTokens: [DeviceIdentifier: AnyListenerToken] = [:]
   private var compatibilityMessages: [DeviceIdentifier: String] = [:]
   private var activeGlassesDeviceID: DeviceIdentifier?
+  private var wantsVisionCapture = false
+  private var visionSessionID: String?
+  private var visionEndpointURL: URL?
+  private var visionRequestHeaders: [String: String] = [:]
+  private var visionPhotoFps: Double = 1.0
 
   #if DEBUG
     private let mockModePreferenceKey = "portworld.debug.mockModeEnabled"
@@ -231,6 +243,7 @@ final class WearablesRuntimeManager: ObservableObject {
 
   func stopGlassesSession() async {
     isGlassesSessionRequested = false
+    await stopVisionCapture(resetState: true)
     guard let glassesSessionCoordinator else {
       resetGlassesSessionSnapshot()
       return
@@ -238,6 +251,27 @@ final class WearablesRuntimeManager: ObservableObject {
 
     await glassesSessionCoordinator.stop()
     glassesSessionErrorMessage = nil
+  }
+
+  func setVisionCaptureActive(
+    _ isActive: Bool,
+    sessionID: String?,
+    endpointURL: URL,
+    requestHeaders: [String: String],
+    photoFps: Double
+  ) async {
+    wantsVisionCapture = isActive
+    visionSessionID = sessionID
+    visionEndpointURL = endpointURL
+    visionRequestHeaders = requestHeaders
+    visionPhotoFps = photoFps
+
+    if !isActive {
+      await stopVisionCapture(resetState: true)
+      return
+    }
+
+    await synchronizeVisionCapture()
   }
 
   private func configureWearables(forceRetry: Bool) async {
@@ -265,6 +299,8 @@ final class WearablesRuntimeManager: ObservableObject {
       deviceStreamTask = nil
       compatibilityListenerTokens.removeAll(keepingCapacity: false)
       glassesSessionCoordinator = nil
+      glassesPhotoCaptureController = nil
+      visionFrameUploader = nil
       wearables = nil
       registrationState = nil
       devices = []
@@ -281,6 +317,7 @@ final class WearablesRuntimeManager: ObservableObject {
       observeWearablesStreams(using: wearables)
       monitorDeviceCompatibility(devices: wearables.devices)
       ensureGlassesSessionCoordinator(using: wearables)
+      ensureGlassesPhotoCaptureController(using: wearables)
       refreshDevelopmentReadiness()
 
       #if DEBUG
@@ -296,6 +333,8 @@ final class WearablesRuntimeManager: ObservableObject {
       configurationErrorMessage = error.localizedDescription
       configurationDiagnostics = Self.buildInitializationDiagnostics(from: error)
       glassesSessionCoordinator = nil
+      glassesPhotoCaptureController = nil
+      visionFrameUploader = nil
       resetGlassesSessionSnapshot()
       refreshDevelopmentReadiness()
     }
@@ -387,6 +426,23 @@ final class WearablesRuntimeManager: ObservableObject {
     glassesSessionCoordinator = coordinator
   }
 
+  private func ensureGlassesPhotoCaptureController(using wearables: WearablesInterface) {
+    guard glassesPhotoCaptureController == nil else { return }
+
+    let controller = GlassesPhotoCaptureController(wearables: wearables)
+    controller.onSnapshotUpdated = { [weak self] snapshot in
+      guard let self else { return }
+      self.applyGlassesPhotoCaptureSnapshot(snapshot)
+    }
+    controller.onPhotoCaptured = { [weak self] image, timestampMs in
+      guard let self else { return }
+      Task {
+        await self.visionFrameUploader?.submitLatestFrame(image, captureTimestampMs: timestampMs)
+      }
+    }
+    glassesPhotoCaptureController = controller
+  }
+
   private func applyGlassesSessionSnapshot(_ snapshot: GlassesSessionCoordinator.Snapshot) {
     let previousPhase = glassesSessionPhase
     glassesSessionPhase = snapshot.phase
@@ -417,7 +473,20 @@ final class WearablesRuntimeManager: ObservableObject {
     glassesAudioMode = .inactive
     isGlassesSessionRequested = false
     glassesSessionErrorMessage = nil
+    visionCaptureStateText = "inactive"
+    visionUploadCount = 0
+    visionUploadFailureCount = 0
+    visionLastErrorText = ""
     refreshDevelopmentReadiness()
+  }
+
+  private func applyGlassesPhotoCaptureSnapshot(_ snapshot: GlassesPhotoCaptureController.Snapshot) {
+    visionCaptureStateText = snapshot.phase.rawValue
+    if let errorMessage = snapshot.errorMessage, !errorMessage.isEmpty {
+      visionLastErrorText = errorMessage
+    } else if snapshot.phase != .failed {
+      visionLastErrorText = ""
+    }
   }
 
   private func enableMockMode() async {
@@ -593,6 +662,75 @@ final class WearablesRuntimeManager: ObservableObject {
       await stopGlassesSession()
       return
     }
+
+    await synchronizeVisionCapture()
+  }
+
+  private func synchronizeVisionCapture() async {
+    guard wantsVisionCapture else { return }
+    guard configurationState == .ready else { return }
+    guard registrationState == .registered else { return }
+    guard isGlassesSessionRequested else { return }
+    guard glassesSessionPhase == .running else {
+      if visionCaptureStateText != GlassesPhotoCaptureController.Phase.failed.rawValue {
+        visionCaptureStateText = "waiting_for_glasses"
+      }
+      return
+    }
+    guard let wearables, let visionEndpointURL else { return }
+    guard let sessionID = visionSessionID, !sessionID.isEmpty, sessionID != "-" else { return }
+
+    ensureGlassesPhotoCaptureController(using: wearables)
+
+    if visionFrameUploader == nil {
+      let uploader = VisionFrameUploader(
+        endpointURL: visionEndpointURL,
+        defaultHeaders: visionRequestHeaders,
+        sessionID: sessionID,
+        uploadIntervalMs: Int64((1000.0 / max(0.1, visionPhotoFps)).rounded())
+      )
+      await uploader.bindUploadResultHandler { [weak self] result in
+        self?.handleVisionUploadResult(result)
+      }
+      visionFrameUploader = uploader
+    } else {
+      await visionFrameUploader?.updateSessionID(sessionID)
+      await visionFrameUploader?.bindUploadResultHandler { [weak self] result in
+        self?.handleVisionUploadResult(result)
+      }
+    }
+
+    await visionFrameUploader?.start()
+    await glassesPhotoCaptureController?.start(photoFps: visionPhotoFps)
+  }
+
+  private func stopVisionCapture(resetState: Bool) async {
+    wantsVisionCapture = false
+    visionSessionID = nil
+    await glassesPhotoCaptureController?.stop()
+    await visionFrameUploader?.stop()
+    visionFrameUploader = nil
+
+    if resetState {
+      visionCaptureStateText = "inactive"
+      visionUploadCount = 0
+      visionUploadFailureCount = 0
+      visionLastErrorText = ""
+    }
+  }
+
+  private func handleVisionUploadResult(_ result: VisionFrameUploadResult) {
+    if result.success {
+      visionUploadCount += 1
+      visionLastErrorText = ""
+      if visionCaptureStateText == GlassesPhotoCaptureController.Phase.failed.rawValue {
+        visionCaptureStateText = GlassesPhotoCaptureController.Phase.capturing.rawValue
+      }
+      return
+    }
+
+    visionUploadFailureCount += 1
+    visionLastErrorText = result.errorDescription ?? "Vision upload failed."
   }
 
   private var hasCompatibleDiscoveredDevice: Bool {

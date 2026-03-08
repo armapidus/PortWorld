@@ -10,7 +10,9 @@ struct AssistantRuntimeConfig {
   private static let apiKeyBootstrapMarkerUserDefaultsKey = "portworld.apiKeyBootstrapSeeded"
 
   let webSocketURL: URL
+  let visionFrameURL: URL
   let requestHeaders: [String: String]
+  let photoFps: Double
   let wakePhrase: String
   let sleepPhrase: String
   let wakeWordMode: AssistantWakeWordMode
@@ -30,14 +32,22 @@ struct AssistantRuntimeConfig {
       defaultPath: "/ws/session",
       bundle: bundle
     )
+    let visionPath = resolvePath(
+      infoPlistKey: "SON_VISION_PATH",
+      defaultPath: "/vision/frame",
+      bundle: bundle
+    )
     let explicitWebSocketURL = resolveOptionalURL(infoPlistKey: "SON_WS_URL", bundle: bundle)
+    let explicitVisionURL = resolveOptionalURL(infoPlistKey: "SON_VISION_URL", bundle: bundle)
 
     let apiKey = resolveAPIKey(bundle: bundle, userDefaults: userDefaults)
     let bearerToken = resolveString(infoPlistKey: "SON_BEARER_TOKEN", defaultValue: "", bundle: bundle)
 
     return AssistantRuntimeConfig(
       webSocketURL: explicitWebSocketURL ?? deriveWebSocketURL(baseURL: backendBaseURL, path: wsPath),
+      visionFrameURL: explicitVisionURL ?? appendPath(path: visionPath, to: backendBaseURL),
       requestHeaders: makeRequestHeaders(apiKey: apiKey, bearerToken: bearerToken),
+      photoFps: resolvePhotoFPS(bundle: bundle),
       wakePhrase: resolveWakePhrase(bundle: bundle, userDefaults: userDefaults),
       sleepPhrase: resolveString(infoPlistKey: "SON_SLEEP_PHRASE", defaultValue: "goodbye mario", bundle: bundle),
       wakeWordMode: resolveWakeWordMode(bundle: bundle),
@@ -162,6 +172,20 @@ struct AssistantRuntimeConfig {
     }
 
     return 1_500
+  }
+
+  private static func resolvePhotoFPS(bundle: Bundle) -> Double {
+    if let raw = bundle.object(forInfoDictionaryKey: "SON_PHOTO_FPS") as? NSNumber {
+      return max(0.1, raw.doubleValue)
+    }
+
+    if let raw = bundle.object(forInfoDictionaryKey: "SON_PHOTO_FPS") as? String,
+       let parsed = Double(raw.trimmingCharacters(in: .whitespacesAndNewlines))
+    {
+      return max(0.1, parsed)
+    }
+
+    return 1.0
   }
 
   private static func resolveSleepWordMinActiveStreamMs(bundle: Bundle) -> Int64 {
