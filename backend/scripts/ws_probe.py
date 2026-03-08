@@ -4,9 +4,15 @@ import argparse
 import asyncio
 import base64
 import json
+import sys
+from pathlib import Path
 from typing import Any
 
 import websockets
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from backend.ws.frame_codec import CLIENT_AUDIO_FRAME_TYPE, encode_frame
 
