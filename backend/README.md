@@ -14,11 +14,12 @@ Current scope:
 - bounded image upload through `POST /vision/frame`
 - persistent backend state under `BACKEND_DATA_DIR`
 - opt-in visual-memory generation with Mistral
+- opt-in realtime tooling with memory tools and optional Tavily search
 
 Not in scope for the current backend slice:
 
 - multi-user hosting
-- web search or MCP execution
+- MCP execution
 - async long-running jobs
 - alternate realtime providers
 - user-profile fact promotion from conversation or vision
@@ -208,6 +209,42 @@ When `VISION_DEBUG_RETAIN_RAW_FRAMES=false`, raw ingest files are deleted after 
 
 The backend still creates `user/user_profile.md` and `user/user_profile.json`, but Step `4B` does not automatically promote new profile facts into them yet. That remains later work.
 
+## Realtime Tooling
+
+When `REALTIME_TOOLING_ENABLED=true`, the backend registers a small tool catalog with the active OpenAI realtime session.
+
+Current tool catalog:
+
+- `get_short_term_visual_context`
+  returns the current `short_term_memory.json` payload for the active session
+- `get_session_visual_context`
+  returns the current `session_memory.json` payload for the active session
+- `web_search`
+  available only when `TAVILY_API_KEY` is configured
+  returns bounded snippets-only search results
+
+Tooling policy:
+
+- short-term and session memory are not injected into every turn
+- the model is instructed to fetch visual context only when the request depends on it
+- tool execution stays backend-side and is not surfaced directly in the iOS UI
+- MCP-backed tools are not active in the current backend slice
+
+### Profile injection
+
+When tooling is enabled, the backend appends two compact blocks to the realtime instructions:
+
+- a tool-usage policy block
+- a stable profile block when supported fields exist in `user_profile.json`
+
+Current supported injected profile fields:
+
+- `name`
+- `job`
+- `company`
+- `preferences`
+- `projects`
+
 ## Health
 
 `GET /healthz` returns a compact productized payload:
@@ -308,7 +345,7 @@ These are used only when `REALTIME_TOOLING_ENABLED=true`:
 - `TAVILY_API_KEY`
 - `TAVILY_BASE_URL`
 
-Step `4C.1` only adds the runtime-owned tooling foundation. Missing Tavily config does not fail startup. It only means the future `web_search` tool is not available once Step `4C` is implemented further.
+Missing Tavily config does not fail startup. It only means `web_search` is omitted from the registered tool catalog for that runtime.
 
 ### Server settings
 
@@ -408,7 +445,7 @@ This is the canonical self-host path for the current backend slice. More polishe
 
 ### Startup and configuration
 
-Visual memory disabled:
+Base backend / visual-memory check:
 
 ```bash
 curl http://127.0.0.1:8080/healthz
@@ -429,6 +466,21 @@ VISION_MEMORY_ENABLED=true uvicorn backend.app:app --host 127.0.0.1 --port 8080
 Expected:
 
 - startup fails clearly if `MISTRAL_API_KEY` is missing
+
+Realtime tooling disabled:
+
+- backend behavior stays the same as the Step `4B` visual-memory slice
+
+Realtime tooling enabled with no Tavily key:
+
+- memory tools are still available
+- `web_search` is omitted
+- startup still succeeds
+
+Realtime tooling enabled with Tavily configured:
+
+- all three tools are available
+- profile injection is enabled if supported fields exist in `user_profile.json`
 
 ### Visual-memory validation
 
@@ -473,6 +525,36 @@ With `VISION_DEBUG_RETAIN_RAW_FRAMES=false`, raw ingest files under `vision_fram
 
 With `VISION_DEBUG_RETAIN_RAW_FRAMES=true`, raw ingest files should remain on disk for inspection.
 
+### Realtime-tooling validation
+
+With `REALTIME_TOOLING_ENABLED=true`, validate:
+
+- `get_short_term_visual_context`
+  - returns `available: false` with empty context when no short-term memory has been materialized
+  - returns the current `short_term_memory.json` payload once visual memory exists
+- `get_session_visual_context`
+  - returns `available: false` with empty context when no session memory has been materialized
+  - returns the current `session_memory.json` payload once session memory exists
+- `web_search`
+  - appears only when `TAVILY_API_KEY` is configured
+  - returns snippets-only results with:
+    - `title`
+    - `url`
+    - `snippet`
+  - returns structured tool errors on invalid input, timeout, or provider failure
+
+Bridge-level checks:
+
+- OpenAI session initialization includes tool descriptors when tooling is enabled
+- profile instructions include the tool-usage policy block
+- supported profile fields from `user_profile.json` are appended when present
+- `response.function_call_arguments.done` is handled correctly
+- `response.output_item.done` for function calls is handled correctly
+- each tool call produces:
+  - one `function_call_output`
+  - followed by one `response.create`
+- malformed tool arguments do not break the live session
+
 ### Probe script
 
 Use the local websocket probe to validate the control and binary framing contract:
@@ -515,5 +597,8 @@ After a websocket session ends, verify that:
 - Unsupported `REALTIME_PROVIDER` values fail runtime construction and startup.
 - Visual memory is opt-in. It is enabled only when `VISION_MEMORY_ENABLED=true`.
 - Accepted visual observations are stored as derived events. Raw frames are deleted by default after processing.
+- Realtime tooling is opt-in. It is enabled only when `REALTIME_TOOLING_ENABLED=true`.
+- `web_search` is optional and only appears when Tavily is configured.
+- MCP-backed tools are not active yet in the current backend slice.
 - Step 4A intentionally keeps the live session registry in memory. SQLite is persistent indexing, not live coordination.
 - Product roadmap and later multimodal/backend milestones live under `docs/`, not in this README.

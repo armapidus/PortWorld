@@ -191,22 +191,49 @@ class RealtimeToolingRuntime:
             )
 
     def build_session_instructions(self, *, base_instructions: str) -> str:
+        sections: list[str] = [base_instructions.rstrip()]
+
+        tool_usage_block = self._build_tool_usage_block()
+        if tool_usage_block:
+            sections.append(tool_usage_block)
+
         try:
             profile = self.storage.read_user_profile()
         except (JSONDecodeError, OSError):
-            return base_instructions
+            return "\n\n".join(section for section in sections if section).strip() + "\n"
 
         profile_lines = self._build_profile_lines(profile)
-        if not profile_lines:
-            return base_instructions
-        profile_block = "\n".join(
+        if profile_lines:
+            sections.append(
+                "\n".join(
+                    [
+                        "Stable user profile context:",
+                        *profile_lines,
+                    ]
+                )
+            )
+
+        return "\n\n".join(section for section in sections if section).strip() + "\n"
+
+    def _build_tool_usage_block(self) -> str:
+        guidance_lines = [
+            "Tool usage policy:",
+            "- Use get_short_term_visual_context when the user asks about what is visible now or what was seen in the last few moments.",
+            "- Use get_session_visual_context when the user asks about what has been seen across the current session.",
+        ]
+        if self.registry.has_tool("web_search"):
+            guidance_lines.append(
+                "- Use web_search for fresh external facts or documentation lookups."
+            )
+        guidance_lines.extend(
             [
-                "",
-                "Stable user profile context:",
-                *profile_lines,
+                "- Do not claim visual context you have not retrieved through a tool.",
+                "- Do not ask for visual memory tools when the request does not depend on recent visual context.",
+                "- Keep answers concise after tool use.",
+                "- Do not mention internal tool names or backend execution details to the user.",
             ]
         )
-        return base_instructions.rstrip() + "\n" + profile_block + "\n"
+        return "\n".join(guidance_lines)
 
     @staticmethod
     def _build_profile_lines(profile: dict[str, object]) -> list[str]:
