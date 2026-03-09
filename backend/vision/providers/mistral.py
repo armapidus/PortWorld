@@ -1,0 +1,176 @@
+from __future__ import annotations
+
+import base64
+from dataclasses import dataclass, field
+from typing import Any
+
+import httpx
+
+from backend.vision.contracts import (
+    ProviderObservationPayload,
+    VisionFrameContext,
+    VisionObservation,
+    parse_provider_observation_payload,
+)
+
+DEFAULT_MISTRAL_BASE_URL = "https://api.mistral.ai"
+
+_SYSTEM_PROMPT = (
+    "You are a vision observation service for a realtime wearable assistant. "
+    "Return exactly one compact JSON object with keys: "
+    "scene_summary, user_activity_guess, entities, actions, visible_text, documents_seen, salient_change, confidence. "
+    "Do not include markdown, code fences, or extra commentary. "
+    "Keep scene_summary short and factual. "
+    "Use arrays of short strings for entities, actions, visible_text, and documents_seen. "
+    "Set confidence as a number between 0.0 and 1.0."
+)
+
+
+@dataclass(slots=True)
+class MistralVisionAnalyzer:
+    api_key: str
+    model_name: str
+    base_url: str | None = None
+    provider_name: str = field(default="mistral", init=False)
+    _client: httpx.AsyncClient | None = field(default=None, init=False, repr=False)
+
+    async def startup(self) -> None:
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                base_url=(self.base_url or DEFAULT_MISTRAL_BASE_URL).rstrip("/"),
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Accept": "application/json",
+                },
+                timeout=httpx.Timeout(30.0),
+            )
+
+    async def shutdown(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+    async def analyze_frame(
+        self,
+        *,
+        image_bytes: bytes,
+        frame_context: VisionFrameContext,
+        image_media_type: str = "image/jpeg",
+    ) -> VisionObservation:
+        client = await self._get_client()
+        response = await client.post(
+            "/v1/chat/completions",
+            json=self._build_request_body(
+                image_bytes=image_bytes,
+                frame_context=frame_context,
+                image_media_type=image_media_type,
+            ),
+        )
+        response.raise_for_status()
+        payload = self._extract_provider_payload(response.json())
+        return self._normalize_observation(payload=payload, frame_context=frame_context)
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            await self.startup()
+        assert self._client is not None
+        return self._client
+
+    def _build_request_body(
+        self,
+        *,
+        image_bytes: bytes,
+        frame_context: VisionFrameContext,
+        image_media_type: str,
+    ) -> dict[str, Any]:
+        data_url = self._build_data_url(image_bytes=image_bytes, image_media_type=image_media_type)
+        return {
+            "model": self.model_name,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {
+                    "role": "system",
+                    "content": _SYSTEM_PROMPT,
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": self._build_user_prompt(frame_context=frame_context),
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": data_url,
+                        },
+                    ],
+                },
+            ],
+        }
+
+    def _build_user_prompt(self, *, frame_context: VisionFrameContext) -> str:
+        dimensions = []
+        if frame_context.width is not None:
+            dimensions.append(f"width={frame_context.width}")
+        if frame_context.height is not None:
+            dimensions.append(f"height={frame_context.height}")
+        dimension_text = ", ".join(dimensions) if dimensions else "unknown dimensions"
+        return (
+            "Analyze this single still image for short-term wearable context. "
+            f"Frame context: session_id={frame_context.session_id}, frame_id={frame_context.frame_id}, "
+            f"capture_ts_ms={frame_context.capture_ts_ms}, {dimension_text}. "
+            "Focus on what the user appears to be doing, prominent entities, readable text, "
+            "and whether this frame likely represents a salient change from nearby context."
+        )
+
+    def _build_data_url(self, *, image_bytes: bytes, image_media_type: str) -> str:
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+        return f"data:{image_media_type};base64,{encoded}"
+
+    def _extract_provider_payload(self, response_json: dict[str, Any]) -> ProviderObservationPayload:
+        choices = response_json.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise ValueError("Mistral response did not include choices")
+
+        message = choices[0].get("message")
+        if not isinstance(message, dict):
+            raise ValueError("Mistral response did not include a message payload")
+
+        content = message.get("content")
+        if isinstance(content, str):
+            return parse_provider_observation_payload(content)
+        if isinstance(content, list):
+            return parse_provider_observation_payload(self._coalesce_content_list(content))
+
+        raise ValueError("Mistral response message content had an unsupported shape")
+
+    def _coalesce_content_list(self, content: list[Any]) -> str:
+        text_parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                text_parts.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "text":
+                text_value = item.get("text")
+                if isinstance(text_value, str):
+                    text_parts.append(text_value)
+        if not text_parts:
+            raise ValueError("Mistral response content list did not contain text")
+        return "\n".join(text_parts)
+
+    def _normalize_observation(
+        self,
+        *,
+        payload: ProviderObservationPayload,
+        frame_context: VisionFrameContext,
+    ) -> VisionObservation:
+        return VisionObservation.model_validate(
+            {
+                "frame_id": frame_context.frame_id,
+                "session_id": frame_context.session_id,
+                "capture_ts_ms": frame_context.capture_ts_ms,
+                **payload.model_dump(),
+            }
+        )
