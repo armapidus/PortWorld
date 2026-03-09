@@ -174,7 +174,21 @@ Acceptance:
 
 Status:
 
-- planned
+- complete
+
+Implementation notes:
+
+- visual memory now runs as an opt-in backend-owned subsystem with explicit runtime lifecycle and provider configuration
+- `/vision/frame` remains stable for the iOS client while now feeding bounded asynchronous per-session analysis workers
+- the backend now performs cheap `dHash`-based gating before Mistral analysis instead of analyzing every uploaded frame
+- accepted observations now produce:
+  - `vision_events.jsonl`
+  - `short_term_memory.md/json`
+  - `session_memory.md/json`
+- `vision_frame_index` now makes ingest, gating, analysis, and failure states queryable through SQLite
+- raw ingest frames are deleted after terminal processing by default, while derived memory artifacts remain persisted
+- session teardown now finalizes the visual-memory worker and flushes any pending session-memory rollup
+- persistent `user_profile` files remain scaffold-only; profile promotion and lifecycle policy stay in Step `4D`
 
 ### Step 4C. Realtime Tooling MVP
 
