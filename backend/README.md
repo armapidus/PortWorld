@@ -198,10 +198,28 @@ Those files are placeholders for Step 4B and later work. Step 4A does not genera
   default: `false`
 - `BACKEND_DEBUG_TRACE_WS_MESSAGES`
   default: `false`
+- `VISION_MEMORY_ENABLED`
+  default: `false`
+- `VISION_MEMORY_PROVIDER`
+  default: `mistral`
+- `VISION_MEMORY_MODEL`
+  default: `ministral-3b-2512`
+- `VISION_SHORT_TERM_WINDOW_SECONDS`
+  default: `30`
+- `VISION_MIN_ANALYSIS_GAP_SECONDS`
+  default: `3`
+- `VISION_SCENE_CHANGE_HAMMING_THRESHOLD`
+  default: `12`
+- `VISION_SESSION_ROLLUP_INTERVAL_SECONDS`
+  default: `10`
+- `VISION_SESSION_ROLLUP_MIN_ACCEPTED_EVENTS`
+  default: `5`
+- `VISION_DEBUG_RETAIN_RAW_FRAMES`
+  default: `false`
 
 ### Realtime provider settings
 
-These are still OpenAI-specific in Step 4A:
+These are still OpenAI-specific for the active realtime path:
 
 - `OPENAI_API_KEY`
 - `OPENAI_REALTIME_MODEL`
@@ -215,6 +233,13 @@ These are still OpenAI-specific in Step 4A:
   default: `true`
 - `OPENAI_REALTIME_MANUAL_TURN_FALLBACK_DELAY_MS`
   default: `900`, minimum: `100`
+
+### Visual-memory provider settings
+
+These are used only when `VISION_MEMORY_ENABLED=true`:
+
+- `MISTRAL_API_KEY`
+- `MISTRAL_BASE_URL`
 
 ### Server settings
 
@@ -246,6 +271,9 @@ REALTIME_PROVIDER=openai
 BACKEND_DATA_DIR=backend/var
 BACKEND_DEBUG_DUMP_INPUT_AUDIO=false
 BACKEND_DEBUG_DUMP_INPUT_AUDIO_DIR=backend/var/debug_audio
+VISION_MEMORY_ENABLED=false
+VISION_MEMORY_PROVIDER=mistral
+VISION_MEMORY_MODEL=ministral-3b-2512
 
 OPENAI_API_KEY=...
 OPENAI_REALTIME_MODEL=gpt-realtime

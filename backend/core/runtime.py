@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from backend.core.settings import Settings
 from backend.core.storage import BackendStorage, StorageBootstrapResult, StoragePaths
 from backend.realtime.factory import RealtimeProviderFactory, build_debug_mock_capture_bridge
+from backend.vision.runtime import VisionMemoryRuntime
 
 if TYPE_CHECKING:
     from backend.realtime.factory import BridgeBinding
@@ -30,6 +31,7 @@ class AppRuntime:
     storage_paths: RuntimeStoragePaths
     storage: BackendStorage
     realtime_provider: RealtimeProviderFactory
+    vision_memory_runtime: VisionMemoryRuntime | None
     storage_bootstrap_result: StorageBootstrapResult | None = field(
         default=None,
         init=False,
@@ -53,6 +55,9 @@ class AppRuntime:
             user_profile_markdown_path=settings.backend_data_dir / "user" / "user_profile.md",
             user_profile_json_path=settings.backend_data_dir / "user" / "user_profile.json",
         )
+        vision_memory_runtime = None
+        if settings.vision_memory_enabled:
+            vision_memory_runtime = VisionMemoryRuntime.from_settings(settings)
         return cls(
             settings=settings,
             storage_paths=storage_paths,
@@ -69,12 +74,22 @@ class AppRuntime:
                 )
             ),
             realtime_provider=RealtimeProviderFactory(settings=settings),
+            vision_memory_runtime=vision_memory_runtime,
         )
 
     def bootstrap_storage(self) -> StorageBootstrapResult:
         result = self.storage.bootstrap()
         object.__setattr__(self, "storage_bootstrap_result", result)
         return result
+
+    async def startup(self) -> None:
+        self.bootstrap_storage()
+        if self.vision_memory_runtime is not None:
+            await self.vision_memory_runtime.startup()
+
+    async def shutdown(self) -> None:
+        if self.vision_memory_runtime is not None:
+            await self.vision_memory_runtime.shutdown()
 
     def make_session_bridge(
         self,
