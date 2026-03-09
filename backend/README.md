@@ -2,7 +2,7 @@
 
 FastAPI backend for the active PortWorld iPhone-first runtime.
 
-The backend is still centered on a realtime session bridge plus a bounded vision upload path, but Step 4A turns it into a cleaner self-hostable service with explicit runtime ownership, persistent storage bootstrap, and a provider seam that later phases can build on.
+The backend is centered on a realtime session bridge plus a bounded vision upload path. Steps `4A` and `4B` turn it into a cleaner self-hostable service with explicit runtime ownership, persistent storage bootstrap, and an opt-in visual-memory pipeline built around accepted image observations.
 
 ## Scope
 
@@ -13,14 +13,15 @@ Current scope:
 - OpenAI as the only active realtime provider
 - bounded image upload through `POST /vision/frame`
 - persistent backend state under `BACKEND_DATA_DIR`
+- opt-in visual-memory generation with Mistral
 
-Not in scope for Step 4A:
+Not in scope for the current backend slice:
 
 - multi-user hosting
-- visual memory generation
 - web search or MCP execution
 - async long-running jobs
 - alternate realtime providers
+- user-profile fact promotion from conversation or vision
 
 ## API Surface
 
@@ -118,8 +119,11 @@ Default layout:
 - `backend/var/portworld.db`
 - `backend/var/user/user_profile.md`
 - `backend/var/user/user_profile.json`
+- `backend/var/session/<session_id>/short_term_memory.md`
+- `backend/var/session/<session_id>/short_term_memory.json`
 - `backend/var/session/<session_id>/session_memory.md`
 - `backend/var/session/<session_id>/session_memory.json`
+- `backend/var/session/<session_id>/vision_events.jsonl`
 - `backend/var/vision_frames/...`
 - `backend/var/debug_audio/...`
 
@@ -132,31 +136,77 @@ Current tables:
 - `schema_meta`
 - `session_index`
 - `artifact_index`
+- `vision_frame_index`
 
 What is persisted today:
 
 - session lifecycle status (`active`, `ended`)
 - stored artifact metadata and relative paths
-- user/session placeholder memory files for later phases
+- vision ingest and processing status
+- derived short-term memory artifacts
+- derived per-session memory artifacts
+- accepted visual observations in `vision_events.jsonl`
 
 What is not persisted yet:
 
-- visual summaries
-- derived short-term context
-- extracted profile facts from conversation
+- user-profile facts promoted from conversations
+- cross-session semantic memory beyond the profile scaffold
 
-### Vision uploads
+### Vision uploads and derived memory
 
-`POST /vision/frame` still writes the uploaded JPEG plus a JSON sidecar and now also registers both artifacts in `artifact_index`.
+`POST /vision/frame` still acknowledges quickly after ingest. When `VISION_MEMORY_ENABLED=true`, the backend then:
 
-### Session placeholders
+1. writes the uploaded JPEG plus a JSON sidecar
+2. registers ingest artifacts in `artifact_index`
+3. records frame status in `vision_frame_index`
+4. enqueues the frame into one sequential per-session worker
+5. applies cheap gating before any provider call
+6. sends accepted frames to the configured vision provider
+7. updates:
+   - `vision_events.jsonl`
+   - `short_term_memory.md`
+   - `short_term_memory.json`
+   - `session_memory.md`
+   - `session_memory.json`
 
-When a session activates successfully, the backend ensures:
+When `VISION_DEBUG_RETAIN_RAW_FRAMES=false`, raw ingest files are deleted after terminal processing. The derived memory artifacts remain on disk.
 
-- `session/<session_id>/session_memory.md`
-- `session/<session_id>/session_memory.json`
+### Short-term memory
 
-Those files are placeholders for Step 4B and later work. Step 4A does not generate memory content yet.
+`short_term_memory` is rebuilt on every accepted observation from accepted events inside the last `VISION_SHORT_TERM_WINDOW_SECONDS`.
+
+`short_term_memory.json` contains:
+
+- `session_id`
+- `window_start_ts_ms`
+- `window_end_ts_ms`
+- `current_scene_summary`
+- `recent_entities`
+- `recent_actions`
+- `recent_visible_text`
+- `recent_documents`
+- `source_frame_ids`
+
+### Session memory
+
+`session_memory` is rolled forward in micro-batches rather than recomputed from the entire session every time.
+
+`session_memory.json` contains:
+
+- `session_id`
+- `started_at_ms`
+- `updated_at_ms`
+- `current_task_guess`
+- `environment_summary`
+- `recurring_entities`
+- `documents_seen`
+- `notable_transitions`
+- `open_uncertainties`
+- `summary_text`
+
+### Profile scaffold
+
+The backend still creates `user/user_profile.md` and `user/user_profile.json`, but Step `4B` does not automatically promote new profile facts into them yet. That remains later work.
 
 ## Health
 
@@ -241,6 +291,8 @@ These are used only when `VISION_MEMORY_ENABLED=true`:
 - `MISTRAL_API_KEY`
 - `MISTRAL_BASE_URL`
 
+If `VISION_MEMORY_ENABLED=true` and `MISTRAL_API_KEY` is missing, startup fails clearly. When visual memory is disabled, missing Mistral config does not matter.
+
 ### Server settings
 
 - `HOST`
@@ -274,11 +326,19 @@ BACKEND_DEBUG_DUMP_INPUT_AUDIO_DIR=backend/var/debug_audio
 VISION_MEMORY_ENABLED=false
 VISION_MEMORY_PROVIDER=mistral
 VISION_MEMORY_MODEL=ministral-3b-2512
+VISION_SHORT_TERM_WINDOW_SECONDS=30
+VISION_MIN_ANALYSIS_GAP_SECONDS=3
+VISION_SCENE_CHANGE_HAMMING_THRESHOLD=12
+VISION_SESSION_ROLLUP_INTERVAL_SECONDS=10
+VISION_SESSION_ROLLUP_MIN_ACCEPTED_EVENTS=5
+VISION_DEBUG_RETAIN_RAW_FRAMES=false
 
 OPENAI_API_KEY=...
 OPENAI_REALTIME_MODEL=gpt-realtime
 OPENAI_REALTIME_VOICE=ash
 OPENAI_REALTIME_INSTRUCTIONS=You are a concise assistant. Keep answers short, clear, and practical.
+
+MISTRAL_API_KEY=...
 
 HOST=0.0.0.0
 PORT=8080
@@ -320,9 +380,76 @@ Run:
 docker compose up --build
 ```
 
-This is the canonical Step 4A self-host path. More polished operator guidance stays in later roadmap work.
+This is the canonical self-host path for the current backend slice. More polished operator guidance stays in later roadmap work.
 
 ## Validation
+
+### Startup and configuration
+
+Visual memory disabled:
+
+```bash
+curl http://127.0.0.1:8080/healthz
+```
+
+Expected:
+
+- backend starts normally with `VISION_MEMORY_ENABLED=false`
+- `/healthz` reports `service=portworld-backend`
+- `/healthz` reports `storage=ready`
+
+Visual memory enabled but misconfigured:
+
+```bash
+VISION_MEMORY_ENABLED=true uvicorn backend.app:app --host 127.0.0.1 --port 8080
+```
+
+Expected:
+
+- startup fails clearly if `MISTRAL_API_KEY` is missing
+
+### Visual-memory validation
+
+Use a backend config with:
+
+- `VISION_MEMORY_ENABLED=true`
+- `MISTRAL_API_KEY=...`
+- `VISION_DEBUG_RETAIN_RAW_FRAMES=false`
+
+Then post repeated frames to `/vision/frame` and inspect:
+
+- `session/<session_id>/vision_events.jsonl`
+- `session/<session_id>/short_term_memory.json`
+- `session/<session_id>/short_term_memory.md`
+- `session/<session_id>/session_memory.json`
+- `session/<session_id>/session_memory.md`
+
+Useful checks:
+
+- repeated near-identical frames inside the analysis gap should be gated and not all analyzed
+- accepted frames should append one event to `vision_events.jsonl`
+- accepted frames should rebuild `short_term_memory`
+- session rollups should update `session_memory` on the configured cadence
+
+To inspect frame-processing state:
+
+```bash
+sqlite3 backend/var/portworld.db "select session_id, frame_id, processing_status, gate_status, gate_reason from vision_frame_index order by ingest_ts_ms desc limit 20;"
+```
+
+Expected statuses include:
+
+- `queued`
+- `superseded`
+- `gated_rejected`
+- `analysis_failed`
+- `analyzed`
+
+### Raw-frame cleanup
+
+With `VISION_DEBUG_RETAIN_RAW_FRAMES=false`, raw ingest files under `vision_frames/` should be deleted after terminal processing while derived memory artifacts remain.
+
+With `VISION_DEBUG_RETAIN_RAW_FRAMES=true`, raw ingest files should remain on disk for inspection.
 
 ### Probe script
 
@@ -352,9 +479,19 @@ python backend/scripts/ws_probe.py --send-text-fallback
 python3 -m compileall backend
 ```
 
+### Session finalization
+
+After a websocket session ends, verify that:
+
+- pending accepted events have been flushed into `session_memory`
+- `session/<session_id>/vision_events.jsonl` remains on disk
+- the final `session_memory.json` reflects the last accepted observations
+
 ## Notes
 
 - Missing `OPENAI_API_KEY` does not fail backend startup by itself. It fails when a realtime session actually needs OpenAI.
 - Unsupported `REALTIME_PROVIDER` values fail runtime construction and startup.
+- Visual memory is opt-in. It is enabled only when `VISION_MEMORY_ENABLED=true`.
+- Accepted visual observations are stored as derived events. Raw frames are deleted by default after processing.
 - Step 4A intentionally keeps the live session registry in memory. SQLite is persistent indexing, not live coordination.
 - Product roadmap and later multimodal/backend milestones live under `docs/`, not in this README.
