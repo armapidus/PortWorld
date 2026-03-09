@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from backend.core.settings import Settings
 from backend.core.storage import BackendStorage
 from backend.tools.contracts import ToolDefinition
+from backend.tools.memory import MemoryToolExecutor
 from backend.tools.registry import NotImplementedToolExecutor, RealtimeToolRegistry
 
 
@@ -37,7 +38,10 @@ class RealtimeToolingRuntime:
 
         web_search_enabled = settings.has_tavily_api_key()
         web_search_provider = provider if web_search_enabled else None
-        registry = cls._build_registry(web_search_enabled=web_search_enabled)
+        registry = cls._build_registry(
+            storage=storage,
+            web_search_enabled=web_search_enabled,
+        )
         return cls(
             settings=settings,
             storage=storage,
@@ -49,7 +53,11 @@ class RealtimeToolingRuntime:
         )
 
     @staticmethod
-    def _build_registry(*, web_search_enabled: bool) -> RealtimeToolRegistry:
+    def _build_registry(
+        *,
+        storage: BackendStorage,
+        web_search_enabled: bool,
+    ) -> RealtimeToolRegistry:
         registry = RealtimeToolRegistry()
         registry.register(
             definition=ToolDefinition(
@@ -63,8 +71,9 @@ class RealtimeToolingRuntime:
                     "additionalProperties": False,
                 },
             ),
-            executor=NotImplementedToolExecutor(
-                tool_name="get_short_term_visual_context"
+            executor=MemoryToolExecutor(
+                storage=storage,
+                memory_scope="short_term",
             ),
         )
         registry.register(
@@ -79,7 +88,10 @@ class RealtimeToolingRuntime:
                     "additionalProperties": False,
                 },
             ),
-            executor=NotImplementedToolExecutor(tool_name="get_session_visual_context"),
+            executor=MemoryToolExecutor(
+                storage=storage,
+                memory_scope="session",
+            ),
         )
         if web_search_enabled:
             registry.register(

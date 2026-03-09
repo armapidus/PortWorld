@@ -280,6 +280,10 @@ class BackendStorage:
         session_storage = self.ensure_session_storage(session_id=session_id)
         return json.loads(session_storage.session_memory_json_path.read_text(encoding="utf-8"))
 
+    def read_short_term_memory(self, *, session_id: str) -> dict[str, Any]:
+        session_storage = self.ensure_session_storage(session_id=session_id)
+        return json.loads(session_storage.short_term_memory_json_path.read_text(encoding="utf-8"))
+
     def write_short_term_memory(
         self,
         *,

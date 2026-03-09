@@ -24,6 +24,7 @@ class ToolDefinition:
 class ToolCall:
     name: str
     call_id: str
+    session_id: str
     arguments: dict[str, Any]
 
 
