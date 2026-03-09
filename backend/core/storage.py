@@ -262,6 +262,58 @@ class BackendStorage:
         self._upsert_vision_frame_index(record)
         return record
 
+    def append_vision_event(self, *, session_id: str, event: dict[str, Any]) -> None:
+        session_storage = self.ensure_session_storage(session_id=session_id)
+        with session_storage.vision_events_log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event, ensure_ascii=True, sort_keys=True) + "\n")
+
+    def read_vision_events(self, *, session_id: str) -> list[dict[str, Any]]:
+        session_storage = self.ensure_session_storage(session_id=session_id)
+        events: list[dict[str, Any]] = []
+        for line in session_storage.vision_events_log_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            events.append(json.loads(line))
+        return events
+
+    def read_session_memory(self, *, session_id: str) -> dict[str, Any]:
+        session_storage = self.ensure_session_storage(session_id=session_id)
+        return json.loads(session_storage.session_memory_json_path.read_text(encoding="utf-8"))
+
+    def write_short_term_memory(
+        self,
+        *,
+        session_id: str,
+        payload: dict[str, Any],
+        markdown_text: str,
+    ) -> None:
+        session_storage = self.ensure_session_storage(session_id=session_id)
+        session_storage.short_term_memory_json_path.write_text(
+            json.dumps(payload, ensure_ascii=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        session_storage.short_term_memory_markdown_path.write_text(
+            markdown_text,
+            encoding="utf-8",
+        )
+
+    def write_session_memory(
+        self,
+        *,
+        session_id: str,
+        payload: dict[str, Any],
+        markdown_text: str,
+    ) -> None:
+        session_storage = self.ensure_session_storage(session_id=session_id)
+        session_storage.session_memory_json_path.write_text(
+            json.dumps(payload, ensure_ascii=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        session_storage.session_memory_markdown_path.write_text(
+            markdown_text,
+            encoding="utf-8",
+        )
+
     def update_vision_frame_processing(
         self,
         *,

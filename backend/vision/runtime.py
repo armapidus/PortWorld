@@ -6,7 +6,12 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from backend.core.settings import Settings
-from backend.core.storage import BackendStorage, now_ms
+from backend.core.storage import BackendStorage, SessionStorageResult, now_ms
+from backend.memory.materializer import (
+    build_accepted_vision_event,
+    build_session_memory_rollup,
+    build_short_term_memory,
+)
 from backend.vision.contracts import VisionAnalyzer, VisionFrameContext, VisionObservation
 from backend.vision.factory import build_vision_analyzer
 from backend.vision.gating import AcceptedFrameReference, VisionGateError, evaluate_frame_gate
@@ -34,10 +39,13 @@ class GateRecord:
 @dataclass(slots=True)
 class SessionVisionWorker:
     session_id: str
+    session_storage: SessionStorageResult
     pending_frame: PendingVisionFrame | None = None
     latest_gate_records: deque[GateRecord] = field(default_factory=lambda: deque(maxlen=25))
     last_accepted_frame: AcceptedFrameReference | None = None
     last_observation: VisionObservation | None = None
+    pending_session_events: list[dict[str, object]] = field(default_factory=list)
+    last_session_rollup_at_ms: int | None = None
     task: asyncio.Task[None] | None = None
     condition: asyncio.Condition = field(default_factory=asyncio.Condition)
 
@@ -151,7 +159,15 @@ class VisionMemoryRuntime:
         async with self._workers_lock:
             worker = self._workers.get(session_id)
             if worker is None:
-                worker = SessionVisionWorker(session_id=session_id)
+                session_storage = self.storage.ensure_session_storage(session_id=session_id)
+                previous_session_memory = self.storage.read_session_memory(session_id=session_id)
+                worker = SessionVisionWorker(
+                    session_id=session_id,
+                    session_storage=session_storage,
+                    last_session_rollup_at_ms=_coerce_optional_int(
+                        previous_session_memory.get("updated_at_ms")
+                    ),
+                )
                 worker.task = asyncio.create_task(
                     self._run_session_worker(worker),
                     name=f"vision-session-{session_id}",
@@ -288,6 +304,19 @@ class VisionMemoryRuntime:
             dhash_hex=gate_decision.dhash_hex,
         )
         worker.last_observation = observation
+        accepted_event = build_accepted_vision_event(
+            observation=observation,
+            provider=self.provider_name,
+            model=self.model_name,
+        )
+        self.storage.append_vision_event(
+            session_id=observation.session_id,
+            event=accepted_event,
+        )
+        worker.pending_session_events.append(accepted_event)
+        self._materialize_short_term_memory(worker)
+        if self._should_roll_session_memory(worker):
+            self._materialize_session_memory(worker)
         self.storage.update_vision_frame_processing(
             session_id=observation.session_id,
             frame_id=observation.frame_id,
@@ -308,3 +337,50 @@ class VisionMemoryRuntime:
             self.model_name,
             observation.scene_summary,
         )
+
+    def _materialize_short_term_memory(self, worker: SessionVisionWorker) -> None:
+        accepted_events = self.storage.read_vision_events(session_id=worker.session_id)
+        payload, markdown_text = build_short_term_memory(
+            session_id=worker.session_id,
+            accepted_events=accepted_events,
+            window_seconds=self.settings.vision_short_term_window_seconds,
+        )
+        self.storage.write_short_term_memory(
+            session_id=worker.session_id,
+            payload=payload,
+            markdown_text=markdown_text,
+        )
+
+    def _should_roll_session_memory(self, worker: SessionVisionWorker) -> bool:
+        if not worker.pending_session_events:
+            return False
+        if worker.last_session_rollup_at_ms is None:
+            return True
+        if len(worker.pending_session_events) >= self.settings.vision_session_rollup_min_accepted_events:
+            return True
+        elapsed_ms = now_ms() - worker.last_session_rollup_at_ms
+        return elapsed_ms >= self.settings.vision_session_rollup_interval_seconds * 1000
+
+    def _materialize_session_memory(self, worker: SessionVisionWorker) -> None:
+        previous_memory = self.storage.read_session_memory(session_id=worker.session_id)
+        payload, markdown_text = build_session_memory_rollup(
+            session_id=worker.session_id,
+            previous_memory=previous_memory,
+            recent_events=list(worker.pending_session_events),
+        )
+        self.storage.write_session_memory(
+            session_id=worker.session_id,
+            payload=payload,
+            markdown_text=markdown_text,
+        )
+        worker.pending_session_events.clear()
+        worker.last_session_rollup_at_ms = int(payload["updated_at_ms"])
+
+
+def _coerce_optional_int(value: object) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
