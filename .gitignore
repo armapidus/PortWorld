@@ -118,9 +118,6 @@ playground.xcworkspace
 # Tests
 tmp/
 __Snapshots__/
-debug_audio/
-backend/var/
-archived/
 tests_archived/
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -190,3 +187,8 @@ realtime_*.md
 priority_*.md
 TEMPLATE_PROMPT.md
 intermediary*/
+cleanup/
+issues/
+debug_audio/
+backend/var/
+archived/
