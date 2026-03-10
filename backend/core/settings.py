@@ -56,6 +56,8 @@ class Settings:
     openai_api_key: str | None
     mistral_api_key: str | None
     mistral_base_url: str | None
+    vision_provider_api_key: str | None
+    vision_provider_base_url: str | None
     tavily_api_key: str | None
     tavily_base_url: str | None
     backend_bearer_token: str | None
@@ -117,6 +119,8 @@ class Settings:
             openai_api_key=os.getenv("OPENAI_API_KEY"),
             mistral_api_key=os.getenv("MISTRAL_API_KEY"),
             mistral_base_url=_get_env("MISTRAL_BASE_URL"),
+            vision_provider_api_key=os.getenv("VISION_PROVIDER_API_KEY"),
+            vision_provider_base_url=_get_env("VISION_PROVIDER_BASE_URL"),
             tavily_api_key=os.getenv("TAVILY_API_KEY"),
             tavily_base_url=_get_env("TAVILY_BASE_URL"),
             backend_bearer_token=(_get_env("BACKEND_BEARER_TOKEN") or "").strip()
@@ -277,6 +281,18 @@ class Settings:
         if not key:
             raise RuntimeError("MISTRAL_API_KEY is required when VISION_MEMORY_ENABLED=true")
         return key
+
+    def require_vision_provider_api_key(self) -> str:
+        key = (self.vision_provider_api_key or "").strip()
+        if key:
+            return key
+        key = (self.mistral_api_key or "").strip()
+        if key:
+            return key
+        raise RuntimeError(
+            "VISION_PROVIDER_API_KEY or MISTRAL_API_KEY is required when "
+            "VISION_MEMORY_ENABLED=true"
+        )
 
     def has_tavily_api_key(self) -> bool:
         return bool((self.tavily_api_key or "").strip())

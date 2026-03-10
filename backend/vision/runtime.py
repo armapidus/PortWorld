@@ -17,6 +17,7 @@ from backend.vision.contracts import (
     VisionAnalyzer,
     VisionFrameContext,
     VisionObservation,
+    VisionProviderError,
     VisionRateLimitError,
 )
 from backend.vision.factory import build_vision_analyzer
@@ -59,6 +60,7 @@ class DeferredVisionCandidate:
     signal: VisionSignalSnapshot
     route: VisionRouteDecision
     deferred_at_ms: int
+    bootstrap_candidate: bool = False
 
 
 @dataclass(slots=True)
@@ -75,6 +77,8 @@ class SessionVisionWorker:
     short_term_memory_last_updated_at_ms: int | None = None
     session_memory_last_updated_at_ms: int | None = None
     session_memory_exists: bool = False
+    accepted_event_count: int = 0
+    bootstrap_state: str = "unbootstrapped"
     pending_session_events: list[dict[str, object]] = field(default_factory=list)
     last_session_rollup_at_ms: int | None = None
     close_requested: bool = False
@@ -311,14 +315,93 @@ class VisionMemoryRuntime:
 
         if worker.best_deferred_candidate is not None:
             deferred = worker.best_deferred_candidate
-            self._mark_store_only(
-                pending_frame=deferred.pending_frame,
-                signal=deferred.signal,
-                route=deferred.route,
-                provider_budget_state=build_budget_state_from_signal(deferred.signal),
-                reason="session_finalized_before_analysis",
-            )
+            budget_state = await self.provider_budget.get_state()
+            if deferred.bootstrap_candidate and budget_state.available_now:
+                try:
+                    signal = self._build_signal_snapshot(
+                        worker=worker,
+                        pending_frame=deferred.pending_frame,
+                        provider_budget_state=budget_state,
+                    )
+                    route = decide_vision_route(
+                        signal=signal,
+                        min_analysis_gap_seconds=self.settings.vision_min_analysis_gap_seconds,
+                        scene_change_hamming_threshold=self.settings.vision_scene_change_hamming_threshold,
+                        analysis_heartbeat_seconds=self.settings.vision_analysis_heartbeat_seconds,
+                    )
+                    if route.action == "analyze_now":
+                        await self._analyze_now(
+                            worker=worker,
+                            pending_frame=deferred.pending_frame,
+                            signal=signal,
+                            route=route,
+                        )
+                    else:
+                        self._mark_store_only(
+                            pending_frame=deferred.pending_frame,
+                            signal=signal,
+                            route=route,
+                            provider_budget_state=budget_state,
+                            reason="session_finalized_before_analysis",
+                        )
+                except VisionGateError:
+                    self._mark_store_only(
+                        pending_frame=deferred.pending_frame,
+                        signal=deferred.signal,
+                        route=deferred.route,
+                        provider_budget_state=budget_state,
+                        reason="session_finalized_before_analysis",
+                    )
+            elif deferred.bootstrap_candidate:
+                self._persist_bootstrap_memory_state(
+                    worker=worker,
+                    status="bootstrap_degraded",
+                    reason="session_finalized_during_provider_cooldown",
+                    frame_id=deferred.pending_frame.frame_context.frame_id,
+                    next_retry_at_ms=budget_state.available_at_ms,
+                    attempt_count=self._current_attempt_count(
+                        session_id=deferred.pending_frame.frame_context.session_id,
+                        frame_id=deferred.pending_frame.frame_context.frame_id,
+                    ),
+                    error_code="VISION_BOOTSTRAP_INCOMPLETE",
+                )
+                self.storage.update_vision_frame_processing(
+                    session_id=deferred.pending_frame.frame_context.session_id,
+                    frame_id=deferred.pending_frame.frame_context.frame_id,
+                    processing_status="bootstrap_degraded",
+                    gate_status="accepted",
+                    gate_reason="session_finalized_during_provider_cooldown",
+                    phash=deferred.signal.dhash_hex,
+                    provider=self.provider_name,
+                    model=self.model_name,
+                    next_retry_at_ms=budget_state.available_at_ms,
+                    error_code="VISION_BOOTSTRAP_INCOMPLETE",
+                    routing_status="bootstrap_degraded",
+                    routing_reason="session_finalized_during_provider_cooldown",
+                    routing_score=deferred.route.priority_score,
+                    routing_metadata=self._build_routing_metadata(
+                        signal=deferred.signal,
+                        route=deferred.route,
+                        provider_budget_state=budget_state,
+                        analysis_outcome="bootstrap_degraded",
+                    ),
+                )
+            else:
+                self._mark_store_only(
+                    pending_frame=deferred.pending_frame,
+                    signal=deferred.signal,
+                    route=deferred.route,
+                    provider_budget_state=build_budget_state_from_signal(deferred.signal),
+                    reason="session_finalized_before_analysis",
+                )
             worker.best_deferred_candidate = None
+        if worker.accepted_event_count == 0 and worker.bootstrap_state != "bootstrap_degraded":
+            self._persist_bootstrap_memory_state(
+                worker=worker,
+                status="bootstrap_degraded",
+                reason="session_ended_without_accepted_visual_observation",
+                error_code="VISION_BOOTSTRAP_INCOMPLETE",
+            )
         if worker.pending_session_events:
             self._materialize_session_memory(worker)
 
@@ -327,11 +410,15 @@ class VisionMemoryRuntime:
             worker = self._workers.get(session_id)
             if worker is None:
                 session_storage = self.storage.ensure_session_storage(session_id=session_id)
+                accepted_events = self.storage.read_vision_events(session_id=session_id)
                 previous_session_memory = self.storage.read_session_memory(session_id=session_id)
                 previous_short_term_memory = self.storage.read_short_term_memory(session_id=session_id)
                 session_updated_at_ms = _coerce_optional_int(previous_session_memory.get("updated_at_ms"))
-                short_term_updated_at_ms = _coerce_positive_optional_int(
-                    previous_short_term_memory.get("window_end_ts_ms")
+                accepted_event_count = len(accepted_events)
+                short_term_updated_at_ms = (
+                    _coerce_positive_optional_int(previous_short_term_memory.get("window_end_ts_ms"))
+                    if accepted_event_count > 0
+                    else None
                 )
                 worker = SessionVisionWorker(
                     session_id=session_id,
@@ -339,8 +426,10 @@ class VisionMemoryRuntime:
                     last_successful_analysis_at_ms=short_term_updated_at_ms,
                     short_term_memory_last_updated_at_ms=short_term_updated_at_ms,
                     session_memory_last_updated_at_ms=short_term_updated_at_ms,
-                    session_memory_exists=bool(previous_session_memory),
-                    last_session_rollup_at_ms=session_updated_at_ms,
+                    session_memory_exists=accepted_event_count > 0,
+                    accepted_event_count=accepted_event_count,
+                    bootstrap_state="bootstrapped" if accepted_event_count > 0 else "unbootstrapped",
+                    last_session_rollup_at_ms=session_updated_at_ms if accepted_event_count > 0 else None,
                 )
                 worker.task = asyncio.create_task(
                     self._run_session_worker(worker),
@@ -383,9 +472,12 @@ class VisionMemoryRuntime:
                     deferred = worker.best_deferred_candidate
                     budget_state = await self.provider_budget.get_state()
                     now_ts_ms = now_ms()
-                    deferred_ttl_ms = self.settings.vision_deferred_candidate_ttl_seconds * 1000
-                    expires_at_ms = deferred.deferred_at_ms + deferred_ttl_ms
-                    wake_at_ms = min(expires_at_ms, budget_state.available_at_ms)
+                    if deferred.bootstrap_candidate:
+                        wake_at_ms = budget_state.available_at_ms
+                    else:
+                        deferred_ttl_ms = self.settings.vision_deferred_candidate_ttl_seconds * 1000
+                        expires_at_ms = deferred.deferred_at_ms + deferred_ttl_ms
+                        wake_at_ms = min(expires_at_ms, budget_state.available_at_ms)
                     if wake_at_ms <= now_ts_ms:
                         return "deferred", deferred
                     try:
@@ -544,10 +636,10 @@ class VisionMemoryRuntime:
         if worker.best_deferred_candidate is not deferred:
             return
         budget_state = await self.provider_budget.get_state()
-        deferred_ttl_ms = self.settings.vision_deferred_candidate_ttl_seconds * 1000
         now_ts_ms = now_ms()
+        deferred_ttl_ms = self.settings.vision_deferred_candidate_ttl_seconds * 1000
         expires_at_ms = deferred.deferred_at_ms + deferred_ttl_ms
-        if now_ts_ms >= expires_at_ms:
+        if not deferred.bootstrap_candidate and now_ts_ms >= expires_at_ms:
             self._mark_store_only(
                 pending_frame=deferred.pending_frame,
                 signal=deferred.signal,
@@ -628,15 +720,17 @@ class VisionMemoryRuntime:
             analysis_heartbeat_seconds=self.settings.vision_analysis_heartbeat_seconds,
         )
         if route.action == "defer_candidate":
+            processing_status = "retry_pending" if deferred.bootstrap_candidate else "deferred"
             self.storage.update_vision_frame_processing(
                 session_id=deferred.pending_frame.frame_context.session_id,
                 frame_id=deferred.pending_frame.frame_context.frame_id,
-                processing_status="deferred",
+                processing_status=processing_status,
                 gate_status="accepted",
                 gate_reason=route.reason,
                 phash=signal.dhash_hex,
                 provider=self.provider_name,
                 model=self.model_name,
+                next_retry_at_ms=budget_state.available_at_ms,
                 routing_status=route.action,
                 routing_reason=route.reason,
                 routing_score=route.priority_score,
@@ -647,6 +741,18 @@ class VisionMemoryRuntime:
                     analysis_outcome="deferred_candidate_retained",
                 ),
             )
+            if deferred.bootstrap_candidate:
+                self._persist_bootstrap_memory_state(
+                    worker=worker,
+                    status="bootstrap_pending",
+                    reason="provider_budget_unavailable",
+                    frame_id=deferred.pending_frame.frame_context.frame_id,
+                    next_retry_at_ms=budget_state.available_at_ms,
+                    attempt_count=self._current_attempt_count(
+                        session_id=deferred.pending_frame.frame_context.session_id,
+                        frame_id=deferred.pending_frame.frame_context.frame_id,
+                    ),
+                )
             self._append_routing_event(
                 signal=signal,
                 route=route,
@@ -717,6 +823,7 @@ class VisionMemoryRuntime:
         provider_budget_state: VisionProviderBudgetState,
         analysis_outcome: str,
         retry_after_seconds: float | None = None,
+        error_details: dict[str, object] | None = None,
     ) -> dict[str, object]:
         metadata: dict[str, object] = {
             "capture_gap_ms": signal.capture_gap_ms,
@@ -734,6 +841,8 @@ class VisionMemoryRuntime:
         }
         if retry_after_seconds is not None:
             metadata["retry_after_seconds"] = retry_after_seconds
+        if error_details is not None:
+            metadata["error_details"] = error_details
         return metadata
 
     def _build_route_decision_payload(
@@ -779,6 +888,7 @@ class VisionMemoryRuntime:
         did_attempt_analysis: bool,
         analysis_outcome: str,
         retry_after_seconds: float | None = None,
+        error_details: dict[str, object] | None = None,
         fallback_action: str = "store_only",
         fallback_reason: str = "route_unavailable",
     ) -> None:
@@ -821,6 +931,8 @@ class VisionMemoryRuntime:
         }
         if retry_after_seconds is not None:
             event["retry_after_seconds"] = retry_after_seconds
+        if error_details is not None:
+            event["error_details"] = error_details
         self.storage.append_vision_routing_event(session_id=signal.session_id, event=event)
 
     async def _defer_candidate(
@@ -832,11 +944,13 @@ class VisionMemoryRuntime:
         route: VisionRouteDecision,
         provider_budget_state: VisionProviderBudgetState,
     ) -> None:
+        bootstrap_candidate = route.memory_bootstrap_required and worker.accepted_event_count == 0
         incoming = DeferredVisionCandidate(
             pending_frame=pending_frame,
             signal=signal,
             route=route,
             deferred_at_ms=now_ms(),
+            bootstrap_candidate=bootstrap_candidate,
         )
         existing = worker.best_deferred_candidate
         if existing is None:
@@ -844,12 +958,13 @@ class VisionMemoryRuntime:
             self.storage.update_vision_frame_processing(
                 session_id=signal.session_id,
                 frame_id=signal.frame_id,
-                processing_status="deferred",
+                processing_status="retry_pending" if bootstrap_candidate else "deferred",
                 gate_status="accepted",
                 gate_reason=route.reason,
                 phash=signal.dhash_hex,
                 provider=self.provider_name,
                 model=self.model_name,
+                next_retry_at_ms=provider_budget_state.available_at_ms,
                 routing_status=route.action,
                 routing_reason=route.reason,
                 routing_score=route.priority_score,
@@ -860,6 +975,19 @@ class VisionMemoryRuntime:
                     analysis_outcome="deferred_candidate_selected",
                 ),
             )
+            if bootstrap_candidate:
+                worker.bootstrap_state = "bootstrap_pending"
+                self._persist_bootstrap_memory_state(
+                    worker=worker,
+                    status="bootstrap_pending",
+                    reason=route.reason,
+                    frame_id=signal.frame_id,
+                    next_retry_at_ms=provider_budget_state.available_at_ms,
+                    attempt_count=self._current_attempt_count(
+                        session_id=signal.session_id,
+                        frame_id=signal.frame_id,
+                    ),
+                )
             self._append_routing_event(
                 signal=signal,
                 route=route,
@@ -870,17 +998,77 @@ class VisionMemoryRuntime:
             async with worker.condition:
                 worker.condition.notify_all()
             return
+        if existing.bootstrap_candidate and bootstrap_candidate:
+            if incoming.route.priority_score > existing.route.priority_score:
+                worker.best_deferred_candidate = incoming
+                self.storage.update_vision_frame_processing(
+                    session_id=signal.session_id,
+                    frame_id=signal.frame_id,
+                    processing_status="retry_pending",
+                    gate_status="accepted",
+                    gate_reason=route.reason,
+                    phash=signal.dhash_hex,
+                    provider=self.provider_name,
+                    model=self.model_name,
+                    next_retry_at_ms=provider_budget_state.available_at_ms,
+                    routing_status=route.action,
+                    routing_reason=route.reason,
+                    routing_score=route.priority_score,
+                    routing_metadata=self._build_routing_metadata(
+                        signal=signal,
+                        route=route,
+                        provider_budget_state=provider_budget_state,
+                        analysis_outcome="deferred_candidate_selected",
+                    ),
+                )
+                self._mark_store_only(
+                    pending_frame=existing.pending_frame,
+                    signal=existing.signal,
+                    route=existing.route,
+                    provider_budget_state=provider_budget_state,
+                    reason="bootstrap_candidate_replaced_by_stronger_frame",
+                )
+                self._persist_bootstrap_memory_state(
+                    worker=worker,
+                    status="bootstrap_pending",
+                    reason=route.reason,
+                    frame_id=signal.frame_id,
+                    next_retry_at_ms=provider_budget_state.available_at_ms,
+                    attempt_count=self._current_attempt_count(
+                        session_id=signal.session_id,
+                        frame_id=signal.frame_id,
+                    ),
+                )
+                self._append_routing_event(
+                    signal=signal,
+                    route=route,
+                    provider_budget_state=provider_budget_state,
+                    did_attempt_analysis=False,
+                    analysis_outcome="deferred_candidate_selected",
+                )
+                async with worker.condition:
+                    worker.condition.notify_all()
+                return
+            self._mark_store_only(
+                pending_frame=pending_frame,
+                signal=signal,
+                route=route,
+                provider_budget_state=provider_budget_state,
+                reason="bootstrap_candidate_already_pending",
+            )
+            return
         if _is_candidate_stronger(incoming, existing):
             worker.best_deferred_candidate = incoming
             self.storage.update_vision_frame_processing(
                 session_id=signal.session_id,
                 frame_id=signal.frame_id,
-                processing_status="deferred",
+                processing_status="retry_pending" if bootstrap_candidate else "deferred",
                 gate_status="accepted",
                 gate_reason=route.reason,
                 phash=signal.dhash_hex,
                 provider=self.provider_name,
                 model=self.model_name,
+                next_retry_at_ms=provider_budget_state.available_at_ms,
                 routing_status=route.action,
                 routing_reason=route.reason,
                 routing_score=route.priority_score,
@@ -898,6 +1086,18 @@ class VisionMemoryRuntime:
                 provider_budget_state=provider_budget_state,
                 reason="deferred_replaced_by_higher_priority_candidate",
             )
+            if bootstrap_candidate:
+                self._persist_bootstrap_memory_state(
+                    worker=worker,
+                    status="bootstrap_pending",
+                    reason=route.reason,
+                    frame_id=signal.frame_id,
+                    next_retry_at_ms=provider_budget_state.available_at_ms,
+                    attempt_count=self._current_attempt_count(
+                        session_id=signal.session_id,
+                        frame_id=signal.frame_id,
+                    ),
+                )
             self._append_routing_event(
                 signal=signal,
                 route=route,
@@ -956,6 +1156,12 @@ class VisionMemoryRuntime:
             phash=signal.dhash_hex,
             provider=self.provider_name,
             model=self.model_name,
+            next_retry_at_ms=None,
+            attempt_count=self._current_attempt_count(
+                session_id=pending_frame.frame_context.session_id,
+                frame_id=pending_frame.frame_context.frame_id,
+            )
+            + 1,
             routing_status=route.action,
             routing_reason=route.reason,
             routing_score=route.priority_score,
@@ -966,6 +1172,8 @@ class VisionMemoryRuntime:
                 analysis_outcome="analyzing",
             ),
         )
+        if route.memory_bootstrap_required and worker.accepted_event_count == 0:
+            worker.bootstrap_state = "bootstrap_pending"
         try:
             observation = await self.analyzer.analyze_frame(
                 image_bytes=pending_frame.image_bytes,
@@ -975,17 +1183,30 @@ class VisionMemoryRuntime:
         except VisionRateLimitError as exc:
             await self.provider_budget.record_rate_limit(exc.retry_after_seconds)
             cooldown_state = await self.provider_budget.get_state()
+            error_details = {
+                "http_status": exc.status_code,
+                "provider_error_code": exc.provider_error_code,
+                "provider_message": exc.provider_message,
+                "payload_excerpt": exc.payload_excerpt,
+            }
+            bootstrap_retry = route.memory_bootstrap_required and worker.accepted_event_count == 0
             self.storage.update_vision_frame_processing(
                 session_id=pending_frame.frame_context.session_id,
                 frame_id=pending_frame.frame_context.frame_id,
-                processing_status="analysis_rate_limited",
+                processing_status="retry_pending" if bootstrap_retry else "analysis_rate_limited",
                 gate_status="accepted",
                 gate_reason=route.reason,
                 phash=signal.dhash_hex,
                 provider=self.provider_name,
                 model=self.model_name,
                 analyzed_at_ms=now_ms(),
+                next_retry_at_ms=cooldown_state.available_at_ms,
+                attempt_count=self._current_attempt_count(
+                    session_id=pending_frame.frame_context.session_id,
+                    frame_id=pending_frame.frame_context.frame_id,
+                ),
                 error_code="VISION_ANALYSIS_RATE_LIMITED",
+                error_details=error_details,
                 routing_status="analysis_rate_limited",
                 routing_reason="provider_rate_limited",
                 routing_score=route.priority_score,
@@ -995,6 +1216,7 @@ class VisionMemoryRuntime:
                     provider_budget_state=cooldown_state,
                     analysis_outcome="analysis_rate_limited",
                     retry_after_seconds=exc.retry_after_seconds,
+                    error_details=error_details,
                 ),
             )
             self._append_routing_event(
@@ -1004,8 +1226,32 @@ class VisionMemoryRuntime:
                 did_attempt_analysis=True,
                 analysis_outcome="analysis_rate_limited",
                 retry_after_seconds=exc.retry_after_seconds,
+                error_details=error_details,
             )
             worker.last_analysis_failed = True
+            if bootstrap_retry:
+                worker.best_deferred_candidate = DeferredVisionCandidate(
+                    pending_frame=pending_frame,
+                    signal=signal,
+                    route=route,
+                    deferred_at_ms=now_ms(),
+                    bootstrap_candidate=True,
+                )
+                worker.bootstrap_state = "bootstrap_pending"
+                self._persist_bootstrap_memory_state(
+                    worker=worker,
+                    status="bootstrap_pending",
+                    reason="provider_rate_limited",
+                    frame_id=pending_frame.frame_context.frame_id,
+                    next_retry_at_ms=cooldown_state.available_at_ms,
+                    attempt_count=self._current_attempt_count(
+                        session_id=pending_frame.frame_context.session_id,
+                        frame_id=pending_frame.frame_context.frame_id,
+                    ),
+                    error_code="VISION_ANALYSIS_RATE_LIMITED",
+                    error_details=error_details,
+                    last_attempt_at_ms=now_ms(),
+                )
             logger.warning(
                 "VISION_ANALYSIS_RATE_LIMITED session=%s frame=%s provider=%s model=%s cooldown_until_ms=%s retry_after_seconds=%s",
                 pending_frame.frame_context.session_id,
@@ -1014,6 +1260,80 @@ class VisionMemoryRuntime:
                 self.model_name,
                 cooldown_state.cooldown_until_ms,
                 exc.retry_after_seconds,
+            )
+            if not bootstrap_retry:
+                self._cleanup_ingest_artifacts(
+                    session_id=pending_frame.frame_context.session_id,
+                    frame_id=pending_frame.frame_context.frame_id,
+                )
+            return
+        except VisionProviderError as exc:
+            await self.provider_budget.record_non_rate_limit_failure()
+            error_details = {
+                "http_status": exc.status_code,
+                "provider_error_code": exc.provider_error_code,
+                "provider_message": exc.provider_message,
+                "payload_excerpt": exc.payload_excerpt,
+            }
+            self.storage.update_vision_frame_processing(
+                session_id=pending_frame.frame_context.session_id,
+                frame_id=pending_frame.frame_context.frame_id,
+                processing_status="analysis_failed",
+                gate_status="accepted",
+                gate_reason=route.reason,
+                phash=signal.dhash_hex,
+                provider=self.provider_name,
+                model=self.model_name,
+                analyzed_at_ms=now_ms(),
+                next_retry_at_ms=None,
+                attempt_count=self._current_attempt_count(
+                    session_id=pending_frame.frame_context.session_id,
+                    frame_id=pending_frame.frame_context.frame_id,
+                ),
+                error_code="VISION_ANALYSIS_FAILED",
+                error_details=error_details,
+                routing_status=route.action,
+                routing_reason=route.reason,
+                routing_score=route.priority_score,
+                routing_metadata=self._build_routing_metadata(
+                    signal=signal,
+                    route=route,
+                    provider_budget_state=slot_state,
+                    analysis_outcome="analysis_failed",
+                    error_details=error_details,
+                ),
+            )
+            self._append_routing_event(
+                signal=signal,
+                route=route,
+                provider_budget_state=slot_state,
+                did_attempt_analysis=True,
+                analysis_outcome="analysis_failed",
+                error_details=error_details,
+            )
+            worker.last_analysis_failed = True
+            worker.best_deferred_candidate = None
+            if route.memory_bootstrap_required and worker.accepted_event_count == 0:
+                worker.bootstrap_state = "bootstrap_degraded"
+                self._persist_bootstrap_memory_state(
+                    worker=worker,
+                    status="bootstrap_degraded",
+                    reason="provider_request_failed",
+                    frame_id=pending_frame.frame_context.frame_id,
+                    attempt_count=self._current_attempt_count(
+                        session_id=pending_frame.frame_context.session_id,
+                        frame_id=pending_frame.frame_context.frame_id,
+                    ),
+                    error_code="VISION_ANALYSIS_FAILED",
+                    error_details=error_details,
+                    last_attempt_at_ms=now_ms(),
+                )
+            logger.exception(
+                "VISION_ANALYSIS_FAILED session=%s frame=%s provider=%s model=%s",
+                pending_frame.frame_context.session_id,
+                pending_frame.frame_context.frame_id,
+                self.provider_name,
+                self.model_name,
             )
             self._cleanup_ingest_artifacts(
                 session_id=pending_frame.frame_context.session_id,
@@ -1032,6 +1352,11 @@ class VisionMemoryRuntime:
                 provider=self.provider_name,
                 model=self.model_name,
                 analyzed_at_ms=now_ms(),
+                next_retry_at_ms=None,
+                attempt_count=self._current_attempt_count(
+                    session_id=pending_frame.frame_context.session_id,
+                    frame_id=pending_frame.frame_context.frame_id,
+                ),
                 error_code="VISION_ANALYSIS_FAILED",
                 routing_status=route.action,
                 routing_reason=route.reason,
@@ -1051,6 +1376,21 @@ class VisionMemoryRuntime:
                 analysis_outcome="analysis_failed",
             )
             worker.last_analysis_failed = True
+            worker.best_deferred_candidate = None
+            if route.memory_bootstrap_required and worker.accepted_event_count == 0:
+                worker.bootstrap_state = "bootstrap_degraded"
+                self._persist_bootstrap_memory_state(
+                    worker=worker,
+                    status="bootstrap_degraded",
+                    reason="unexpected_analysis_failure",
+                    frame_id=pending_frame.frame_context.frame_id,
+                    attempt_count=self._current_attempt_count(
+                        session_id=pending_frame.frame_context.session_id,
+                        frame_id=pending_frame.frame_context.frame_id,
+                    ),
+                    error_code="VISION_ANALYSIS_FAILED",
+                    last_attempt_at_ms=now_ms(),
+                )
             logger.exception(
                 "VISION_ANALYSIS_FAILED session=%s frame=%s provider=%s model=%s",
                 pending_frame.frame_context.session_id,
@@ -1066,6 +1406,8 @@ class VisionMemoryRuntime:
 
         await self.provider_budget.record_success()
         worker.last_analysis_failed = False
+        worker.bootstrap_state = "bootstrapped"
+        worker.best_deferred_candidate = None
         worker.last_successful_analysis_at_ms = pending_frame.frame_context.capture_ts_ms
         worker.last_accepted_frame = AcceptedFrameReference(
             capture_ts_ms=pending_frame.frame_context.capture_ts_ms,
@@ -1081,6 +1423,7 @@ class VisionMemoryRuntime:
             session_id=observation.session_id,
             event=accepted_event,
         )
+        worker.accepted_event_count += 1
         worker.pending_session_events.append(accepted_event)
         self._materialize_short_term_memory(worker)
         if self._should_roll_session_memory(worker):
@@ -1095,6 +1438,8 @@ class VisionMemoryRuntime:
             provider=self.provider_name,
             model=self.model_name,
             analyzed_at_ms=now_ms(),
+            next_retry_at_ms=None,
+            error_details=None,
             summary_snippet=observation.scene_summary[:240],
             routing_status=route.action,
             routing_reason=route.reason,
@@ -1252,6 +1597,7 @@ class VisionMemoryRuntime:
         if latest_capture_ts_ms is not None:
             worker.session_memory_last_updated_at_ms = latest_capture_ts_ms
         worker.session_memory_exists = True
+        worker.bootstrap_state = "bootstrapped"
 
     def _cleanup_ingest_artifacts(self, *, session_id: str, frame_id: str) -> None:
         if self.settings.vision_debug_retain_raw_frames:
@@ -1260,6 +1606,112 @@ class VisionMemoryRuntime:
             session_id=session_id,
             frame_id=frame_id,
         )
+
+    def _current_attempt_count(self, *, session_id: str, frame_id: str) -> int:
+        record = self.storage.get_vision_frame_record(session_id=session_id, frame_id=frame_id)
+        if record is None:
+            return 0
+        return record.attempt_count
+
+    def _persist_bootstrap_memory_state(
+        self,
+        *,
+        worker: SessionVisionWorker,
+        status: str,
+        reason: str,
+        frame_id: str | None = None,
+        next_retry_at_ms: int | None = None,
+        attempt_count: int | None = None,
+        error_code: str | None = None,
+        error_details: dict[str, object] | None = None,
+        last_attempt_at_ms: int | None = None,
+    ) -> None:
+        updated_at_ms = now_ms()
+        short_term_payload = {
+            "session_id": worker.session_id,
+            "status": status,
+            "updated_at_ms": updated_at_ms,
+            "reason": reason,
+            "provider": self.provider_name,
+            "model": self.model_name,
+            "bootstrap_frame_id": frame_id,
+            "next_retry_at_ms": next_retry_at_ms,
+            "last_attempt_at_ms": last_attempt_at_ms,
+            "attempt_count": attempt_count or 0,
+            "error_code": error_code,
+            "error_details": error_details or {},
+            "current_scene_summary": "",
+            "recent_entities": [],
+            "recent_actions": [],
+            "recent_visible_text": [],
+            "recent_documents": [],
+            "source_frame_ids": [frame_id] if frame_id else [],
+        }
+        short_term_markdown = "\n".join(
+            [
+                "# Short-Term Visual Memory",
+                "",
+                f"Status: {status}",
+                f"Reason: {reason}",
+                f"Provider: {self.provider_name}",
+                f"Model: {self.model_name}",
+                f"Bootstrap frame: {frame_id or 'none'}",
+                f"Next retry: {next_retry_at_ms if next_retry_at_ms is not None else 'none'}",
+                f"Last attempt: {last_attempt_at_ms if last_attempt_at_ms is not None else 'none'}",
+                f"Attempt count: {attempt_count or 0}",
+                f"Error code: {error_code or 'none'}",
+                "",
+            ]
+        )
+        session_payload = {
+            "session_id": worker.session_id,
+            "status": status,
+            "updated_at_ms": updated_at_ms,
+            "started_at_ms": worker.last_session_rollup_at_ms or updated_at_ms,
+            "reason": reason,
+            "provider": self.provider_name,
+            "model": self.model_name,
+            "bootstrap_frame_id": frame_id,
+            "next_retry_at_ms": next_retry_at_ms,
+            "last_attempt_at_ms": last_attempt_at_ms,
+            "attempt_count": attempt_count or 0,
+            "error_code": error_code,
+            "error_details": error_details or {},
+            "accepted_event_count": worker.accepted_event_count,
+            "summary_text": "Visual memory bootstrap has not completed yet.",
+        }
+        session_markdown = "\n".join(
+            [
+                "# Session Memory",
+                "",
+                f"Status: {status}",
+                f"Reason: {reason}",
+                f"Provider: {self.provider_name}",
+                f"Model: {self.model_name}",
+                f"Bootstrap frame: {frame_id or 'none'}",
+                f"Next retry: {next_retry_at_ms if next_retry_at_ms is not None else 'none'}",
+                f"Last attempt: {last_attempt_at_ms if last_attempt_at_ms is not None else 'none'}",
+                f"Attempt count: {attempt_count or 0}",
+                f"Error code: {error_code or 'none'}",
+                "",
+                "Visual memory bootstrap has not completed yet.",
+                "",
+            ]
+        )
+        self.storage.write_short_term_memory(
+            session_id=worker.session_id,
+            payload=short_term_payload,
+            markdown_text=short_term_markdown,
+        )
+        self.storage.write_session_memory(
+            session_id=worker.session_id,
+            payload=session_payload,
+            markdown_text=session_markdown,
+        )
+        worker.short_term_memory_last_updated_at_ms = None
+        worker.session_memory_last_updated_at_ms = None
+        worker.session_memory_exists = False
+        worker.bootstrap_state = status
 
 
 def _compute_age_ms(*, current_capture_ts_ms: int, memory_ts_ms: int | None) -> int | None:

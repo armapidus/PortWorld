@@ -27,6 +27,7 @@ from backend.memory.profile import (
 )
 
 SCHEMA_VERSION = "3"
+_UNSET = object()
 
 
 def now_ms() -> int:
@@ -90,7 +91,10 @@ class VisionFrameIndexRecord:
     provider: str | None
     model: str | None
     analyzed_at_ms: int | None
+    next_retry_at_ms: int | None
+    attempt_count: int
     error_code: str | None
+    error_details_json: str | None
     summary_snippet: str | None
     routing_status: str | None
     routing_reason: str | None
@@ -325,7 +329,10 @@ class BackendStorage:
             provider=None,
             model=None,
             analyzed_at_ms=None,
+            next_retry_at_ms=None,
+            attempt_count=0,
             error_code=None,
+            error_details_json=None,
             summary_snippet=None,
             routing_status=None,
             routing_reason=None,
@@ -668,7 +675,10 @@ class BackendStorage:
         provider: str | None = None,
         model: str | None = None,
         analyzed_at_ms: int | None = None,
+        next_retry_at_ms: int | object = _UNSET,
+        attempt_count: int | object = _UNSET,
         error_code: str | None = None,
+        error_details: dict[str, Any] | None | object = _UNSET,
         summary_snippet: str | None = None,
         routing_status: str | None = None,
         routing_reason: str | None = None,
@@ -702,7 +712,34 @@ class BackendStorage:
                 provider=provider,
                 model=model,
                 analyzed_at_ms=analyzed_at_ms,
+                next_retry_at_ms=(
+                    int(next_retry_at_ms)
+                    if isinstance(next_retry_at_ms, int)
+                    else (
+                        int(existing["next_retry_at_ms"])
+                        if next_retry_at_ms is _UNSET and existing["next_retry_at_ms"] is not None
+                        else None
+                    )
+                ),
+                attempt_count=(
+                    int(attempt_count)
+                    if isinstance(attempt_count, int)
+                    else int(existing["attempt_count"] or 0)
+                ),
                 error_code=error_code,
+                error_details_json=(
+                    json.dumps(error_details, ensure_ascii=True, sort_keys=True)
+                    if isinstance(error_details, dict)
+                    else (
+                        None
+                        if error_details is None
+                        else (
+                            str(existing["error_details_json"])
+                            if error_details is _UNSET and existing["error_details_json"] is not None
+                            else None
+                        )
+                    )
+                ),
                 summary_snippet=summary_snippet,
                 routing_status=routing_status,
                 routing_reason=routing_reason,
@@ -743,7 +780,10 @@ class BackendStorage:
                     provider,
                     model,
                     analyzed_at_ms,
+                    next_retry_at_ms,
+                    attempt_count,
                     error_code,
+                    error_details_json,
                     summary_snippet,
                     routing_status,
                     routing_reason,
@@ -763,7 +803,10 @@ class BackendStorage:
                     provider=excluded.provider,
                     model=excluded.model,
                     analyzed_at_ms=excluded.analyzed_at_ms,
+                    next_retry_at_ms=excluded.next_retry_at_ms,
+                    attempt_count=excluded.attempt_count,
                     error_code=excluded.error_code,
+                    error_details_json=excluded.error_details_json,
                     summary_snippet=excluded.summary_snippet,
                     routing_status=excluded.routing_status,
                     routing_reason=excluded.routing_reason,
@@ -784,7 +827,10 @@ class BackendStorage:
                     record.provider,
                     record.model,
                     record.analyzed_at_ms,
+                    record.next_retry_at_ms,
+                    record.attempt_count,
                     record.error_code,
+                    record.error_details_json,
                     record.summary_snippet,
                     record.routing_status,
                     record.routing_reason,
@@ -855,7 +901,10 @@ class BackendStorage:
                     provider TEXT,
                     model TEXT,
                     analyzed_at_ms INTEGER,
+                    next_retry_at_ms INTEGER,
+                    attempt_count INTEGER NOT NULL DEFAULT 0,
                     error_code TEXT,
+                    error_details_json TEXT,
                     summary_snippet TEXT,
                     routing_status TEXT,
                     routing_reason TEXT,
@@ -882,6 +931,9 @@ class BackendStorage:
             for row in connection.execute("PRAGMA table_info(vision_frame_index)").fetchall()
         }
         required_columns = (
+            ("next_retry_at_ms", "INTEGER"),
+            ("attempt_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("error_details_json", "TEXT"),
             ("routing_status", "TEXT"),
             ("routing_reason", "TEXT"),
             ("routing_score", "REAL"),
@@ -916,6 +968,110 @@ class BackendStorage:
             vision_events_log_path=session_dir / SESSION_MEMORY_ARTIFACT_FILE_NAMES[4],
             vision_routing_events_log_path=session_dir / SESSION_MEMORY_ARTIFACT_FILE_NAMES[5],
         )
+
+    def get_vision_frame_record(
+        self,
+        *,
+        session_id: str,
+        frame_id: str,
+    ) -> VisionFrameIndexRecord | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT *
+                FROM vision_frame_index
+                WHERE session_id = ? AND frame_id = ?
+                """,
+                (session_id, frame_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_vision_frame_index_record(row)
+
+    def read_session_memory_status(
+        self,
+        *,
+        session_id: str,
+        recent_limit: int = 10,
+    ) -> dict[str, Any]:
+        session_storage = self.ensure_session_storage(session_id=session_id)
+        short_term_memory = self.read_short_term_memory(session_id=session_id)
+        session_memory = self.read_session_memory(session_id=session_id)
+        accepted_events = self.read_vision_events(session_id=session_id)
+
+        with self.connect() as connection:
+            session_row = connection.execute(
+                """
+                SELECT status, created_at_ms, updated_at_ms
+                FROM session_index
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+            total_frames = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM vision_frame_index
+                    WHERE session_id = ?
+                    """,
+                    (session_id,),
+                ).fetchone()[0]
+            )
+            recent_rows = connection.execute(
+                """
+                SELECT *
+                FROM vision_frame_index
+                WHERE session_id = ?
+                ORDER BY capture_ts_ms DESC
+                LIMIT ?
+                """,
+                (session_id, max(1, recent_limit)),
+            ).fetchall()
+
+        status = (
+            str(session_memory.get("status") or short_term_memory.get("status") or "")
+            or ("ready" if accepted_events else "unbootstrapped")
+        )
+        recent_frames: list[dict[str, Any]] = []
+        for row in recent_rows:
+            recent_frames.append(
+                {
+                    "frame_id": str(row["frame_id"]),
+                    "capture_ts_ms": int(row["capture_ts_ms"]),
+                    "processing_status": str(row["processing_status"]),
+                    "gate_status": str(row["gate_status"]) if row["gate_status"] is not None else None,
+                    "gate_reason": str(row["gate_reason"]) if row["gate_reason"] is not None else None,
+                    "provider": str(row["provider"]) if row["provider"] is not None else None,
+                    "model": str(row["model"]) if row["model"] is not None else None,
+                    "analyzed_at_ms": int(row["analyzed_at_ms"]) if row["analyzed_at_ms"] is not None else None,
+                    "next_retry_at_ms": int(row["next_retry_at_ms"]) if row["next_retry_at_ms"] is not None else None,
+                    "attempt_count": int(row["attempt_count"] or 0),
+                    "error_code": str(row["error_code"]) if row["error_code"] is not None else None,
+                    "error_details": (
+                        json.loads(str(row["error_details_json"]))
+                        if row["error_details_json"] is not None
+                        else None
+                    ),
+                    "routing_status": str(row["routing_status"]) if row["routing_status"] is not None else None,
+                    "routing_reason": str(row["routing_reason"]) if row["routing_reason"] is not None else None,
+                    "routing_score": float(row["routing_score"]) if row["routing_score"] is not None else None,
+                }
+            )
+
+        return {
+            "session_id": session_id,
+            "status": status,
+            "session_state": str(session_row["status"]) if session_row is not None else None,
+            "session_created_at_ms": int(session_row["created_at_ms"]) if session_row is not None else None,
+            "session_updated_at_ms": int(session_row["updated_at_ms"]) if session_row is not None else None,
+            "accepted_event_count": len(accepted_events),
+            "total_frames": total_frames,
+            "short_term_memory": short_term_memory,
+            "session_memory": session_memory,
+            "recent_frames": recent_frames,
+            "session_dir_exists": session_storage.session_dir.exists(),
+        }
 
     def _session_vision_frames_dir(self, *, session_id: str) -> Path:
         return self.paths.vision_frames_root / self._sanitize_session_id(session_id)
@@ -980,6 +1136,32 @@ class BackendStorage:
             yield connection
         finally:
             connection.close()
+
+    def _row_to_vision_frame_index_record(self, row: sqlite3.Row) -> VisionFrameIndexRecord:
+        return VisionFrameIndexRecord(
+            session_id=str(row["session_id"]),
+            frame_id=str(row["frame_id"]),
+            capture_ts_ms=int(row["capture_ts_ms"]),
+            ingest_ts_ms=int(row["ingest_ts_ms"]),
+            width=int(row["width"]),
+            height=int(row["height"]),
+            processing_status=str(row["processing_status"]),
+            gate_status=str(row["gate_status"]) if row["gate_status"] is not None else None,
+            gate_reason=str(row["gate_reason"]) if row["gate_reason"] is not None else None,
+            phash=str(row["phash"]) if row["phash"] is not None else None,
+            provider=str(row["provider"]) if row["provider"] is not None else None,
+            model=str(row["model"]) if row["model"] is not None else None,
+            analyzed_at_ms=int(row["analyzed_at_ms"]) if row["analyzed_at_ms"] is not None else None,
+            next_retry_at_ms=int(row["next_retry_at_ms"]) if row["next_retry_at_ms"] is not None else None,
+            attempt_count=int(row["attempt_count"] or 0),
+            error_code=str(row["error_code"]) if row["error_code"] is not None else None,
+            error_details_json=str(row["error_details_json"]) if row["error_details_json"] is not None else None,
+            summary_snippet=str(row["summary_snippet"]) if row["summary_snippet"] is not None else None,
+            routing_status=str(row["routing_status"]) if row["routing_status"] is not None else None,
+            routing_reason=str(row["routing_reason"]) if row["routing_reason"] is not None else None,
+            routing_score=float(row["routing_score"]) if row["routing_score"] is not None else None,
+            routing_metadata_json=str(row["routing_metadata_json"]) if row["routing_metadata_json"] is not None else None,
+        )
 
     def _sanitize_session_id(self, session_id: str) -> str:
         return "".join(

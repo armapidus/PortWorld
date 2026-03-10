@@ -12,6 +12,7 @@ from backend.vision.contracts import (
     ProviderObservationPayload,
     VisionFrameContext,
     VisionObservation,
+    VisionProviderError,
     VisionRateLimitError,
     parse_provider_observation_payload,
 )
@@ -72,11 +73,21 @@ class MistralVisionAnalyzer:
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
+            error_details = _extract_error_details(exc.response)
             if exc.response.status_code == 429:
                 raise VisionRateLimitError(
                     retry_after_seconds=_parse_retry_after_seconds(exc.response),
+                    status_code=429,
+                    provider_error_code=error_details["provider_error_code"],
+                    provider_message=error_details["provider_message"],
+                    payload_excerpt=error_details["payload_excerpt"],
                 ) from exc
-            raise
+            raise VisionProviderError(
+                status_code=exc.response.status_code,
+                provider_error_code=error_details["provider_error_code"],
+                provider_message=error_details["provider_message"],
+                payload_excerpt=error_details["payload_excerpt"],
+            ) from exc
         payload = self._extract_provider_payload(response.json())
         return self._normalize_observation(payload=payload, frame_context=frame_context)
 
@@ -96,7 +107,6 @@ class MistralVisionAnalyzer:
         data_url = self._build_data_url(image_bytes=image_bytes, image_media_type=image_media_type)
         return {
             "model": self.model_name,
-            "response_format": {"type": "json_object"},
             "messages": [
                 {
                     "role": "system",
@@ -209,3 +219,42 @@ def _parse_retry_after_seconds(response: httpx.Response) -> float | None:
     now = dt.datetime.now(tz=dt.timezone.utc)
     delta_seconds = (parsed_dt - now).total_seconds()
     return delta_seconds if delta_seconds > 0 else None
+
+
+def _extract_error_details(response: httpx.Response) -> dict[str, str | None]:
+    payload_excerpt: str | None = None
+    provider_error_code: str | None = None
+    provider_message: str | None = None
+
+    raw_text = response.text.strip()
+    if raw_text:
+        payload_excerpt = raw_text[:400]
+
+    try:
+        payload = response.json()
+    except ValueError:
+        return {
+            "provider_error_code": provider_error_code,
+            "provider_message": provider_message,
+            "payload_excerpt": payload_excerpt,
+        }
+
+    if isinstance(payload, dict):
+        error_payload = payload.get("error")
+        if isinstance(error_payload, dict):
+            error_code = error_payload.get("code")
+            if isinstance(error_code, str) and error_code.strip():
+                provider_error_code = error_code.strip()
+            message = error_payload.get("message")
+            if isinstance(message, str) and message.strip():
+                provider_message = message.strip()
+        elif isinstance(error_payload, str) and error_payload.strip():
+            provider_message = error_payload.strip()
+        if payload_excerpt is None:
+            payload_excerpt = str(payload)[:400]
+
+    return {
+        "provider_error_code": provider_error_code,
+        "provider_message": provider_message,
+        "payload_excerpt": payload_excerpt,
+    }

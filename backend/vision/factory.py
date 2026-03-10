@@ -18,9 +18,9 @@ def build_vision_analyzer(*, settings: Settings) -> VisionAnalyzer:
         from backend.vision.providers.mistral import MistralVisionAnalyzer
 
         return MistralVisionAnalyzer(
-            api_key=settings.require_mistral_api_key(),
+            api_key=settings.require_vision_provider_api_key(),
             model_name=settings.vision_memory_model,
-            base_url=settings.mistral_base_url,
+            base_url=settings.vision_provider_base_url or settings.mistral_base_url,
         )
 
     raise RuntimeError(f"Unsupported vision-memory provider: {provider_name}")

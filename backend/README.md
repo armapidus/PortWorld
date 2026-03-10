@@ -409,6 +409,10 @@ Detailed provider/runtime/storage state is intentionally not exposed through thi
   default: `mistral`
 - `VISION_MEMORY_MODEL`
   default: `ministral-3b-2512`
+- `VISION_PROVIDER_API_KEY`
+  default: unset
+- `VISION_PROVIDER_BASE_URL`
+  default: unset
 - `VISION_SHORT_TERM_WINDOW_SECONDS`
   default: `30`
 - `VISION_MIN_ANALYSIS_GAP_SECONDS`
@@ -461,10 +465,14 @@ These are still OpenAI-specific for the active realtime path:
 
 These are used only when `VISION_MEMORY_ENABLED=true`:
 
+- `VISION_PROVIDER_API_KEY`
+- `VISION_PROVIDER_BASE_URL`
 - `MISTRAL_API_KEY`
 - `MISTRAL_BASE_URL`
 
-If `VISION_MEMORY_ENABLED=true` and `MISTRAL_API_KEY` is missing, startup fails clearly. When visual memory is disabled, missing Mistral config does not matter.
+The active adapter uses a non-streaming OpenAI-compatible `/v1/chat/completions` request shape. `VISION_PROVIDER_API_KEY` and `VISION_PROVIDER_BASE_URL` are the preferred overrides when pointing the visual-memory runtime at a compatible backend such as NVIDIA NIM. `MISTRAL_API_KEY` and `MISTRAL_BASE_URL` remain supported as backward-compatible fallbacks for the default Mistral path.
+
+If `VISION_MEMORY_ENABLED=true` and neither `VISION_PROVIDER_API_KEY` nor `MISTRAL_API_KEY` is set, startup fails clearly. When visual memory is disabled, missing provider config does not matter.
 
 ### Realtime-tooling provider settings
 
@@ -513,6 +521,8 @@ BACKEND_DEBUG_DUMP_INPUT_AUDIO_DIR=backend/var/debug_audio
 VISION_MEMORY_ENABLED=false
 VISION_MEMORY_PROVIDER=mistral
 VISION_MEMORY_MODEL=ministral-3b-2512
+VISION_PROVIDER_API_KEY=
+VISION_PROVIDER_BASE_URL=
 VISION_SHORT_TERM_WINDOW_SECONDS=30
 VISION_MIN_ANALYSIS_GAP_SECONDS=3
 VISION_SCENE_CHANGE_HAMMING_THRESHOLD=12
@@ -541,6 +551,16 @@ HOST=0.0.0.0
 PORT=8080
 LOG_LEVEL=INFO
 CORS_ORIGINS=*
+```
+
+Typical NVIDIA NIM override for the same provider path:
+
+```dotenv
+VISION_MEMORY_ENABLED=true
+VISION_MEMORY_PROVIDER=mistral
+VISION_MEMORY_MODEL=mistralai/ministral-14b-instruct-2512
+VISION_PROVIDER_API_KEY=...
+VISION_PROVIDER_BASE_URL=https://integrate.api.nvidia.com
 ```
 
 ## Local Run

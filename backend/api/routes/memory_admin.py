@@ -122,3 +122,10 @@ async def reset_session_memory(request: Request, session_id: str) -> dict[str, o
         "removed_session_dir": result.removed_session_dir,
         "removed_vision_frames_dir": result.removed_vision_frames_dir,
     }
+
+
+@router.get("/memory/session/{session_id}/status")
+async def session_memory_status(request: Request, session_id: str) -> dict[str, object]:
+    runtime = get_app_runtime(request.app)
+    require_http_bearer_auth(request=request, settings=runtime.settings)
+    return runtime.storage.read_session_memory_status(session_id=session_id)

@@ -134,6 +134,34 @@ class VisionAnalyzer(Protocol):
 
 
 class VisionRateLimitError(RuntimeError):
-    def __init__(self, *, retry_after_seconds: float | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        retry_after_seconds: float | None = None,
+        status_code: int = 429,
+        provider_error_code: str | None = None,
+        provider_message: str | None = None,
+        payload_excerpt: str | None = None,
+    ) -> None:
         super().__init__("Vision provider returned rate-limited response")
         self.retry_after_seconds = retry_after_seconds
+        self.status_code = status_code
+        self.provider_error_code = provider_error_code
+        self.provider_message = provider_message
+        self.payload_excerpt = payload_excerpt
+
+
+class VisionProviderError(RuntimeError):
+    def __init__(
+        self,
+        *,
+        status_code: int | None = None,
+        provider_error_code: str | None = None,
+        provider_message: str | None = None,
+        payload_excerpt: str | None = None,
+    ) -> None:
+        super().__init__(provider_message or "Vision provider request failed")
+        self.status_code = status_code
+        self.provider_error_code = provider_error_code
+        self.provider_message = provider_message
+        self.payload_excerpt = payload_excerpt
