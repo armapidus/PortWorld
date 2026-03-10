@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from backend.core.auth import reject_ws_if_unauthorized
 from backend.core.runtime import get_app_runtime
 from backend.ws.binary_dispatch import dispatch_binary_frame
 from backend.ws.control_dispatch import dispatch_control_envelope, parse_control_envelope
@@ -22,9 +23,12 @@ _connection_ids = itertools.count(1)
 
 @router.websocket("/ws/session")
 async def ws_session(websocket: WebSocket) -> None:
+    runtime = get_app_runtime(websocket.app)
+    if await reject_ws_if_unauthorized(websocket=websocket, settings=runtime.settings):
+        logger.warning("Rejected unauthorized websocket session request")
+        return
     await websocket.accept()
     connection_id = next(_connection_ids)
-    runtime = get_app_runtime(websocket.app)
 
     active_session: SessionRecord | None = None
     server_audio_frame_count = 0

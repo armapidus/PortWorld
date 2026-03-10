@@ -34,6 +34,11 @@ The active backend surface is:
 - `POST /vision/frame`
 - `WS /ws/session`
 
+Auth behavior:
+
+- when `BACKEND_BEARER_TOKEN` is set, `/ws/session` and `/vision/frame` require `Authorization: Bearer <token>`
+- when `BACKEND_BEARER_TOKEN` is unset, the backend keeps the current local-dev behavior and does not require auth
+
 Step 4A keeps the existing websocket and vision wire contract stable while cleaning up backend internals.
 
 ## Runtime Lifecycle
@@ -292,20 +297,16 @@ Current supported injected profile fields:
 
 ## Health
 
-`GET /healthz` returns a compact productized payload:
+`GET /healthz` is intentionally public and minimal.
+
+It returns:
 
 - `status`
 - `service`
-- `realtime_provider`
-- `realtime_model`
-- `storage`
-- `ws_path`
-- `vision_path`
-- `mock_capture_mode`
 
 `service` is `portworld-backend`.
 
-`storage` reports `ready` only after startup storage bootstrap succeeds.
+Detailed provider/runtime/storage state is intentionally not exposed through this endpoint in the current cleanup pass.
 
 ## Configuration
 
@@ -319,6 +320,15 @@ Current supported injected profile fields:
   default: `<BACKEND_DATA_DIR>/portworld.db`
 - `BACKEND_UPLINK_ACK_EVERY_N_FRAMES`
   default: `20`, minimum: `1`
+- `BACKEND_BEARER_TOKEN`
+  default: unset
+  when set, requires `Authorization: Bearer <token>` on `/ws/session` and `/vision/frame`
+- `BACKEND_MAX_VISION_REQUEST_BYTES`
+  default: `4000000`
+  rejects oversized `/vision/frame` requests using `Content-Length` when present
+- `BACKEND_MAX_VISION_FRAME_BYTES`
+  default: `2500000`
+  rejects oversized decoded JPEG payloads before write
 - `BACKEND_ALLOW_TEXT_AUDIO_FALLBACK`
   default: `false`
   compatibility path only; not used by the active iPhone runtime
@@ -412,6 +422,7 @@ Missing Tavily config does not fail startup. It only means `web_search` is omitt
   default: `INFO`
 - `CORS_ORIGINS`
   default: `*`
+  local-dev default only; production should set explicit allowed origins
 
 ## Local Setup
 
@@ -430,6 +441,9 @@ Typical local `.env` shape:
 ```dotenv
 REALTIME_PROVIDER=openai
 BACKEND_DATA_DIR=backend/var
+BACKEND_BEARER_TOKEN=
+BACKEND_MAX_VISION_REQUEST_BYTES=4000000
+BACKEND_MAX_VISION_FRAME_BYTES=2500000
 BACKEND_DEBUG_DUMP_INPUT_AUDIO=false
 BACKEND_DEBUG_DUMP_INPUT_AUDIO_DIR=backend/var/debug_audio
 VISION_MEMORY_ENABLED=false
@@ -471,7 +485,7 @@ From repo root:
 
 ```bash
 source backend/.venv/bin/activate
-uvicorn backend.app:app --host 0.0.0.0 --port 8080 --log-level info --reload
+python -m uvicorn backend.app:app --host 0.0.0.0 --port 8080 --log-level info --reload
 ```
 
 Quick health check:
@@ -492,6 +506,12 @@ It currently:
 - mounts a named volume to `/app/backend/var`
 - runs the backend with `uvicorn`
 - health-checks `/healthz`
+
+The backend Docker context excludes runtime artifacts through `backend/.dockerignore`, including:
+
+- `backend/var/`
+- `__pycache__/`
+- local env/debug artifacts
 
 Run:
 
@@ -515,7 +535,15 @@ Expected:
 
 - backend starts normally with `VISION_MEMORY_ENABLED=false`
 - `/healthz` reports `service=portworld-backend`
-- `/healthz` reports `storage=ready`
+- `/healthz` reports `status=ok`
+
+Auth off:
+
+- `/ws/session` and `/vision/frame` keep current local-dev behavior
+
+Auth on:
+
+- when `BACKEND_BEARER_TOKEN` is set, `/ws/session` and `/vision/frame` require `Authorization: Bearer <token>`
 
 Visual memory enabled but misconfigured:
 
@@ -561,6 +589,8 @@ Then post repeated frames to `/vision/frame` and inspect:
 
 Useful checks:
 
+- requests above `BACKEND_MAX_VISION_REQUEST_BYTES` are rejected with `413`
+- decoded JPEGs above `BACKEND_MAX_VISION_FRAME_BYTES` are rejected with `413`
 - repeated near-identical frames inside the analysis gap should route to `drop_redundant`
 - heavy-analysis-worthy frames should route to `analyze_now` when budget is available
 - heavy-analysis-worthy frames should route to `defer_candidate` when provider budget/cooldown is unavailable

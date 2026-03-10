@@ -5,12 +5,14 @@ import binascii
 import json
 import logging
 import re
+from math import ceil
 
 from fastapi import APIRouter
 from fastapi import HTTPException
 from fastapi import Request
 from pydantic import BaseModel, Field, field_validator
 
+from backend.core.auth import require_http_bearer_auth
 from backend.core.runtime import get_app_runtime
 from backend.vision.contracts import VisionFrameContext
 
@@ -52,10 +54,36 @@ def _decode_frame_bytes(frame_b64: str) -> bytes:
     return frame_bytes
 
 
+def _estimate_decoded_frame_bytes(frame_b64: str) -> int:
+    normalized = frame_b64.strip()
+    if not normalized:
+        return 0
+    padding_chars = min(2, len(normalized) - len(normalized.rstrip("=")))
+    return max(0, (ceil(len(normalized) / 4) * 3) - padding_chars)
+
+
 @router.post("/vision/frame")
 async def vision_frame(request: Request, payload: VisionFramePayload) -> dict[str, str]:
     runtime = get_app_runtime(request.app)
+    require_http_bearer_auth(request=request, settings=runtime.settings)
+    estimated_frame_bytes = _estimate_decoded_frame_bytes(payload.frame_b64)
+    if estimated_frame_bytes > runtime.settings.backend_max_vision_frame_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "Decoded vision frame exceeds "
+                f"BACKEND_MAX_VISION_FRAME_BYTES={runtime.settings.backend_max_vision_frame_bytes}"
+            ),
+        )
     frame_bytes = _decode_frame_bytes(payload.frame_b64)
+    if len(frame_bytes) > runtime.settings.backend_max_vision_frame_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "Decoded vision frame exceeds "
+                f"BACKEND_MAX_VISION_FRAME_BYTES={runtime.settings.backend_max_vision_frame_bytes}"
+            ),
+        )
     runtime.storage.ensure_session_storage(session_id=payload.session_id)
 
     session_dir = (

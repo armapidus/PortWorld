@@ -57,6 +57,7 @@ class Settings:
     mistral_base_url: str | None
     tavily_api_key: str | None
     tavily_base_url: str | None
+    backend_bearer_token: str | None
     realtime_provider: str
     openai_realtime_model: str
     openai_realtime_voice: str
@@ -72,6 +73,8 @@ class Settings:
     backend_debug_dump_input_audio_dir: Path
     backend_debug_mock_capture_mode: bool
     backend_debug_trace_ws_messages: bool
+    backend_max_vision_request_bytes: int
+    backend_max_vision_frame_bytes: int
     vision_memory_enabled: bool
     vision_memory_provider: str
     vision_memory_model: str
@@ -114,6 +117,8 @@ class Settings:
             mistral_base_url=_get_env("MISTRAL_BASE_URL"),
             tavily_api_key=os.getenv("TAVILY_API_KEY"),
             tavily_base_url=_get_env("TAVILY_BASE_URL"),
+            backend_bearer_token=(_get_env("BACKEND_BEARER_TOKEN") or "").strip()
+            or None,
             realtime_provider=(_get_env("REALTIME_PROVIDER") or "openai").strip().lower(),
             openai_realtime_model=os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime"),
             openai_realtime_voice=os.getenv("OPENAI_REALTIME_VOICE", "ash"),
@@ -156,6 +161,16 @@ class Settings:
             backend_debug_trace_ws_messages=_parse_bool_env(
                 "BACKEND_DEBUG_TRACE_WS_MESSAGES",
                 default=False,
+            ),
+            backend_max_vision_request_bytes=_parse_int_env(
+                "BACKEND_MAX_VISION_REQUEST_BYTES",
+                default=4_000_000,
+                minimum=1,
+            ),
+            backend_max_vision_frame_bytes=_parse_int_env(
+                "BACKEND_MAX_VISION_FRAME_BYTES",
+                default=2_500_000,
+                minimum=1,
             ),
             vision_memory_enabled=_parse_bool_env(
                 "VISION_MEMORY_ENABLED",
