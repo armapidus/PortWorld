@@ -9,6 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from backend.api.routes.health import router as health_router
+from backend.api.routes.memory_admin import router as memory_admin_router
 from backend.api.routes.profile import router as profile_router
 from backend.api.routes.session_ws import router as session_ws_router
 from backend.api.routes.vision import router as vision_router
@@ -80,6 +81,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(health_router)
+    app.include_router(memory_admin_router)
     app.include_router(profile_router)
     app.include_router(vision_router)
     app.include_router(session_ws_router)
