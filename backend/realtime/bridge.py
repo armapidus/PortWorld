@@ -61,6 +61,7 @@ class IOSRealtimeBridge:
         self._started_response_ids: set[str] = set()
         self._last_stopped_response_id: str | None = None
         self._current_response_id: str | None = None
+        self._has_active_upstream_response = False
         self._server_turn_detection_enabled = server_turn_detection_enabled
         self._manual_turn_fallback_enabled = manual_turn_fallback_enabled
         self._manual_turn_fallback_delay_s = (
@@ -71,6 +72,10 @@ class IOSRealtimeBridge:
         self._manual_response_sent_for_turn = False
         self._current_turn_started_at_monotonic: float | None = None
         self._server_vad_speaking = False
+        self._processed_tool_call_ids: dict[str, None] = {}
+        self._processed_tool_item_ids: dict[str, None] = {}
+        self._processed_tool_dedupe_limit = 512
+        self._saw_duplicate_tool_call_event_for_turn = False
         self._dump_input_audio_enabled = dump_input_audio_enabled
         self._tooling_runtime = tooling_runtime
         self._closed = False
@@ -322,8 +327,13 @@ class IOSRealtimeBridge:
             await self._on_audio_delta(event)
             return
 
-        if event_type in {"response.output_audio.done", "response.done"}:
+        if event_type == "response.output_audio.done":
             await self._on_response_done(event)
+            return
+
+        if event_type == "response.done":
+            await self._on_response_done(event)
+            self._has_active_upstream_response = False
             self._reset_turn_state()
             return
 
@@ -343,6 +353,7 @@ class IOSRealtimeBridge:
 
         if event_type == "response.created":
             logger.warning("Upstream response.created session=%s", self._session_id)
+            self._has_active_upstream_response = True
             self._current_turn_response_started = True
             return
 
@@ -383,6 +394,22 @@ class IOSRealtimeBridge:
             )
             return
 
+        call_id, item_id = self._extract_tool_call_dedupe_ids(event)
+        duplicate, dedupe_key = self._is_duplicate_tool_call_event(
+            call_id=call_id,
+            item_id=item_id,
+        )
+        if duplicate:
+            self._saw_duplicate_tool_call_event_for_turn = True
+            logger.warning(
+                "Ignoring duplicate tool call completion session=%s dedupe_key=%s event_type=%s",
+                self._session_id,
+                dedupe_key,
+                event.get("type"),
+            )
+            return
+        self._mark_tool_call_processed(call_id=call_id, item_id=item_id)
+
         tool_call_or_error = self._extract_tool_call_or_error(event)
         if isinstance(tool_call_or_error, dict):
             await self._send_tool_error_output(
@@ -393,18 +420,81 @@ class IOSRealtimeBridge:
             )
             return
 
-        tool_result = await self._tooling_runtime.execute(tool_call_or_error)
-        await self._upstream_client.send_json(
-            {
-                "type": "conversation.item.create",
-                "item": {
-                    "type": "function_call_output",
-                    "call_id": tool_result.call_id,
-                    "output": tool_result.to_output_json(),
-                },
-            }
+        try:
+            tool_result = await self._tooling_runtime.execute(tool_call_or_error)
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            logger.exception(
+                "Tool execution failed session=%s call_id=%s name=%s",
+                self._session_id,
+                tool_call_or_error.call_id,
+                tool_call_or_error.name,
+            )
+            await self._send_tool_error_output(
+                call_id=tool_call_or_error.call_id,
+                tool_name=tool_call_or_error.name,
+                error_code="TOOL_EXECUTION_FAILED",
+                error_message=str(exc) or "Tool execution failed",
+            )
+            return
+
+        await self._send_tool_output_and_continue(
+            call_id=tool_result.call_id,
+            output=tool_result.to_output_json(),
         )
-        await self._upstream_client.send_json({"type": "response.create"})
+
+    def _extract_tool_call_dedupe_ids(
+        self,
+        event: dict[str, Any],
+    ) -> tuple[str | None, str | None]:
+        item = event.get("item")
+        container = item if isinstance(item, dict) else event
+
+        call_id = self._extract_non_empty_string(container, "call_id")
+        if call_id is None:
+            call_id = self._extract_non_empty_string(event, "call_id")
+        item_id = self._extract_non_empty_string(container, "id")
+        return call_id, item_id
+
+    def _is_duplicate_tool_call_event(
+        self,
+        *,
+        call_id: str | None,
+        item_id: str | None,
+    ) -> tuple[bool, str | None]:
+        if call_id is not None and call_id in self._processed_tool_call_ids:
+            return True, f"call_id:{call_id}"
+        if item_id is not None and item_id in self._processed_tool_item_ids:
+            return True, f"item_id:{item_id}"
+        return False, None
+
+    def _mark_tool_call_processed(
+        self,
+        *,
+        call_id: str | None,
+        item_id: str | None,
+    ) -> None:
+        if call_id is not None:
+            self._remember_processed_tool_id(
+                self._processed_tool_call_ids,
+                call_id,
+            )
+        if item_id is not None:
+            self._remember_processed_tool_id(
+                self._processed_tool_item_ids,
+                item_id,
+            )
+
+    def _remember_processed_tool_id(
+        self,
+        id_store: dict[str, None],
+        processed_id: str,
+    ) -> None:
+        if processed_id in id_store:
+            id_store.pop(processed_id, None)
+        id_store[processed_id] = None
+        while len(id_store) > self._processed_tool_dedupe_limit:
+            oldest_id = next(iter(id_store))
+            id_store.pop(oldest_id, None)
 
     def _extract_tool_call_or_error(
         self,
@@ -480,27 +570,31 @@ class IOSRealtimeBridge:
         error_code: str,
         error_message: str,
     ) -> None:
+        output_json = json.dumps(
+            {
+                "ok": False,
+                "tool_name": tool_name,
+                "session_id": self._session_id,
+                "error_code": error_code,
+                "error_message": error_message,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        )
+        await self._send_tool_output_and_continue(call_id=call_id, output=output_json)
+
+    async def _send_tool_output_and_continue(self, *, call_id: str, output: str) -> None:
         await self._upstream_client.send_json(
             {
                 "type": "conversation.item.create",
                 "item": {
                     "type": "function_call_output",
                     "call_id": call_id,
-                    "output": json.dumps(
-                        {
-                            "ok": False,
-                            "tool_name": tool_name,
-                            "session_id": self._session_id,
-                            "error_code": error_code,
-                            "error_message": error_message,
-                        },
-                        ensure_ascii=True,
-                        sort_keys=True,
-                    ),
+                    "output": output,
                 },
             }
         )
-        await self._upstream_client.send_json({"type": "response.create"})
+        await self._send_response_create(source="tool_output")
 
     async def _on_audio_delta(self, event: dict[str, Any]) -> None:
         delta_b64 = event.get("delta")
@@ -702,17 +796,44 @@ class IOSRealtimeBridge:
         )
         return any(marker in lower_message for marker in schema_markers)
 
-    @staticmethod
-    def _is_expected_interrupt_race_error(*, code: str, message: str) -> bool:
+    def _is_expected_interrupt_race_error(self, *, code: str, message: str) -> bool:
         lower_code = code.strip().lower()
         lower_message = message.strip().lower()
-        return (
+        is_interrupt_cancel_race = (
             lower_code == "response_cancel_not_active"
             or (
                 "cancel" in lower_message
                 and "no active response" in lower_message
             )
         )
+        if is_interrupt_cancel_race:
+            return True
+
+        is_active_response_race = (
+            lower_code == "conversation_already_has_active_response"
+            or (
+                "already" in lower_message
+                and "active response" in lower_message
+            )
+        )
+        if not is_active_response_race:
+            return False
+
+        return (
+            self._server_turn_detection_enabled
+            or self._has_active_upstream_response
+            or self._current_turn_response_started
+            or self._saw_duplicate_tool_call_event_for_turn
+        )
+
+    def client_end_turn_ignore_reason(self) -> str | None:
+        if not self._server_turn_detection_enabled:
+            return None
+        if self._has_active_upstream_response:
+            return "active_upstream_response"
+        if self._current_turn_response_started:
+            return "response_already_started_for_turn"
+        return None
 
     async def _send_upstream_error(
         self,
@@ -769,6 +890,15 @@ class IOSRealtimeBridge:
             and self._server_turn_detection_enabled
         ):
             return
+        if reason == "client_end_turn":
+            ignore_reason = self.client_end_turn_ignore_reason()
+            if ignore_reason is not None:
+                logger.warning(
+                    "Ignoring client end_turn under server VAD session=%s reason=%s",
+                    self._session_id,
+                    ignore_reason,
+                )
+                return
         if not self._current_turn_audio_seen:
             if reason == "client_end_turn":
                 logger.warning(
@@ -796,6 +926,15 @@ class IOSRealtimeBridge:
                     self._manual_response_sent_for_turn,
                 )
             return
+        if self._has_active_upstream_response:
+            if reason == "client_end_turn":
+                logger.warning(
+                    "Skipping turn finalize session=%s reason=%s active_upstream_response=%s",
+                    self._session_id,
+                    reason,
+                    self._has_active_upstream_response,
+                )
+            return
         if reason == "continuous_uplink_timeout":
             if self._server_vad_speaking:
                 return
@@ -815,7 +954,17 @@ class IOSRealtimeBridge:
         )
         await self._wait_for_client_audio_queue_drain()
         await self._upstream_client.send_json({"type": "input_audio_buffer.commit"})
+        await self._send_response_create(source=f"manual_finalize:{reason}")
+
+    async def _send_response_create(self, *, source: str) -> None:
         await self._upstream_client.send_json({"type": "response.create"})
+        self._has_active_upstream_response = True
+        self._current_turn_response_started = True
+        logger.warning(
+            "Upstream response.create sent session=%s source=%s",
+            self._session_id,
+            source,
+        )
 
     async def _wait_for_client_audio_queue_drain(self) -> None:
         task = self._client_audio_sender_task
@@ -837,6 +986,8 @@ class IOSRealtimeBridge:
         self._manual_response_sent_for_turn = False
         self._current_turn_started_at_monotonic = None
         self._current_response_id = None
+        self._has_active_upstream_response = False
+        self._saw_duplicate_tool_call_event_for_turn = False
 
     @staticmethod
     def _parse_retriable_flag(raw: Any) -> bool:

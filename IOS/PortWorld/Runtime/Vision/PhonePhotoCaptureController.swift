@@ -1,5 +1,5 @@
 // Debug-only bounded still-photo capture controller for exercising vision upload from the iPhone camera.
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 import UIKit
 
@@ -24,6 +24,7 @@ final class PhonePhotoCaptureController: NSObject {
 
   private let captureSession = AVCaptureSession()
   private let photoOutput = AVCapturePhotoOutput()
+  private let captureSessionQueue = DispatchQueue(label: "com.portworld.phone_photo_capture.session")
   private var snapshot = Snapshot()
   private var captureLoopTask: Task<Void, Never>?
   private var activePhotoProcessors: [Int64: PhotoCaptureProcessor] = [:]
@@ -34,8 +35,12 @@ final class PhonePhotoCaptureController: NSObject {
 
   deinit {
     captureLoopTask?.cancel()
-    if captureSession.isRunning {
-      captureSession.stopRunning()
+    let captureSession = self.captureSession
+    let captureSessionQueue = self.captureSessionQueue
+    captureSessionQueue.async {
+      if captureSession.isRunning {
+        captureSession.stopRunning()
+      }
     }
   }
 
@@ -57,9 +62,7 @@ final class PhonePhotoCaptureController: NSObject {
       try configureSessionIfNeeded()
       snapshot.phase = .starting
       publishSnapshot()
-      if !captureSession.isRunning {
-        captureSession.startRunning()
-      }
+      await startCaptureSessionIfNeeded()
       snapshot.phase = .capturing
       snapshot.errorMessage = nil
       publishSnapshot()
@@ -87,9 +90,7 @@ final class PhonePhotoCaptureController: NSObject {
     captureLoopTask = nil
     activePhotoProcessors.removeAll(keepingCapacity: false)
     inFlightCapture = false
-    if captureSession.isRunning {
-      captureSession.stopRunning()
-    }
+    await stopCaptureSessionIfNeeded()
     snapshot.phase = .inactive
     snapshot.errorMessage = nil
     publishSnapshot()
@@ -213,6 +214,32 @@ final class PhonePhotoCaptureController: NSObject {
 
   private func publishSnapshot() {
     onSnapshotUpdated?(snapshot)
+  }
+
+  private func startCaptureSessionIfNeeded() async {
+    let captureSession = self.captureSession
+    let captureSessionQueue = self.captureSessionQueue
+    await withCheckedContinuation { continuation in
+      captureSessionQueue.async {
+        if !captureSession.isRunning {
+          captureSession.startRunning()
+        }
+        continuation.resume()
+      }
+    }
+  }
+
+  private func stopCaptureSessionIfNeeded() async {
+    let captureSession = self.captureSession
+    let captureSessionQueue = self.captureSessionQueue
+    await withCheckedContinuation { continuation in
+      captureSessionQueue.async {
+        if captureSession.isRunning {
+          captureSession.stopRunning()
+        }
+        continuation.resume()
+      }
+    }
   }
 }
 

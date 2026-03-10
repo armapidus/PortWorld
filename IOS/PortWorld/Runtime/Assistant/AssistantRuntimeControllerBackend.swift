@@ -76,6 +76,12 @@ extension AssistantRuntimeController {
         status.infoText = "Assistant interrupted. Listening to user speech."
         break
       }
+      if isExpectedActiveResponseRaceError(message) {
+        debugLog("Ignoring expected duplicate-response backend race: \(message)")
+        status.errorText = ""
+        status.infoText = "Assistant response already active. Continuing conversation."
+        break
+      }
       status.errorText = message
       if status.assistantRuntimeState == .connectingConversation || status.assistantRuntimeState == .activeConversation {
         await resetConversationToArmedState(reason: "Conversation failed. Listening for wake phrase again.")
@@ -94,6 +100,14 @@ extension AssistantRuntimeController {
   func isExpectedInterruptRaceError(_ message: String) -> Bool {
     let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     return normalized.contains("cancellation failed") && normalized.contains("no active response found")
+  }
+
+  func isExpectedActiveResponseRaceError(_ message: String) -> Bool {
+    let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if normalized.contains("conversation_already_has_active_response") {
+      return true
+    }
+    return normalized.contains("already") && normalized.contains("active response")
   }
 
   func describeBackendEvent(_ event: BackendSessionClient.Event) -> String {

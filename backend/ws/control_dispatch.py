@@ -110,6 +110,23 @@ async def dispatch_control_envelope(
         if active_session is None:
             logger.info("Ignoring session.end_turn before session.activate")
             return ControlDispatchResult(active_session=active_session, handled=True)
+        ignore_reason: str | None = None
+        ignore_reason_getter = getattr(
+            active_session.bridge,
+            "client_end_turn_ignore_reason",
+            None,
+        )
+        if callable(ignore_reason_getter):
+            candidate_reason = ignore_reason_getter()
+            if isinstance(candidate_reason, str) and candidate_reason:
+                ignore_reason = candidate_reason
+        if ignore_reason is not None:
+            logger.warning(
+                "Ignoring session.end_turn session=%s reason=%s",
+                active_session.session_id,
+                ignore_reason,
+            )
+            return ControlDispatchResult(active_session=active_session, handled=True)
         logger.warning(
             "Client requested session.end_turn session=%s",
             active_session.session_id,
