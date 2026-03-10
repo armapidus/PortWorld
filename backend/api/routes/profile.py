@@ -1,0 +1,88 @@
+from __future__ import annotations
+
+from typing import Any
+
+from fastapi import APIRouter
+from fastapi import Request
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from backend.core.auth import require_http_bearer_auth
+from backend.core.runtime import get_app_runtime
+from backend.memory.lifecycle import PROFILE_METADATA_KEY, allowed_profile_fields
+
+router = APIRouter()
+
+
+class ProfileUpdatePayload(BaseModel):
+    name: str | None = None
+    job: str | None = None
+    company: str | None = None
+    preferences: list[str] = Field(default_factory=list)
+    projects: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("name", "job", "company")
+    @classmethod
+    def validate_optional_string(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("preferences", "projects")
+    @classmethod
+    def validate_string_lists(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for item in value:
+            candidate = item.strip()
+            if candidate:
+                normalized.append(candidate)
+        return normalized
+
+
+def _build_profile_response(profile_payload: dict[str, Any]) -> dict[str, Any]:
+    fields = allowed_profile_fields()
+    profile = {
+        field_name: profile_payload[field_name]
+        for field_name in fields
+        if field_name in profile_payload
+    }
+    metadata = profile_payload.get(PROFILE_METADATA_KEY)
+    if not isinstance(metadata, dict):
+        metadata = {}
+    present_fields = set(profile.keys())
+    return {
+        "profile": profile,
+        "is_onboarded": bool(profile),
+        "missing_fields": [field_name for field_name in fields if field_name not in present_fields],
+        "metadata": metadata,
+    }
+
+
+@router.get("/profile")
+async def get_profile(request: Request) -> dict[str, Any]:
+    runtime = get_app_runtime(request.app)
+    require_http_bearer_auth(request=request, settings=runtime.settings)
+    return _build_profile_response(runtime.storage.read_user_profile())
+
+
+@router.put("/profile")
+async def put_profile(
+    request: Request,
+    payload: ProfileUpdatePayload,
+) -> dict[str, Any]:
+    runtime = get_app_runtime(request.app)
+    require_http_bearer_auth(request=request, settings=runtime.settings)
+    updated_profile = runtime.storage.write_user_profile(
+        payload=payload.model_dump(),
+        source="api_profile_put",
+    )
+    return _build_profile_response(updated_profile)
+
+
+@router.post("/profile/reset")
+async def reset_profile(request: Request) -> dict[str, Any]:
+    runtime = get_app_runtime(request.app)
+    require_http_bearer_auth(request=request, settings=runtime.settings)
+    return _build_profile_response(runtime.storage.reset_user_profile())
