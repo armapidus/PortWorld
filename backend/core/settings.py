@@ -16,6 +16,10 @@ load_dotenv()
 DEFAULT_INSTRUCTIONS = "You are a concise assistant. Keep answers short, clear, and practical."
 
 
+class MissingOpenAIAPIKeyError(RuntimeError):
+    pass
+
+
 def _get_env(*names: str) -> str | None:
     for name in names:
         raw = os.getenv(name)
@@ -349,7 +353,7 @@ class Settings:
     def require_openai_api_key(self) -> str:
         key = (self.openai_api_key or "").strip()
         if not key:
-            raise RuntimeError("OPENAI_API_KEY is required at runtime")
+            raise MissingOpenAIAPIKeyError("OPENAI_API_KEY is required at runtime")
         return key
 
     def require_mistral_api_key(self) -> str:

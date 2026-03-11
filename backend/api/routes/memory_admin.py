@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import tempfile
@@ -96,8 +97,9 @@ async def export_memory(request: Request) -> StreamingResponse:
     runtime = get_app_runtime(request.app)
     require_http_bearer_auth(request=request, settings=runtime.settings)
 
-    artifacts = runtime.storage.list_memory_export_artifacts()
-    export_path = _write_export_zip(
+    artifacts = await asyncio.to_thread(runtime.storage.list_memory_export_artifacts)
+    export_path = await asyncio.to_thread(
+        _write_export_zip,
         artifacts=artifacts,
         session_retention_days=runtime.settings.backend_session_memory_retention_days,
     )
@@ -117,7 +119,10 @@ async def reset_session_memory(request: Request, session_id: str) -> dict[str, o
     runtime = get_app_runtime(request.app)
     require_http_bearer_auth(request=request, settings=runtime.settings)
 
-    eligibility = runtime.storage.get_session_memory_reset_eligibility(session_id=session_id)
+    eligibility = await asyncio.to_thread(
+        runtime.storage.get_session_memory_reset_eligibility,
+        session_id=session_id,
+    )
     if eligibility.is_active:
         raise HTTPException(
             status_code=409,
@@ -130,7 +135,10 @@ async def reset_session_memory(request: Request, session_id: str) -> dict[str, o
         )
 
     try:
-        result = runtime.storage.reset_session_memory(session_id=session_id)
+        result = await asyncio.to_thread(
+            runtime.storage.reset_session_memory,
+            session_id=session_id,
+        )
     except RuntimeError as exc:
         raise HTTPException(
             status_code=409,
@@ -156,4 +164,7 @@ async def reset_session_memory(request: Request, session_id: str) -> dict[str, o
 async def session_memory_status(request: Request, session_id: str) -> dict[str, object]:
     runtime = get_app_runtime(request.app)
     require_http_bearer_auth(request=request, settings=runtime.settings)
-    return runtime.storage.read_session_memory_status(session_id=session_id)
+    return await asyncio.to_thread(
+        runtime.storage.read_session_memory_status,
+        session_id=session_id,
+    )

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
 from fastapi import WebSocket
 
+from backend.core.settings import MissingOpenAIAPIKeyError
 from backend.core.storage import BackendStorage
 from backend.realtime.client import RealtimeClientError
 from backend.realtime.factory import BridgeBinding
@@ -60,7 +62,7 @@ async def activate_session(
             send_control=send_control,
             send_server_audio=send_server_audio,
         )
-    except RuntimeError:
+    except MissingOpenAIAPIKeyError:
         await send_control(
             "error",
             {
@@ -102,8 +104,9 @@ async def activate_session(
         )
         return None
 
-    storage.ensure_session_storage(session_id=envelope.session_id)
-    storage.upsert_session_status(
+    await asyncio.to_thread(storage.ensure_session_storage, session_id=envelope.session_id)
+    await asyncio.to_thread(
+        storage.upsert_session_status,
         session_id=envelope.session_id,
         status="active",
     )

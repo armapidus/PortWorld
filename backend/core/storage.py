@@ -8,8 +8,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from time import time_ns
-from typing import Any, Iterator, Mapping
+from time import sleep, time_ns
+from typing import Any, Callable, Iterator, Mapping, TypeVar
 
 from backend.memory.lifecycle import (
     EXPORTABLE_SESSION_ARTIFACT_KINDS,
@@ -29,8 +29,11 @@ from backend.memory.profile import (
 )
 
 SCHEMA_VERSION = "3"
+_SQLITE_BUSY_BACKOFF_SECONDS = (0.05, 0.1, 0.2)
+_SQLITE_BUSY_TIMEOUT_MS = 5_000
 _STORAGE_ID_PREFIX_MAX_LENGTH = 24
 _UNSET = object()
+_SQLiteRetryResult = TypeVar("_SQLiteRetryResult")
 
 
 def now_ms() -> int:
@@ -124,6 +127,13 @@ class SessionMemoryResetResult:
     deleted_session_rows: int
     removed_session_dir: bool
     removed_vision_frames_dir: bool
+
+
+@dataclass(frozen=True, slots=True)
+class VisionFrameIngestResult:
+    frame_path: Path
+    metadata_path: Path
+    stored_bytes: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,18 +250,21 @@ class BackendStorage:
 
     def upsert_session_status(self, *, session_id: str, status: str) -> None:
         timestamp_ms = now_ms()
-        with self.connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO session_index(session_id, status, created_at_ms, updated_at_ms)
-                VALUES(?, ?, ?, ?)
-                ON CONFLICT(session_id) DO UPDATE SET
-                    status=excluded.status,
-                    updated_at_ms=excluded.updated_at_ms
-                """,
-                (session_id, status, timestamp_ms, timestamp_ms),
-            )
-            connection.commit()
+        def _operation() -> None:
+            with self.connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO session_index(session_id, status, created_at_ms, updated_at_ms)
+                    VALUES(?, ?, ?, ?)
+                    ON CONFLICT(session_id) DO UPDATE SET
+                        status=excluded.status,
+                        updated_at_ms=excluded.updated_at_ms
+                    """,
+                    (session_id, status, timestamp_ms, timestamp_ms),
+                )
+                connection.commit()
+
+        self._run_with_sqlite_retry(_operation)
 
     def register_artifact(
         self,
@@ -266,38 +279,21 @@ class BackendStorage:
         relative_path = str(artifact_path.relative_to(self.paths.data_root))
         created_at_ms = now_ms()
         metadata_json = json.dumps(metadata, ensure_ascii=True, sort_keys=True)
-        with self.connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO artifact_index(
-                    artifact_id,
-                    session_id,
-                    artifact_kind,
-                    relative_path,
-                    content_type,
-                    metadata_json,
-                    created_at_ms
+        def _operation() -> None:
+            with self.connect() as connection:
+                self._upsert_artifact_record(
+                    artifact_id=artifact_id,
+                    session_id=session_id,
+                    artifact_kind=artifact_kind,
+                    relative_path=relative_path,
+                    content_type=content_type,
+                    metadata_json=metadata_json,
+                    created_at_ms=created_at_ms,
+                    connection=connection,
                 )
-                VALUES(?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(artifact_id) DO UPDATE SET
-                    session_id=excluded.session_id,
-                    artifact_kind=excluded.artifact_kind,
-                    relative_path=excluded.relative_path,
-                    content_type=excluded.content_type,
-                    metadata_json=excluded.metadata_json,
-                    created_at_ms=excluded.created_at_ms
-                """,
-                (
-                    artifact_id,
-                    session_id,
-                    artifact_kind,
-                    relative_path,
-                    content_type,
-                    metadata_json,
-                    created_at_ms,
-                ),
-            )
-            connection.commit()
+                connection.commit()
+
+        self._run_with_sqlite_retry(_operation)
         return ArtifactRecord(
             artifact_id=artifact_id,
             session_id=session_id,
@@ -306,6 +302,116 @@ class BackendStorage:
             content_type=content_type,
             metadata_json=metadata_json,
             created_at_ms=created_at_ms,
+        )
+
+    def store_vision_frame_ingest(
+        self,
+        *,
+        session_id: str,
+        frame_id: str,
+        ts_ms: int,
+        capture_ts_ms: int,
+        width: int,
+        height: int,
+        frame_bytes: bytes,
+    ) -> VisionFrameIngestResult:
+        self.ensure_session_storage(session_id=session_id)
+        frame_path, metadata_path = self.vision_frame_artifact_paths(
+            session_id=session_id,
+            frame_id=frame_id,
+        )
+        frame_path.parent.mkdir(parents=True, exist_ok=True)
+
+        artifact_metadata = {
+            "session_id": session_id,
+            "frame_id": frame_id,
+            "ts_ms": ts_ms,
+            "capture_ts_ms": capture_ts_ms,
+            "width": width,
+            "height": height,
+            "stored_bytes": len(frame_bytes),
+        }
+        metadata_payload = {
+            **artifact_metadata,
+            "stored_path": str(frame_path),
+        }
+        ingest_record = VisionFrameIndexRecord(
+            session_id=session_id,
+            frame_id=frame_id,
+            capture_ts_ms=capture_ts_ms,
+            ingest_ts_ms=now_ms(),
+            width=width,
+            height=height,
+            processing_status="queued",
+            gate_status=None,
+            gate_reason=None,
+            phash=None,
+            provider=None,
+            model=None,
+            analyzed_at_ms=None,
+            next_retry_at_ms=None,
+            attempt_count=0,
+            error_code=None,
+            error_details_json=None,
+            summary_snippet=None,
+            routing_status=None,
+            routing_reason=None,
+            routing_score=None,
+            routing_metadata_json=None,
+        )
+
+        def _cleanup_partial_files() -> None:
+            for artifact_path in (metadata_path, frame_path):
+                try:
+                    artifact_path.unlink()
+                except FileNotFoundError:
+                    continue
+
+        try:
+            frame_path.write_bytes(frame_bytes)
+            metadata_path.write_text(
+                json.dumps(metadata_payload, ensure_ascii=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        except Exception:
+            _cleanup_partial_files()
+            raise
+
+        try:
+            def _operation() -> None:
+                with self.connect() as connection:
+                    self._upsert_artifact_record(
+                        artifact_id=f"{session_id}:vision_frame_jpeg:{frame_id}",
+                        session_id=session_id,
+                        artifact_kind="vision_frame_jpeg",
+                        relative_path=str(frame_path.relative_to(self.paths.data_root)),
+                        content_type="image/jpeg",
+                        metadata_json=json.dumps(artifact_metadata, ensure_ascii=True, sort_keys=True),
+                        created_at_ms=ingest_record.ingest_ts_ms,
+                        connection=connection,
+                    )
+                    self._upsert_artifact_record(
+                        artifact_id=f"{session_id}:vision_frame_metadata:{frame_id}",
+                        session_id=session_id,
+                        artifact_kind="vision_frame_metadata",
+                        relative_path=str(metadata_path.relative_to(self.paths.data_root)),
+                        content_type="application/json",
+                        metadata_json=json.dumps(artifact_metadata, ensure_ascii=True, sort_keys=True),
+                        created_at_ms=ingest_record.ingest_ts_ms,
+                        connection=connection,
+                    )
+                    self._upsert_vision_frame_index(ingest_record, connection=connection)
+                    connection.commit()
+
+            self._run_with_sqlite_retry(_operation)
+        except Exception:
+            _cleanup_partial_files()
+            raise
+
+        return VisionFrameIngestResult(
+            frame_path=frame_path,
+            metadata_path=metadata_path,
+            stored_bytes=len(frame_bytes),
         )
 
     def session_storage_dir(self, *, session_id: str) -> Path:
@@ -334,43 +440,6 @@ class BackendStorage:
             root=self.paths.vision_frames_root,
             raw_id=session_id,
         )
-
-    def record_vision_frame_ingest(
-        self,
-        *,
-        session_id: str,
-        frame_id: str,
-        capture_ts_ms: int,
-        width: int,
-        height: int,
-        ingest_ts_ms: int | None = None,
-    ) -> VisionFrameIndexRecord:
-        record = VisionFrameIndexRecord(
-            session_id=session_id,
-            frame_id=frame_id,
-            capture_ts_ms=capture_ts_ms,
-            ingest_ts_ms=ingest_ts_ms or now_ms(),
-            width=width,
-            height=height,
-            processing_status="queued",
-            gate_status=None,
-            gate_reason=None,
-            phash=None,
-            provider=None,
-            model=None,
-            analyzed_at_ms=None,
-            next_retry_at_ms=None,
-            attempt_count=0,
-            error_code=None,
-            error_details_json=None,
-            summary_snippet=None,
-            routing_status=None,
-            routing_reason=None,
-            routing_score=None,
-            routing_metadata_json=None,
-        )
-        self._upsert_vision_frame_index(record)
-        return record
 
     def append_vision_event(self, *, session_id: str, event: dict[str, Any]) -> None:
         session_storage = self.ensure_session_storage(session_id=session_id)
@@ -715,73 +784,76 @@ class BackendStorage:
         routing_score: float | None = None,
         routing_metadata: dict[str, Any] | None = None,
     ) -> None:
-        with self.connect() as connection:
-            existing = connection.execute(
-                """
-                SELECT *
-                FROM vision_frame_index
-                WHERE session_id = ? AND frame_id = ?
-                """,
-                (session_id, frame_id),
-            ).fetchone()
-            if existing is None:
-                raise KeyError(
-                    f"Vision frame record not found for session_id={session_id!r} frame_id={frame_id!r}"
-                )
-            record = VisionFrameIndexRecord(
-                session_id=session_id,
-                frame_id=frame_id,
-                capture_ts_ms=int(existing["capture_ts_ms"]),
-                ingest_ts_ms=int(existing["ingest_ts_ms"]),
-                width=int(existing["width"]),
-                height=int(existing["height"]),
-                processing_status=processing_status,
-                gate_status=gate_status,
-                gate_reason=gate_reason,
-                phash=phash,
-                provider=provider,
-                model=model,
-                analyzed_at_ms=analyzed_at_ms,
-                next_retry_at_ms=(
-                    int(next_retry_at_ms)
-                    if isinstance(next_retry_at_ms, int)
-                    else (
-                        int(existing["next_retry_at_ms"])
-                        if next_retry_at_ms is _UNSET and existing["next_retry_at_ms"] is not None
-                        else None
+        def _operation() -> None:
+            with self.connect() as connection:
+                existing = connection.execute(
+                    """
+                    SELECT *
+                    FROM vision_frame_index
+                    WHERE session_id = ? AND frame_id = ?
+                    """,
+                    (session_id, frame_id),
+                ).fetchone()
+                if existing is None:
+                    raise KeyError(
+                        f"Vision frame record not found for session_id={session_id!r} frame_id={frame_id!r}"
                     )
-                ),
-                attempt_count=(
-                    int(attempt_count)
-                    if isinstance(attempt_count, int)
-                    else int(existing["attempt_count"] or 0)
-                ),
-                error_code=error_code,
-                error_details_json=(
-                    json.dumps(error_details, ensure_ascii=True, sort_keys=True)
-                    if isinstance(error_details, dict)
-                    else (
-                        None
-                        if error_details is None
+                record = VisionFrameIndexRecord(
+                    session_id=session_id,
+                    frame_id=frame_id,
+                    capture_ts_ms=int(existing["capture_ts_ms"]),
+                    ingest_ts_ms=int(existing["ingest_ts_ms"]),
+                    width=int(existing["width"]),
+                    height=int(existing["height"]),
+                    processing_status=processing_status,
+                    gate_status=gate_status,
+                    gate_reason=gate_reason,
+                    phash=phash,
+                    provider=provider,
+                    model=model,
+                    analyzed_at_ms=analyzed_at_ms,
+                    next_retry_at_ms=(
+                        int(next_retry_at_ms)
+                        if isinstance(next_retry_at_ms, int)
                         else (
-                            str(existing["error_details_json"])
-                            if error_details is _UNSET and existing["error_details_json"] is not None
+                            int(existing["next_retry_at_ms"])
+                            if next_retry_at_ms is _UNSET and existing["next_retry_at_ms"] is not None
                             else None
                         )
-                    )
-                ),
-                summary_snippet=summary_snippet,
-                routing_status=routing_status,
-                routing_reason=routing_reason,
-                routing_score=routing_score,
-                routing_metadata_json=(
-                    json.dumps(routing_metadata, ensure_ascii=True, sort_keys=True)
-                    if routing_metadata is not None
-                    else None
-                ),
-            )
-            self._upsert_vision_frame_index(record, connection=connection)
-            connection.commit()
+                    ),
+                    attempt_count=(
+                        int(attempt_count)
+                        if isinstance(attempt_count, int)
+                        else int(existing["attempt_count"] or 0)
+                    ),
+                    error_code=error_code,
+                    error_details_json=(
+                        json.dumps(error_details, ensure_ascii=True, sort_keys=True)
+                        if isinstance(error_details, dict)
+                        else (
+                            None
+                            if error_details is None
+                            else (
+                                str(existing["error_details_json"])
+                                if error_details is _UNSET and existing["error_details_json"] is not None
+                                else None
+                            )
+                        )
+                    ),
+                    summary_snippet=summary_snippet,
+                    routing_status=routing_status,
+                    routing_reason=routing_reason,
+                    routing_score=routing_score,
+                    routing_metadata_json=(
+                        json.dumps(routing_metadata, ensure_ascii=True, sort_keys=True)
+                        if routing_metadata is not None
+                        else None
+                    ),
+                )
+                self._upsert_vision_frame_index(record, connection=connection)
+                connection.commit()
+
+        self._run_with_sqlite_retry(_operation)
 
     def _upsert_vision_frame_index(
         self,
@@ -1158,14 +1230,80 @@ class BackendStorage:
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
-        connection = sqlite3.connect(self.paths.sqlite_path)
+        connection = sqlite3.connect(
+            self.paths.sqlite_path,
+            timeout=_SQLITE_BUSY_TIMEOUT_MS / 1000,
+        )
         connection.row_factory = sqlite3.Row
         try:
             connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute(f"PRAGMA busy_timeout={_SQLITE_BUSY_TIMEOUT_MS}")
             connection.execute("PRAGMA foreign_keys=ON")
             yield connection
         finally:
             connection.close()
+
+    def _upsert_artifact_record(
+        self,
+        *,
+        artifact_id: str,
+        session_id: str | None,
+        artifact_kind: str,
+        relative_path: str,
+        content_type: str,
+        metadata_json: str,
+        created_at_ms: int,
+        connection: sqlite3.Connection,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO artifact_index(
+                artifact_id,
+                session_id,
+                artifact_kind,
+                relative_path,
+                content_type,
+                metadata_json,
+                created_at_ms
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(artifact_id) DO UPDATE SET
+                session_id=excluded.session_id,
+                artifact_kind=excluded.artifact_kind,
+                relative_path=excluded.relative_path,
+                content_type=excluded.content_type,
+                metadata_json=excluded.metadata_json,
+                created_at_ms=excluded.created_at_ms
+            """,
+            (
+                artifact_id,
+                session_id,
+                artifact_kind,
+                relative_path,
+                content_type,
+                metadata_json,
+                created_at_ms,
+            ),
+        )
+
+    def _run_with_sqlite_retry(
+        self,
+        operation: Callable[[], _SQLiteRetryResult],
+    ) -> _SQLiteRetryResult:
+        """Sync-only helper. Intended for storage calls already running off the event loop."""
+        for attempt_index in range(len(_SQLITE_BUSY_BACKOFF_SECONDS) + 1):
+            try:
+                return operation()
+            except sqlite3.OperationalError as exc:
+                if not self._is_sqlite_busy_error(exc) or attempt_index >= len(_SQLITE_BUSY_BACKOFF_SECONDS):
+                    raise
+                sleep(_SQLITE_BUSY_BACKOFF_SECONDS[attempt_index])
+        return operation()
+
+    @staticmethod
+    def _is_sqlite_busy_error(exc: sqlite3.OperationalError) -> bool:
+        message = str(exc).strip().lower()
+        return "database is locked" in message or "database is busy" in message
 
     def _row_to_vision_frame_index_record(self, row: sqlite3.Row) -> VisionFrameIndexRecord:
         return VisionFrameIndexRecord(

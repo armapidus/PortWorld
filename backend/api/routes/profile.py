@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter
@@ -64,7 +65,8 @@ def _build_profile_response(profile_payload: dict[str, Any]) -> dict[str, Any]:
 async def get_profile(request: Request) -> dict[str, Any]:
     runtime = get_app_runtime(request.app)
     require_http_bearer_auth(request=request, settings=runtime.settings)
-    return _build_profile_response(runtime.storage.read_user_profile())
+    profile = await asyncio.to_thread(runtime.storage.read_user_profile)
+    return _build_profile_response(profile)
 
 
 @router.put("/profile")
@@ -74,7 +76,8 @@ async def put_profile(
 ) -> dict[str, Any]:
     runtime = get_app_runtime(request.app)
     require_http_bearer_auth(request=request, settings=runtime.settings)
-    updated_profile = runtime.storage.write_user_profile(
+    updated_profile = await asyncio.to_thread(
+        runtime.storage.write_user_profile,
         payload=payload.model_dump(),
         source="api_profile_put",
     )
@@ -85,4 +88,5 @@ async def put_profile(
 async def reset_profile(request: Request) -> dict[str, Any]:
     runtime = get_app_runtime(request.app)
     require_http_bearer_auth(request=request, settings=runtime.settings)
-    return _build_profile_response(runtime.storage.reset_user_profile())
+    profile = await asyncio.to_thread(runtime.storage.reset_user_profile)
+    return _build_profile_response(profile)

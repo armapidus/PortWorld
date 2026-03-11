@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -101,11 +102,12 @@ async def deactivate_session(
     await active_session.bridge.close()
     if vision_memory_runtime is not None:
         await vision_memory_runtime.finalize_session(session_id=active_session.session_id)
-    storage.upsert_session_status(
+    await asyncio.to_thread(
+        storage.upsert_session_status,
         session_id=active_session.session_id,
         status="ended",
     )
-    _sweep_expired_session_memory_after_finalization(
+    await _sweep_expired_session_memory_after_finalization(
         storage=storage,
         retention_days=session_memory_retention_days,
     )
@@ -133,11 +135,12 @@ async def deactivate_and_unregister_session(
         await active_session.bridge.close()
         if vision_memory_runtime is not None:
             await vision_memory_runtime.finalize_session(session_id=active_session.session_id)
-        storage.upsert_session_status(
+        await asyncio.to_thread(
+            storage.upsert_session_status,
             session_id=active_session.session_id,
             status="ended",
         )
-        _sweep_expired_session_memory_after_finalization(
+        await _sweep_expired_session_memory_after_finalization(
             storage=storage,
             retention_days=session_memory_retention_days,
         )
@@ -147,13 +150,14 @@ async def deactivate_and_unregister_session(
     )
 
 
-def _sweep_expired_session_memory_after_finalization(
+async def _sweep_expired_session_memory_after_finalization(
     *,
     storage: BackendStorage,
     retention_days: int,
 ) -> None:
     try:
-        expired_sessions = storage.sweep_expired_session_memory(
+        expired_sessions = await asyncio.to_thread(
+            storage.sweep_expired_session_memory,
             retention_days=retention_days,
         )
     except Exception:

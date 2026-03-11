@@ -768,6 +768,7 @@ class IOSRealtimeBridge:
         except RealtimeClientError:
             return False
         except Exception:  # pragma: no cover - defensive fallback
+            logger.exception("Unexpected failure retrying legacy session init schema fallback")
             return False
         return bool(did_retry)
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
-import json
 import logging
 from math import ceil
 
@@ -100,64 +100,22 @@ async def vision_frame(request: Request, payload: VisionFramePayload) -> dict[st
                 f"BACKEND_MAX_VISION_FRAME_BYTES={runtime.settings.backend_max_vision_frame_bytes}"
             ),
         )
-    runtime.storage.ensure_session_storage(session_id=payload.session_id)
-    frame_path, metadata_path = runtime.storage.vision_frame_artifact_paths(
+    ingest_result = await asyncio.to_thread(
+        runtime.storage.store_vision_frame_ingest,
         session_id=payload.session_id,
         frame_id=payload.frame_id,
-    )
-    frame_path.parent.mkdir(parents=True, exist_ok=True)
-    artifact_metadata = {
-        "session_id": payload.session_id,
-        "frame_id": payload.frame_id,
-        "ts_ms": payload.ts_ms,
-        "capture_ts_ms": payload.capture_ts_ms,
-        "width": payload.width,
-        "height": payload.height,
-        "stored_bytes": len(frame_bytes),
-    }
-
-    frame_path.write_bytes(frame_bytes)
-    metadata_path.write_text(
-        json.dumps(
-            {
-                **artifact_metadata,
-                "stored_path": str(frame_path),
-            },
-            ensure_ascii=True,
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    runtime.storage.register_artifact(
-        artifact_id=f"{payload.session_id}:vision_frame_jpeg:{payload.frame_id}",
-        session_id=payload.session_id,
-        artifact_kind="vision_frame_jpeg",
-        artifact_path=frame_path,
-        content_type="image/jpeg",
-        metadata=artifact_metadata,
-    )
-    runtime.storage.register_artifact(
-        artifact_id=f"{payload.session_id}:vision_frame_metadata:{payload.frame_id}",
-        session_id=payload.session_id,
-        artifact_kind="vision_frame_metadata",
-        artifact_path=metadata_path,
-        content_type="application/json",
-        metadata=artifact_metadata,
-    )
-    runtime.storage.record_vision_frame_ingest(
-        session_id=payload.session_id,
-        frame_id=payload.frame_id,
+        ts_ms=payload.ts_ms,
         capture_ts_ms=payload.capture_ts_ms,
         width=payload.width,
         height=payload.height,
+        frame_bytes=frame_bytes,
     )
 
     logger.info(
         "Vision frame stored session=%s frame=%s bytes=%s size=%sx%s",
         payload.session_id,
         payload.frame_id,
-        len(frame_bytes),
+        ingest_result.stored_bytes,
         payload.width,
         payload.height,
     )
