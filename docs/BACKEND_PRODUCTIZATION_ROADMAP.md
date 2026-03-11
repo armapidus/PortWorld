@@ -331,6 +331,7 @@ Acceptance:
 Status:
 
 - complete
+- with Step `4E` complete, the planned Phase `4` backend slice is complete
 
 Implementation notes:
 
@@ -347,6 +348,11 @@ Implementation notes:
   - persistence behavior
   - compact operator route reference
 - `backend/README.md` now stays focused on backend architecture, API surface, storage, and high-signal configuration while delegating setup and operator workflow detail to the self-host guide
+- post-self-host shakeout fixes landed during Step `4E` validation:
+  - the vision-frame SQLite upsert path was corrected so frame ingest and index persistence succeed under live traffic
+  - the NVIDIA-hosted `ministral` request payload was aligned to the provider's expected image input shape
+  - the vision-provider response parser was hardened against non-strict JSON output from the model
+  - realtime sessions now set `tool_choice: "auto"` explicitly when tools are advertised
 - future deployment reuse beyond local self-host is acknowledged only as a portability note; no provider- or platform-specific cloud deployment guide is part of Step `4E`
 
 ## Deferred Next
