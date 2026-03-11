@@ -107,8 +107,8 @@ Work:
 - standardize persistence around one explicit storage model:
   - `user/user_profile.md`
   - `user/user_profile.json`
-  - `session/<session_id>/session_memory.md`
-  - `session/<session_id>/session_memory.json`
+  - `session/<session_storage_key>/session_memory.md`
+  - `session/<session_storage_key>/session_memory.json`
   - `SQLite` metadata and indexes
 - make the self-hosted Docker-based deployment path the primary supported operating model
 - remove or isolate hackathon-era backend structure that no longer serves the active app path

@@ -75,7 +75,9 @@ Persisted backend state lives under `BACKEND_DATA_DIR` and includes:
 - `portworld.db`
 - `user/user_profile.md`
 - `user/user_profile.json`
-- `session/<session_id>/...` derived memory artifacts
+- `session/<session_storage_key>/...` derived memory artifacts
+
+`session_storage_key` is a deterministic collision-safe path component derived from the logical session ID.
 
 Normal restart path:
 
