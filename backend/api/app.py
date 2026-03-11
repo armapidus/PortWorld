@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import JSONResponse
 
 from backend.api.routes.health import router as health_router
@@ -65,9 +66,14 @@ def _make_lifespan(settings: Settings) -> Callable[[FastAPI], AsyncIterator[None
 
 def create_app() -> FastAPI:
     settings = Settings.from_env()
+    settings.validate_production_posture()
     app = FastAPI(title=SERVICE_NAME, lifespan=_make_lifespan(settings))
 
     allow_all = settings.cors_origins == ["*"]
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=settings.backend_allowed_hosts,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

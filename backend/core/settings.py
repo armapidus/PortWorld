@@ -51,6 +51,14 @@ def _parse_int_env(*names: str, default: int, minimum: int | None = None) -> int
     return value
 
 
+def _parse_csv_env(*names: str, default: str) -> list[str]:
+    raw = _get_env(*names) or default
+    values = [value.strip() for value in raw.split(",") if value.strip()]
+    if values:
+        return values
+    return [default]
+
+
 @dataclass(frozen=True)
 class Settings:
     openai_api_key: str | None
@@ -97,6 +105,14 @@ class Settings:
     realtime_tool_timeout_ms: int
     realtime_web_search_provider: str
     realtime_web_search_max_results: int
+    backend_profile: str
+    backend_allowed_hosts: list[str]
+    backend_rate_limit_ws_ip_max_attempts: int
+    backend_rate_limit_ws_session_max_attempts: int
+    backend_rate_limit_ws_window_seconds: int
+    backend_rate_limit_vision_ip_max_requests: int
+    backend_rate_limit_vision_session_max_requests: int
+    backend_rate_limit_vision_window_seconds: int
     host: str
     port: int
     log_level: str
@@ -104,8 +120,9 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        origins_raw = _get_env("CORS_ORIGINS") or "*"
-        origins = [origin.strip() for origin in origins_raw.split(",") if origin.strip()]
+        origins = _parse_csv_env("CORS_ORIGINS", default="*")
+        allowed_hosts = _parse_csv_env("BACKEND_ALLOWED_HOSTS", default="*")
+        backend_profile = (_get_env("BACKEND_PROFILE") or "development").strip().lower()
         backend_data_dir = Path(_get_env("BACKEND_DATA_DIR") or "backend/var")
         backend_sqlite_path = Path(
             _get_env("BACKEND_SQLITE_PATH") or str(backend_data_dir / "portworld.db")
@@ -264,11 +281,64 @@ class Settings:
                 default=3,
                 minimum=1,
             ),
+            backend_profile=backend_profile,
+            backend_allowed_hosts=allowed_hosts,
+            backend_rate_limit_ws_ip_max_attempts=_parse_int_env(
+                "BACKEND_RATE_LIMIT_WS_IP_MAX_ATTEMPTS",
+                default=30,
+                minimum=1,
+            ),
+            backend_rate_limit_ws_session_max_attempts=_parse_int_env(
+                "BACKEND_RATE_LIMIT_WS_SESSION_MAX_ATTEMPTS",
+                default=6,
+                minimum=1,
+            ),
+            backend_rate_limit_ws_window_seconds=_parse_int_env(
+                "BACKEND_RATE_LIMIT_WS_WINDOW_SECONDS",
+                default=60,
+                minimum=1,
+            ),
+            backend_rate_limit_vision_ip_max_requests=_parse_int_env(
+                "BACKEND_RATE_LIMIT_VISION_IP_MAX_REQUESTS",
+                default=120,
+                minimum=1,
+            ),
+            backend_rate_limit_vision_session_max_requests=_parse_int_env(
+                "BACKEND_RATE_LIMIT_VISION_SESSION_MAX_REQUESTS",
+                default=60,
+                minimum=1,
+            ),
+            backend_rate_limit_vision_window_seconds=_parse_int_env(
+                "BACKEND_RATE_LIMIT_VISION_WINDOW_SECONDS",
+                default=60,
+                minimum=1,
+            ),
             host=_get_env("HOST") or "0.0.0.0",
             port=_parse_int_env("PORT", default=8080),
             log_level=_get_env("LOG_LEVEL") or "INFO",
             cors_origins=origins or ["*"],
         )
+
+    @property
+    def is_production_profile(self) -> bool:
+        return self.backend_profile in {"prod", "production"}
+
+    def validate_production_posture(self) -> None:
+        if not self.is_production_profile:
+            return
+        if not self.backend_bearer_token:
+            raise RuntimeError(
+                "BACKEND_BEARER_TOKEN must be set when BACKEND_PROFILE=production."
+            )
+        if self.cors_origins == ["*"]:
+            raise RuntimeError(
+                "CORS_ORIGINS must be explicit (not '*') when BACKEND_PROFILE=production."
+            )
+        if self.backend_allowed_hosts == ["*"]:
+            raise RuntimeError(
+                "BACKEND_ALLOWED_HOSTS must be explicit (not '*') when "
+                "BACKEND_PROFILE=production."
+            )
 
     def require_openai_api_key(self) -> str:
         key = (self.openai_api_key or "").strip()
