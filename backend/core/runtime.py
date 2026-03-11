@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from hashlib import sha1
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from backend.core.rate_limit import RateLimitDecision, SlidingWindowRateLimiter
 from backend.core.settings import Settings
 from backend.core.storage import BackendStorage, StorageBootstrapResult, StoragePaths
 from backend.realtime.factory import RealtimeProviderFactory, build_debug_mock_capture_bridge
@@ -38,6 +40,7 @@ class AppRuntime:
     realtime_provider: RealtimeProviderFactory
     vision_memory_runtime: VisionMemoryRuntime | None
     realtime_tooling_runtime: RealtimeToolingRuntime | None
+    rate_limiter: SlidingWindowRateLimiter
     storage_bootstrap_result: StorageBootstrapResult | None = field(
         default=None,
         init=False,
@@ -51,6 +54,7 @@ class AppRuntime:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "AppRuntime":
+        settings.validate_production_posture()
         storage_paths = RuntimeStoragePaths(
             data_root=settings.backend_data_dir,
             user_root=settings.backend_data_dir / "user",
@@ -89,6 +93,7 @@ class AppRuntime:
             realtime_provider=RealtimeProviderFactory(settings=settings),
             vision_memory_runtime=vision_memory_runtime,
             realtime_tooling_runtime=realtime_tooling_runtime,
+            rate_limiter=SlidingWindowRateLimiter(),
         )
 
     def bootstrap_storage(self) -> StorageBootstrapResult:
@@ -109,6 +114,61 @@ class AppRuntime:
             await self.realtime_tooling_runtime.shutdown()
         if self.vision_memory_runtime is not None:
             await self.vision_memory_runtime.shutdown()
+
+    async def limit_ws_connect(self, *, client_ip: str) -> RateLimitDecision:
+        ip_key = _rate_key(client_ip)
+        return await self.rate_limiter.allow(
+            key=f"ws_connect:ip:{ip_key}",
+            limit=self.settings.backend_rate_limit_ws_ip_max_attempts,
+            window_seconds=self.settings.backend_rate_limit_ws_window_seconds,
+            scope="ip",
+        )
+
+    async def limit_ws_session_activation(
+        self,
+        *,
+        client_ip: str,
+        session_id: str,
+    ) -> RateLimitDecision:
+        ip_key = _rate_key(client_ip)
+        session_key = _rate_key(session_id)
+        ip_decision = await self.rate_limiter.allow(
+            key=f"ws_activate:ip:{ip_key}",
+            limit=self.settings.backend_rate_limit_ws_ip_max_attempts,
+            window_seconds=self.settings.backend_rate_limit_ws_window_seconds,
+            scope="ip",
+        )
+        if not ip_decision.allowed:
+            return ip_decision
+        return await self.rate_limiter.allow(
+            key=f"ws_activate:session:{session_key}",
+            limit=self.settings.backend_rate_limit_ws_session_max_attempts,
+            window_seconds=self.settings.backend_rate_limit_ws_window_seconds,
+            scope="session",
+        )
+
+    async def limit_vision_frame_ingest(
+        self,
+        *,
+        client_ip: str,
+        session_id: str,
+    ) -> RateLimitDecision:
+        ip_key = _rate_key(client_ip)
+        session_key = _rate_key(session_id)
+        ip_decision = await self.rate_limiter.allow(
+            key=f"vision_ingest:ip:{ip_key}",
+            limit=self.settings.backend_rate_limit_vision_ip_max_requests,
+            window_seconds=self.settings.backend_rate_limit_vision_window_seconds,
+            scope="ip",
+        )
+        if not ip_decision.allowed:
+            return ip_decision
+        return await self.rate_limiter.allow(
+            key=f"vision_ingest:session:{session_key}",
+            limit=self.settings.backend_rate_limit_vision_session_max_requests,
+            window_seconds=self.settings.backend_rate_limit_vision_window_seconds,
+            scope="session",
+        )
 
     def make_session_bridge(
         self,
@@ -154,3 +214,12 @@ def get_app_runtime(app: Any) -> AppRuntime:
     if isinstance(runtime, AppRuntime):
         return runtime
     raise RuntimeError("App runtime is not initialized")
+
+
+def _rate_key(raw_value: str) -> str:
+    normalized = raw_value.strip()
+    if not normalized:
+        return "unknown"
+    if len(normalized) <= 64:
+        return normalized
+    return sha1(normalized.encode("utf-8")).hexdigest()

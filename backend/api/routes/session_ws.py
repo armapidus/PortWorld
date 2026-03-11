@@ -21,9 +21,27 @@ logger = logging.getLogger(__name__)
 _connection_ids = itertools.count(1)
 
 
+def _client_ip_from_websocket(websocket: WebSocket) -> str:
+    client = websocket.client
+    if client is None:
+        return "unknown"
+    host = (client.host or "").strip()
+    return host or "unknown"
+
+
 @router.websocket("/ws/session")
 async def ws_session(websocket: WebSocket) -> None:
     runtime = get_app_runtime(websocket.app)
+    client_ip = _client_ip_from_websocket(websocket)
+    connect_rate_decision = await runtime.limit_ws_connect(client_ip=client_ip)
+    if not connect_rate_decision.allowed:
+        logger.warning(
+            "Rejected rate-limited websocket connect ip=%s retry_after_seconds=%s",
+            client_ip,
+            connect_rate_decision.retry_after_seconds,
+        )
+        await websocket.close(code=1013, reason="Rate limited")
+        return
     if await reject_ws_if_unauthorized(websocket=websocket, settings=runtime.settings):
         logger.warning("Rejected unauthorized websocket session request")
         return
@@ -148,6 +166,34 @@ async def ws_session(websocket: WebSocket) -> None:
             )
             if envelope is None:
                 continue
+
+            if envelope.type == "session.activate":
+                activation_rate_decision = await runtime.limit_ws_session_activation(
+                    client_ip=client_ip,
+                    session_id=envelope.session_id,
+                )
+                if not activation_rate_decision.allowed:
+                    logger.warning(
+                        "Rate-limited session.activate ip=%s session=%s scope=%s retry_after_seconds=%s",
+                        client_ip,
+                        envelope.session_id,
+                        activation_rate_decision.scope,
+                        activation_rate_decision.retry_after_seconds,
+                    )
+                    await send_control(
+                        "error",
+                        {
+                            "code": "RATE_LIMITED",
+                            "message": (
+                                "Session activation rate limit exceeded "
+                                f"for {activation_rate_decision.scope}"
+                            ),
+                            "retriable": True,
+                            "retry_after_seconds": activation_rate_decision.retry_after_seconds,
+                        },
+                        fallback_session_id=envelope.session_id,
+                    )
+                    continue
 
             dispatch_result = await dispatch_control_envelope(
                 envelope=envelope,

@@ -20,6 +20,14 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _client_ip_from_request(request: Request) -> str:
+    client = request.client
+    if client is None:
+        return "unknown"
+    host = (client.host or "").strip()
+    return host or "unknown"
+
+
 def _sanitize_path_component(value: str) -> str:
     sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip())
     return sanitized or "unknown"
@@ -66,6 +74,20 @@ def _estimate_decoded_frame_bytes(frame_b64: str) -> int:
 async def vision_frame(request: Request, payload: VisionFramePayload) -> dict[str, str]:
     runtime = get_app_runtime(request.app)
     require_http_bearer_auth(request=request, settings=runtime.settings)
+    client_ip = _client_ip_from_request(request)
+    ingest_rate_decision = await runtime.limit_vision_frame_ingest(
+        client_ip=client_ip,
+        session_id=payload.session_id,
+    )
+    if not ingest_rate_decision.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "Vision ingest rate limit exceeded "
+                f"for {ingest_rate_decision.scope}."
+            ),
+            headers={"Retry-After": str(ingest_rate_decision.retry_after_seconds)},
+        )
     estimated_frame_bytes = _estimate_decoded_frame_bytes(payload.frame_b64)
     if estimated_frame_bytes > runtime.settings.backend_max_vision_frame_bytes:
         raise HTTPException(
