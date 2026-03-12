@@ -7,8 +7,6 @@
 backend/.env
 backend/.venv/
 backend/.pytest_cache/
-backend/debug/
-backend/devtools/
 backend/scripts/
 backend/var/
 
