@@ -9,7 +9,7 @@ from backend.bootstrap.runtime import RuntimeStoragePaths, build_runtime_depende
 from backend.core.rate_limit import RateLimitDecision, SlidingWindowRateLimiter
 from backend.core.settings import Settings
 from backend.core.storage import BackendStorage, StorageBootstrapResult
-from backend.realtime.factory import RealtimeProviderFactory, build_debug_mock_capture_bridge
+from backend.realtime.factory import RealtimeProviderFactory
 from backend.tools.runtime import RealtimeToolingRuntime
 from backend.vision.runtime import VisionMemoryRuntime
 
@@ -138,11 +138,6 @@ class AppRuntime:
         send_control: Any,
         send_server_audio: Any,
     ) -> "BridgeBinding":
-        if self.settings.backend_debug_mock_capture_mode:
-            return build_debug_mock_capture_bridge(
-                settings=self.settings,
-                session_id=session_id,
-            )
         return self.realtime_provider.build_session_bridge(
             session_id=session_id,
             send_control=send_control,

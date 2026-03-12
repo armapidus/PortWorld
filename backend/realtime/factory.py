@@ -83,28 +83,6 @@ class BridgeBinding:
         self._record_ref["record"] = record
 
 
-def build_debug_mock_capture_bridge(
-    *,
-    settings: Settings,
-    session_id: str,
-) -> BridgeBinding:
-    try:
-        from backend.debug.mock_capture import IOSMockCaptureBridge
-    except ImportError as exc:
-        raise RuntimeError(
-            "BACKEND_DEBUG_MOCK_CAPTURE_MODE requires the optional backend.debug package, "
-            "which is not included in the production container image."
-        ) from exc
-
-    record_ref: dict[str, SessionRecord | None] = {"record": None}
-    bridge = IOSMockCaptureBridge(
-        session_id=session_id,
-        dump_input_audio_enabled=settings.backend_debug_dump_input_audio,
-        dump_input_audio_dir=str(settings.backend_debug_dump_input_audio_dir),
-    )
-    return BridgeBinding(bridge=bridge, _record_ref=record_ref)
-
-
 @dataclass(frozen=True, slots=True)
 class RealtimeProviderFactory:
     settings: Settings

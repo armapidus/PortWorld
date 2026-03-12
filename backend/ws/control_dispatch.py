@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import base64
-import binascii
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -163,12 +161,13 @@ async def dispatch_control_envelope(
         return ControlDispatchResult(active_session=active_session, handled=True)
 
     if envelope.type == "client.audio":
-        await _handle_text_audio_fallback(
-            envelope=envelope,
-            active_session=active_session,
-            send_control=send_control,
-            telemetry=telemetry,
-            settings=settings,
+        await send_control(
+            "error",
+            {
+                "code": "UNSUPPORTED_CLIENT_AUDIO",
+                "message": "client.audio is not supported; send binary client audio frames",
+                "retriable": False,
+            },
         )
         return ControlDispatchResult(active_session=active_session, handled=True)
 
@@ -182,80 +181,3 @@ async def dispatch_control_envelope(
         return ControlDispatchResult(active_session=active_session, handled=True)
 
     return ControlDispatchResult(active_session=active_session, handled=False)
-
-
-async def _handle_text_audio_fallback(
-    *,
-    envelope: IOSEnvelope,
-    active_session: SessionRecord | None,
-    send_control: SendControl,
-    telemetry: SessionTelemetry,
-    settings: Settings,
-) -> None:
-    if active_session is None:
-        logger.info("Ignoring client.audio before session.activate")
-        return
-    if not settings.backend_allow_text_audio_fallback:
-        await send_control(
-            "error",
-            {
-                "code": "TEXT_AUDIO_FALLBACK_DISABLED",
-                "message": "client.audio fallback is disabled on this server",
-                "retriable": False,
-            },
-        )
-        return
-
-    payload = envelope.payload if isinstance(envelope.payload, dict) else {}
-    audio_b64 = payload.get("audio_b64")
-    if audio_b64 is None:
-        audio_b64 = payload.get("audio")
-    if not isinstance(audio_b64, str):
-        await send_control(
-            "error",
-            {
-                "code": "INVALID_CLIENT_AUDIO",
-                "message": "client.audio requires payload.audio_b64",
-                "retriable": False,
-            },
-        )
-        return
-    try:
-        payload_bytes = base64.b64decode(audio_b64, validate=True)
-    except (binascii.Error, ValueError):
-        await send_control(
-            "error",
-            {
-                "code": "INVALID_CLIENT_AUDIO",
-                "message": "client.audio payload is not valid base64",
-                "retriable": False,
-            },
-        )
-        return
-
-    if not payload_bytes:
-        return
-
-    ack_payload = telemetry.record_text_audio_frame(
-        active_session=active_session,
-        payload_bytes=payload_bytes,
-    )
-    if ack_payload is not None:
-        await send_control("transport.uplink.ack", ack_payload)
-
-    try:
-        await active_session.bridge.append_client_audio(payload_bytes)
-    except RealtimeClientError as exc:
-        logger.warning(
-            "Failed forwarding client audio session=%s: %s",
-            active_session.session_id,
-            exc,
-        )
-        await send_control(
-            "error",
-            {
-                "code": "UPSTREAM_SEND_FAILED",
-                "message": "Failed to forward audio upstream",
-                "retriable": True,
-            },
-        )

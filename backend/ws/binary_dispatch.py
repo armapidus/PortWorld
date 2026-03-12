@@ -3,11 +3,9 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 
-from backend.core.settings import Settings
 from backend.realtime.client import RealtimeClientError
 from backend.ws.frame_codec import (
     CLIENT_AUDIO_FRAME_TYPE,
-    CLIENT_PROBE_FRAME_TYPE,
     decode_frame,
 )
 from backend.ws.session_registry import SessionRecord
@@ -25,7 +23,6 @@ async def dispatch_binary_frame(
     send_control: SendControl,
     telemetry: SessionTelemetry,
     connection_id: int,
-    settings: Settings,
 ) -> bool:
     if active_session is None:
         logger.info("Ignoring binary frame before session.activate")
@@ -50,31 +47,6 @@ async def dispatch_binary_frame(
         return True
 
     if frame_type != CLIENT_AUDIO_FRAME_TYPE:
-        if frame_type == CLIENT_PROBE_FRAME_TYPE:
-            if not settings.backend_enable_devtools_protocol:
-                logger.info(
-                    "Ignoring disabled probe frame connection_id=%s session=%s",
-                    connection_id,
-                    active_session.session_id,
-                )
-                await send_control(
-                    "error",
-                    {
-                        "code": "DEVTOOLS_PROTOCOL_DISABLED",
-                        "message": "Probe frames are disabled on this server",
-                        "retriable": False,
-                    },
-                )
-                return True
-            await send_control(
-                "transport.uplink.ack",
-                telemetry.record_probe_frame(
-                    active_session=active_session,
-                    payload_bytes=payload_bytes,
-                    frame_ts_ms=frame_ts_ms,
-                ),
-            )
-            return True
         logger.info(
             "Ignoring unsupported client frame type=%s connection_id=%s session=%s",
             frame_type,

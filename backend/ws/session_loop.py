@@ -40,7 +40,6 @@ async def process_next_websocket_message(
             send_control=send_control,
             telemetry=context.telemetry,
             connection_id=context.connection_id,
-            settings=context.runtime.settings,
         )
         if handled:
             return True

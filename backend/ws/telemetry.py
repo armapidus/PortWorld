@@ -14,7 +14,6 @@ class SessionTelemetry:
     connection_id: int
     uplink_ack_every_n_frames: int
     did_log_first_client_audio_frame: bool = False
-    did_warn_text_audio_fallback_deprecated: bool = False
     did_emit_uplink_ack: bool = False
     uplink_ack_count: int = 0
     client_audio_frame_count: int = 0
@@ -37,28 +36,6 @@ class SessionTelemetry:
             len(message["text"]) if has_text_payload else 0,
             len(message["bytes"]) if has_bytes_payload else 0,
         )
-
-    def record_probe_frame(
-        self,
-        *,
-        active_session: SessionRecord,
-        payload_bytes: bytes,
-        frame_ts_ms: int,
-    ) -> dict[str, int | bool]:
-        logger.debug(
-            "Client probe frame received connection_id=%s session=%s bytes=%s ts_ms=%s",
-            self.connection_id,
-            active_session.session_id,
-            len(payload_bytes),
-            frame_ts_ms,
-        )
-        self.did_emit_uplink_ack = True
-        self.uplink_ack_count += 1
-        return {
-            "frames_received": self.client_audio_frame_count,
-            "bytes_received": self.client_audio_total_bytes,
-            "probe_acknowledged": True,
-        }
 
     def record_empty_binary_frame(
         self,
@@ -103,66 +80,17 @@ class SessionTelemetry:
         ):
             if self.client_audio_frame_count == 1:
                 logger.debug(
-                    "WS_UPLINK_ACK_PREP connection_id=%s session=%s frames_received=%s bytes_received=%s probe_acknowledged=%s",
+                    "WS_UPLINK_ACK_PREP connection_id=%s session=%s frames_received=%s bytes_received=%s",
                     self.connection_id,
                     active_session.session_id,
                     self.client_audio_frame_count,
                     self.client_audio_total_bytes,
-                    False,
                 )
             self.did_emit_uplink_ack = True
             self.uplink_ack_count += 1
             return {
                 "frames_received": self.client_audio_frame_count,
                 "bytes_received": self.client_audio_total_bytes,
-                "probe_acknowledged": False,
-            }
-        return None
-
-    def record_text_audio_frame(
-        self,
-        *,
-        active_session: SessionRecord,
-        payload_bytes: bytes,
-    ) -> dict[str, int | bool] | None:
-        if not self.did_warn_text_audio_fallback_deprecated:
-            self.did_warn_text_audio_fallback_deprecated = True
-            logger.warning(
-                "Deprecated client.audio text/base64 fallback used connection_id=%s session=%s. Use binary websocket audio frames instead.",
-                self.connection_id,
-                active_session.session_id,
-            )
-
-        self.client_audio_frame_count += 1
-        self.client_audio_total_bytes += len(payload_bytes)
-        if not self.did_log_first_client_audio_frame:
-            self.did_log_first_client_audio_frame = True
-            logger.debug(
-                "First client audio frame received connection_id=%s session=%s bytes=%s total_bytes=%s mode=text_base64",
-                self.connection_id,
-                active_session.session_id,
-                len(payload_bytes),
-                self.client_audio_total_bytes,
-            )
-        elif self.client_audio_frame_count % self.uplink_ack_every_n_frames == 0:
-            logger.debug(
-                "Client audio frame count connection_id=%s session=%s frames=%s total_bytes=%s mode=text_base64",
-                self.connection_id,
-                active_session.session_id,
-                self.client_audio_frame_count,
-                self.client_audio_total_bytes,
-            )
-
-        if (
-            self.client_audio_frame_count == 1
-            or self.client_audio_frame_count % self.uplink_ack_every_n_frames == 0
-        ):
-            self.did_emit_uplink_ack = True
-            self.uplink_ack_count += 1
-            return {
-                "frames_received": self.client_audio_frame_count,
-                "bytes_received": self.client_audio_total_bytes,
-                "probe_acknowledged": False,
             }
         return None
 

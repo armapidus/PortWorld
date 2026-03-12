@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from importlib.util import find_spec
 from pathlib import Path
 
 from backend.core.settings import Settings
@@ -99,7 +98,6 @@ def build_runtime_storage_paths(settings: Settings) -> RuntimeStoragePaths:
 
 def build_runtime_dependencies(settings: Settings) -> RuntimeDependencies:
     settings.validate_production_posture()
-    _validate_optional_debug_packaging(settings)
     storage_paths, storage = build_backend_storage(settings)
     realtime_provider_factory = RealtimeProviderFactory(settings=settings)
     realtime_provider_factory.validate_startup_configuration()
@@ -165,19 +163,4 @@ def check_runtime_configuration(settings: Settings) -> ConfigCheckResult:
         realtime_tooling_enabled=settings.realtime_tooling_enabled,
         web_search_provider=web_search_provider,
         warnings=tuple(warnings),
-    )
-
-
-def _validate_optional_debug_packaging(settings: Settings) -> None:
-    if not settings.backend_debug_mock_capture_mode:
-        return
-    try:
-        spec = find_spec("backend.debug.mock_capture")
-    except ModuleNotFoundError:
-        spec = None
-    if spec is not None:
-        return
-    raise RuntimeError(
-        "BACKEND_DEBUG_MOCK_CAPTURE_MODE=true requires the optional backend.debug package, "
-        "which is excluded from the production container image."
     )

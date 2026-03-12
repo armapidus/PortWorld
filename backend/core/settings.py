@@ -80,14 +80,11 @@ class Settings:
     openai_realtime_include_turn_detection: bool
     openai_realtime_enable_manual_turn_fallback: bool
     openai_realtime_manual_turn_fallback_delay_ms: int
-    backend_allow_text_audio_fallback: bool
-    backend_enable_devtools_protocol: bool
     backend_uplink_ack_every_n_frames: int
     backend_data_dir: Path
     backend_sqlite_path: Path
     backend_debug_dump_input_audio: bool
     backend_debug_dump_input_audio_dir: Path
-    backend_debug_mock_capture_mode: bool
     backend_debug_trace_ws_messages: bool
     backend_max_vision_request_bytes: int
     backend_max_vision_frame_bytes: int
@@ -173,14 +170,6 @@ class Settings:
                 default=900,
                 minimum=100,
             ),
-            backend_allow_text_audio_fallback=_parse_bool_env(
-                "BACKEND_ALLOW_TEXT_AUDIO_FALLBACK",
-                default=False,
-            ),
-            backend_enable_devtools_protocol=_parse_bool_env(
-                "BACKEND_ENABLE_DEVTOOLS_PROTOCOL",
-                default=False,
-            ),
             backend_uplink_ack_every_n_frames=_parse_int_env(
                 "BACKEND_UPLINK_ACK_EVERY_N_FRAMES",
                 default=20,
@@ -193,10 +182,6 @@ class Settings:
                 default=False,
             ),
             backend_debug_dump_input_audio_dir=backend_debug_dump_input_audio_dir,
-            backend_debug_mock_capture_mode=_parse_bool_env(
-                "BACKEND_DEBUG_MOCK_CAPTURE_MODE",
-                default=False,
-            ),
             backend_debug_trace_ws_messages=_parse_bool_env(
                 "BACKEND_DEBUG_TRACE_WS_MESSAGES",
                 default=False,
