@@ -37,6 +37,8 @@ def _serve(args: argparse.Namespace) -> int:
         host=settings.host,
         port=settings.port,
         log_level=settings.log_level.lower(),
+        proxy_headers=True,
+        forwarded_allow_ips=",".join(settings.backend_forwarded_allow_ips),
     )
     return 0
 
