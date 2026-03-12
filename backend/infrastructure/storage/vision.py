@@ -201,9 +201,15 @@ class VisionFrameStorageMixin:
                             None
                             if error_details is None
                             else (
-                                str(existing["error_details_json"])
-                                if error_details is _UNSET and existing["error_details_json"] is not None
-                                else None
+                                (
+                                    str(existing["error_details_json"])
+                                    if (
+                                        error_details is _UNSET
+                                        and error_code is not None
+                                        and existing["error_details_json"] is not None
+                                    )
+                                    else None
+                                )
                             )
                         )
                     ),
