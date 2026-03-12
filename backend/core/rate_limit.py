@@ -5,7 +5,10 @@ from collections import deque
 from dataclasses import dataclass
 from math import ceil
 from time import monotonic
-from typing import Deque
+from typing import TYPE_CHECKING, Deque
+
+if TYPE_CHECKING:
+    from fastapi import Request
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,3 +118,20 @@ class SlidingWindowRateLimiter:
     def _prune_expired_events(*, bucket: _RateBucket, oldest_allowed: float) -> None:
         while bucket.events and bucket.events[0] <= oldest_allowed:
             bucket.events.popleft()
+
+
+async def enforce_http_rate_limit(request: "Request", endpoint: str) -> None:
+    from fastapi import HTTPException
+
+    from backend.core.http import client_ip_from_connection
+    from backend.core.runtime import get_app_runtime
+
+    runtime = get_app_runtime(request.app)
+    client_ip = client_ip_from_connection(request)
+    decision = await runtime.limit_http_request(client_ip=client_ip, endpoint=endpoint)
+    if not decision.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded for {decision.scope}.",
+            headers={"Retry-After": str(decision.retry_after_seconds)},
+        )
