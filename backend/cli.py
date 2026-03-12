@@ -92,6 +92,19 @@ def _export_memory(args: argparse.Namespace) -> int:
     return 0
 
 
+def _migrate_storage_layout(_: argparse.Namespace) -> int:
+    _, storage = build_backend_storage(Settings.from_env())
+    storage.bootstrap()
+    result = storage.migrate_legacy_storage_layout()
+    _json_dump(
+        {
+            "status": "ok",
+            **result,
+        }
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="PortWorld backend operator CLI.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -125,6 +138,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     export_parser.add_argument("--output", default=None)
     export_parser.set_defaults(handler=_export_memory)
+
+    migrate_parser = subparsers.add_parser(
+        "migrate-storage-layout",
+        help="Migrate legacy session/vision directories to hashed storage paths.",
+    )
+    migrate_parser.set_defaults(handler=_migrate_storage_layout)
 
     return parser
 
