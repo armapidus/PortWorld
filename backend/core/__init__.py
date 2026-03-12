@@ -1,3 +1,3 @@
-from backend.core.settings import Settings, settings
+from backend.core.settings import Settings
 
-__all__ = ["Settings", "settings"]
+__all__ = ["Settings"]

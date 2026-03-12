@@ -12,7 +12,7 @@ from backend.bootstrap.runtime import (
     build_backend_storage,
     check_runtime_configuration,
 )
-from backend.core.settings import Settings
+from backend.core.settings import Settings, load_environment_files
 from backend.core.storage import now_ms
 
 
@@ -130,6 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_environment_files()
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

@@ -16,7 +16,7 @@ from backend.api.routes.profile import router as profile_router
 from backend.api.routes.session_ws import router as session_ws_router
 from backend.api.routes.vision import router as vision_router
 from backend.core.constants import SERVICE_NAME
-from backend.core.settings import Settings
+from backend.core.settings import Settings, load_environment_files
 from backend.core.runtime import AppRuntime
 
 logger = logging.getLogger(__name__)
@@ -150,6 +150,7 @@ def create_app_from_settings(settings: Settings) -> FastAPI:
 
 
 def create_app() -> FastAPI:
+    load_environment_files()
     return create_app_from_settings(Settings.from_env())
 
 

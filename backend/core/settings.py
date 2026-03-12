@@ -5,12 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
+
 from backend.memory.lifecycle import DEFAULT_SESSION_MEMORY_RETENTION_DAYS
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 _BACKEND_ENV_PATH = _BACKEND_ROOT / ".env"
-load_dotenv(dotenv_path=_BACKEND_ENV_PATH)
-load_dotenv()
 
 
 DEFAULT_INSTRUCTIONS = "You are a concise assistant. Keep answers short, clear, and practical."
@@ -18,6 +17,11 @@ DEFAULT_INSTRUCTIONS = "You are a concise assistant. Keep answers short, clear, 
 
 class MissingOpenAIAPIKeyError(RuntimeError):
     pass
+
+
+def load_environment_files() -> None:
+    load_dotenv(dotenv_path=_BACKEND_ENV_PATH)
+    load_dotenv()
 
 
 def _get_env(*names: str) -> str | None:
@@ -124,205 +128,15 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        origins = _parse_csv_env("CORS_ORIGINS", default="*")
-        allowed_hosts = _parse_csv_env("BACKEND_ALLOWED_HOSTS", default="*")
-        forwarded_allow_ips = _parse_csv_env(
-            "BACKEND_FORWARDED_ALLOW_IPS",
-            default="127.0.0.1,::1",
-        )
         backend_profile = (_get_env("BACKEND_PROFILE") or "development").strip().lower()
-        enable_ip_rate_limits_default = backend_profile in {"prod", "production"}
-        backend_data_dir = Path(_get_env("BACKEND_DATA_DIR") or "backend/var")
-        backend_sqlite_path = Path(
-            _get_env("BACKEND_SQLITE_PATH") or str(backend_data_dir / "portworld.db")
-        )
-        backend_debug_dump_input_audio_dir = Path(
-            _get_env("BACKEND_DEBUG_DUMP_INPUT_AUDIO_DIR")
-            or str(backend_data_dir / "debug_audio")
-        )
-
         return cls(
-            openai_api_key=os.getenv("OPENAI_API_KEY"),
-            mistral_api_key=os.getenv("MISTRAL_API_KEY"),
-            mistral_base_url=_get_env("MISTRAL_BASE_URL"),
-            vision_provider_api_key=os.getenv("VISION_PROVIDER_API_KEY"),
-            vision_provider_base_url=_get_env("VISION_PROVIDER_BASE_URL"),
-            tavily_api_key=os.getenv("TAVILY_API_KEY"),
-            tavily_base_url=_get_env("TAVILY_BASE_URL"),
-            backend_bearer_token=(_get_env("BACKEND_BEARER_TOKEN") or "").strip()
-            or None,
-            realtime_provider=(_get_env("REALTIME_PROVIDER") or "openai").strip().lower(),
-            openai_realtime_model=os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime"),
-            openai_realtime_voice=os.getenv("OPENAI_REALTIME_VOICE", "ash"),
-            openai_realtime_instructions=os.getenv(
-                "OPENAI_REALTIME_INSTRUCTIONS", DEFAULT_INSTRUCTIONS
-            ),
-            openai_realtime_include_turn_detection=_parse_bool_env(
-                "OPENAI_REALTIME_INCLUDE_TURN_DETECTION",
-                default=True,
-            ),
-            openai_realtime_enable_manual_turn_fallback=_parse_bool_env(
-                "OPENAI_REALTIME_ENABLE_MANUAL_TURN_FALLBACK",
-                default=True,
-            ),
-            openai_realtime_manual_turn_fallback_delay_ms=_parse_int_env(
-                "OPENAI_REALTIME_MANUAL_TURN_FALLBACK_DELAY_MS",
-                default=900,
-                minimum=100,
-            ),
-            backend_uplink_ack_every_n_frames=_parse_int_env(
-                "BACKEND_UPLINK_ACK_EVERY_N_FRAMES",
-                default=20,
-                minimum=1,
-            ),
-            backend_data_dir=backend_data_dir,
-            backend_sqlite_path=backend_sqlite_path,
-            backend_debug_dump_input_audio=_parse_bool_env(
-                "BACKEND_DEBUG_DUMP_INPUT_AUDIO",
-                default=False,
-            ),
-            backend_debug_dump_input_audio_dir=backend_debug_dump_input_audio_dir,
-            backend_debug_trace_ws_messages=_parse_bool_env(
-                "BACKEND_DEBUG_TRACE_WS_MESSAGES",
-                default=False,
-            ),
-            backend_max_vision_request_bytes=_parse_int_env(
-                "BACKEND_MAX_VISION_REQUEST_BYTES",
-                default=4_000_000,
-                minimum=1,
-            ),
-            backend_max_vision_frame_bytes=_parse_int_env(
-                "BACKEND_MAX_VISION_FRAME_BYTES",
-                default=2_500_000,
-                minimum=1,
-            ),
-            backend_session_memory_retention_days=_parse_int_env(
-                "BACKEND_SESSION_MEMORY_RETENTION_DAYS",
-                default=DEFAULT_SESSION_MEMORY_RETENTION_DAYS,
-                minimum=1,
-            ),
-            vision_memory_enabled=_parse_bool_env(
-                "VISION_MEMORY_ENABLED",
-                default=False,
-            ),
-            vision_memory_provider=(
-                _get_env("VISION_MEMORY_PROVIDER") or "mistral"
-            ).strip().lower(),
-            vision_memory_model=(
-                _get_env("VISION_MEMORY_MODEL") or "ministral-3b-2512"
-            ).strip(),
-            vision_short_term_window_seconds=_parse_int_env(
-                "VISION_SHORT_TERM_WINDOW_SECONDS",
-                default=30,
-                minimum=1,
-            ),
-            vision_min_analysis_gap_seconds=_parse_int_env(
-                "VISION_MIN_ANALYSIS_GAP_SECONDS",
-                default=3,
-                minimum=1,
-            ),
-            vision_scene_change_hamming_threshold=_parse_int_env(
-                "VISION_SCENE_CHANGE_HAMMING_THRESHOLD",
-                default=12,
-                minimum=1,
-            ),
-            vision_provider_max_rps=_parse_int_env(
-                "VISION_PROVIDER_MAX_RPS",
-                default=1,
-                minimum=1,
-            ),
-            vision_analysis_heartbeat_seconds=_parse_int_env(
-                "VISION_ANALYSIS_HEARTBEAT_SECONDS",
-                default=15,
-                minimum=1,
-            ),
-            vision_provider_backoff_initial_seconds=_parse_int_env(
-                "VISION_PROVIDER_BACKOFF_INITIAL_SECONDS",
-                default=5,
-                minimum=1,
-            ),
-            vision_provider_backoff_max_seconds=_parse_int_env(
-                "VISION_PROVIDER_BACKOFF_MAX_SECONDS",
-                default=60,
-                minimum=1,
-            ),
-            vision_deferred_candidate_ttl_seconds=_parse_int_env(
-                "VISION_DEFERRED_CANDIDATE_TTL_SECONDS",
-                default=10,
-                minimum=1,
-            ),
-            vision_session_rollup_interval_seconds=_parse_int_env(
-                "VISION_SESSION_ROLLUP_INTERVAL_SECONDS",
-                default=10,
-                minimum=1,
-            ),
-            vision_session_rollup_min_accepted_events=_parse_int_env(
-                "VISION_SESSION_ROLLUP_MIN_ACCEPTED_EVENTS",
-                default=5,
-                minimum=1,
-            ),
-            vision_debug_retain_raw_frames=_parse_bool_env(
-                "VISION_DEBUG_RETAIN_RAW_FRAMES",
-                default=False,
-            ),
-            realtime_tooling_enabled=_parse_bool_env(
-                "REALTIME_TOOLING_ENABLED",
-                default=False,
-            ),
-            realtime_tool_timeout_ms=_parse_int_env(
-                "REALTIME_TOOL_TIMEOUT_MS",
-                default=4000,
-                minimum=100,
-            ),
-            realtime_web_search_provider=(
-                _get_env("REALTIME_WEB_SEARCH_PROVIDER") or "tavily"
-            ).strip().lower(),
-            realtime_web_search_max_results=_parse_int_env(
-                "REALTIME_WEB_SEARCH_MAX_RESULTS",
-                default=3,
-                minimum=1,
-            ),
-            backend_profile=backend_profile,
-            backend_allowed_hosts=allowed_hosts,
-            backend_forwarded_allow_ips=forwarded_allow_ips,
-            backend_enable_ip_rate_limits=_parse_bool_env(
-                "BACKEND_ENABLE_IP_RATE_LIMITS",
-                default=enable_ip_rate_limits_default,
-            ),
-            backend_rate_limit_ws_ip_max_attempts=_parse_int_env(
-                "BACKEND_RATE_LIMIT_WS_IP_MAX_ATTEMPTS",
-                default=30,
-                minimum=1,
-            ),
-            backend_rate_limit_ws_session_max_attempts=_parse_int_env(
-                "BACKEND_RATE_LIMIT_WS_SESSION_MAX_ATTEMPTS",
-                default=6,
-                minimum=1,
-            ),
-            backend_rate_limit_ws_window_seconds=_parse_int_env(
-                "BACKEND_RATE_LIMIT_WS_WINDOW_SECONDS",
-                default=60,
-                minimum=1,
-            ),
-            backend_rate_limit_vision_ip_max_requests=_parse_int_env(
-                "BACKEND_RATE_LIMIT_VISION_IP_MAX_REQUESTS",
-                default=120,
-                minimum=1,
-            ),
-            backend_rate_limit_vision_session_max_requests=_parse_int_env(
-                "BACKEND_RATE_LIMIT_VISION_SESSION_MAX_REQUESTS",
-                default=60,
-                minimum=1,
-            ),
-            backend_rate_limit_vision_window_seconds=_parse_int_env(
-                "BACKEND_RATE_LIMIT_VISION_WINDOW_SECONDS",
-                default=60,
-                minimum=1,
-            ),
-            host=_get_env("HOST") or "0.0.0.0",
-            port=_parse_int_env("PORT", default=8080),
-            log_level=_get_env("LOG_LEVEL") or "INFO",
-            cors_origins=origins or ["*"],
+            **_load_credentials_settings(),
+            **_load_realtime_settings(),
+            **_load_storage_settings(),
+            **_load_vision_settings(),
+            **_load_tooling_settings(),
+            **_load_server_settings(backend_profile=backend_profile),
+            **_load_rate_limit_settings(backend_profile=backend_profile),
         )
 
     @property
@@ -379,4 +193,224 @@ class Settings:
         return bool((self.tavily_api_key or "").strip())
 
 
-settings = Settings.from_env()
+def _load_credentials_settings() -> dict[str, str | None]:
+    return {
+        "openai_api_key": os.getenv("OPENAI_API_KEY"),
+        "mistral_api_key": os.getenv("MISTRAL_API_KEY"),
+        "mistral_base_url": _get_env("MISTRAL_BASE_URL"),
+        "vision_provider_api_key": os.getenv("VISION_PROVIDER_API_KEY"),
+        "vision_provider_base_url": _get_env("VISION_PROVIDER_BASE_URL"),
+        "tavily_api_key": os.getenv("TAVILY_API_KEY"),
+        "tavily_base_url": _get_env("TAVILY_BASE_URL"),
+    }
+
+
+def _load_realtime_settings() -> dict[str, str | int | bool | None]:
+    return {
+        "backend_bearer_token": (_get_env("BACKEND_BEARER_TOKEN") or "").strip() or None,
+        "realtime_provider": (_get_env("REALTIME_PROVIDER") or "openai").strip().lower(),
+        "openai_realtime_model": os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime"),
+        "openai_realtime_voice": os.getenv("OPENAI_REALTIME_VOICE", "ash"),
+        "openai_realtime_instructions": os.getenv(
+            "OPENAI_REALTIME_INSTRUCTIONS",
+            DEFAULT_INSTRUCTIONS,
+        ),
+        "openai_realtime_include_turn_detection": _parse_bool_env(
+            "OPENAI_REALTIME_INCLUDE_TURN_DETECTION",
+            default=True,
+        ),
+        "openai_realtime_enable_manual_turn_fallback": _parse_bool_env(
+            "OPENAI_REALTIME_ENABLE_MANUAL_TURN_FALLBACK",
+            default=True,
+        ),
+        "openai_realtime_manual_turn_fallback_delay_ms": _parse_int_env(
+            "OPENAI_REALTIME_MANUAL_TURN_FALLBACK_DELAY_MS",
+            default=900,
+            minimum=100,
+        ),
+        "backend_uplink_ack_every_n_frames": _parse_int_env(
+            "BACKEND_UPLINK_ACK_EVERY_N_FRAMES",
+            default=20,
+            minimum=1,
+        ),
+    }
+
+
+def _load_storage_settings() -> dict[str, str | int | bool | Path]:
+    backend_data_dir = Path(_get_env("BACKEND_DATA_DIR") or "backend/var")
+    backend_sqlite_path = Path(
+        _get_env("BACKEND_SQLITE_PATH") or str(backend_data_dir / "portworld.db")
+    )
+    backend_debug_dump_input_audio_dir = Path(
+        _get_env("BACKEND_DEBUG_DUMP_INPUT_AUDIO_DIR") or str(backend_data_dir / "debug_audio")
+    )
+    return {
+        "backend_data_dir": backend_data_dir,
+        "backend_sqlite_path": backend_sqlite_path,
+        "backend_debug_dump_input_audio": _parse_bool_env(
+            "BACKEND_DEBUG_DUMP_INPUT_AUDIO",
+            default=False,
+        ),
+        "backend_debug_dump_input_audio_dir": backend_debug_dump_input_audio_dir,
+        "backend_debug_trace_ws_messages": _parse_bool_env(
+            "BACKEND_DEBUG_TRACE_WS_MESSAGES",
+            default=False,
+        ),
+        "backend_max_vision_request_bytes": _parse_int_env(
+            "BACKEND_MAX_VISION_REQUEST_BYTES",
+            default=4_000_000,
+            minimum=1,
+        ),
+        "backend_max_vision_frame_bytes": _parse_int_env(
+            "BACKEND_MAX_VISION_FRAME_BYTES",
+            default=2_500_000,
+            minimum=1,
+        ),
+        "backend_session_memory_retention_days": _parse_int_env(
+            "BACKEND_SESSION_MEMORY_RETENTION_DAYS",
+            default=DEFAULT_SESSION_MEMORY_RETENTION_DAYS,
+            minimum=1,
+        ),
+    }
+
+
+def _load_vision_settings() -> dict[str, str | int | bool]:
+    return {
+        "vision_memory_enabled": _parse_bool_env(
+            "VISION_MEMORY_ENABLED",
+            default=False,
+        ),
+        "vision_memory_provider": (_get_env("VISION_MEMORY_PROVIDER") or "mistral").strip().lower(),
+        "vision_memory_model": (_get_env("VISION_MEMORY_MODEL") or "ministral-3b-2512").strip(),
+        "vision_short_term_window_seconds": _parse_int_env(
+            "VISION_SHORT_TERM_WINDOW_SECONDS",
+            default=30,
+            minimum=1,
+        ),
+        "vision_min_analysis_gap_seconds": _parse_int_env(
+            "VISION_MIN_ANALYSIS_GAP_SECONDS",
+            default=3,
+            minimum=1,
+        ),
+        "vision_scene_change_hamming_threshold": _parse_int_env(
+            "VISION_SCENE_CHANGE_HAMMING_THRESHOLD",
+            default=12,
+            minimum=1,
+        ),
+        "vision_provider_max_rps": _parse_int_env(
+            "VISION_PROVIDER_MAX_RPS",
+            default=1,
+            minimum=1,
+        ),
+        "vision_analysis_heartbeat_seconds": _parse_int_env(
+            "VISION_ANALYSIS_HEARTBEAT_SECONDS",
+            default=15,
+            minimum=1,
+        ),
+        "vision_provider_backoff_initial_seconds": _parse_int_env(
+            "VISION_PROVIDER_BACKOFF_INITIAL_SECONDS",
+            default=5,
+            minimum=1,
+        ),
+        "vision_provider_backoff_max_seconds": _parse_int_env(
+            "VISION_PROVIDER_BACKOFF_MAX_SECONDS",
+            default=60,
+            minimum=1,
+        ),
+        "vision_deferred_candidate_ttl_seconds": _parse_int_env(
+            "VISION_DEFERRED_CANDIDATE_TTL_SECONDS",
+            default=10,
+            minimum=1,
+        ),
+        "vision_session_rollup_interval_seconds": _parse_int_env(
+            "VISION_SESSION_ROLLUP_INTERVAL_SECONDS",
+            default=10,
+            minimum=1,
+        ),
+        "vision_session_rollup_min_accepted_events": _parse_int_env(
+            "VISION_SESSION_ROLLUP_MIN_ACCEPTED_EVENTS",
+            default=5,
+            minimum=1,
+        ),
+        "vision_debug_retain_raw_frames": _parse_bool_env(
+            "VISION_DEBUG_RETAIN_RAW_FRAMES",
+            default=False,
+        ),
+    }
+
+
+def _load_tooling_settings() -> dict[str, str | int | bool]:
+    return {
+        "realtime_tooling_enabled": _parse_bool_env(
+            "REALTIME_TOOLING_ENABLED",
+            default=False,
+        ),
+        "realtime_tool_timeout_ms": _parse_int_env(
+            "REALTIME_TOOL_TIMEOUT_MS",
+            default=4000,
+            minimum=100,
+        ),
+        "realtime_web_search_provider": (
+            _get_env("REALTIME_WEB_SEARCH_PROVIDER") or "tavily"
+        ).strip().lower(),
+        "realtime_web_search_max_results": _parse_int_env(
+            "REALTIME_WEB_SEARCH_MAX_RESULTS",
+            default=3,
+            minimum=1,
+        ),
+    }
+
+
+def _load_server_settings(*, backend_profile: str) -> dict[str, str | int | list[str]]:
+    return {
+        "backend_profile": backend_profile,
+        "backend_allowed_hosts": _parse_csv_env("BACKEND_ALLOWED_HOSTS", default="*"),
+        "backend_forwarded_allow_ips": _parse_csv_env(
+            "BACKEND_FORWARDED_ALLOW_IPS",
+            default="127.0.0.1,::1",
+        ),
+        "host": _get_env("HOST") or "0.0.0.0",
+        "port": _parse_int_env("PORT", default=8080),
+        "log_level": _get_env("LOG_LEVEL") or "INFO",
+        "cors_origins": _parse_csv_env("CORS_ORIGINS", default="*"),
+    }
+
+
+def _load_rate_limit_settings(*, backend_profile: str) -> dict[str, int | bool]:
+    enable_ip_rate_limits_default = backend_profile in {"prod", "production"}
+    return {
+        "backend_enable_ip_rate_limits": _parse_bool_env(
+            "BACKEND_ENABLE_IP_RATE_LIMITS",
+            default=enable_ip_rate_limits_default,
+        ),
+        "backend_rate_limit_ws_ip_max_attempts": _parse_int_env(
+            "BACKEND_RATE_LIMIT_WS_IP_MAX_ATTEMPTS",
+            default=30,
+            minimum=1,
+        ),
+        "backend_rate_limit_ws_session_max_attempts": _parse_int_env(
+            "BACKEND_RATE_LIMIT_WS_SESSION_MAX_ATTEMPTS",
+            default=6,
+            minimum=1,
+        ),
+        "backend_rate_limit_ws_window_seconds": _parse_int_env(
+            "BACKEND_RATE_LIMIT_WS_WINDOW_SECONDS",
+            default=60,
+            minimum=1,
+        ),
+        "backend_rate_limit_vision_ip_max_requests": _parse_int_env(
+            "BACKEND_RATE_LIMIT_VISION_IP_MAX_REQUESTS",
+            default=120,
+            minimum=1,
+        ),
+        "backend_rate_limit_vision_session_max_requests": _parse_int_env(
+            "BACKEND_RATE_LIMIT_VISION_SESSION_MAX_REQUESTS",
+            default=60,
+            minimum=1,
+        ),
+        "backend_rate_limit_vision_window_seconds": _parse_int_env(
+            "BACKEND_RATE_LIMIT_VISION_WINDOW_SECONDS",
+            default=60,
+            minimum=1,
+        ),
+    }
