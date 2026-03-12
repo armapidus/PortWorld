@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class AppRuntime:
     settings: Settings
     storage_paths: RuntimeStoragePaths
@@ -50,12 +50,17 @@ class AppRuntime:
             realtime_provider=dependencies.realtime_provider_factory,
             vision_memory_runtime=dependencies.vision_memory_runtime,
             realtime_tooling_runtime=dependencies.realtime_tooling_runtime,
-            rate_limiter=SlidingWindowRateLimiter(),
+            rate_limiter=SlidingWindowRateLimiter(
+                num_shards=64,
+                max_keys=50_000,
+                cleanup_interval_seconds=30,
+                min_idle_ttl_seconds=300,
+            ),
         )
 
     def bootstrap_storage(self) -> StorageBootstrapResult:
         result = self.storage.bootstrap()
-        object.__setattr__(self, "storage_bootstrap_result", result)
+        self.storage_bootstrap_result = result
         return result
 
     async def startup(self) -> None:
