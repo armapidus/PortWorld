@@ -551,6 +551,7 @@ Initial operator CLI:
 
 ```bash
 python3 -m backend.cli check-config
+python3 -m backend.cli check-config --full-readiness
 python3 -m backend.cli bootstrap-storage
 python3 -m backend.cli export-memory --output /tmp/portworld-memory-export.zip
 python3 -m backend.cli serve
@@ -565,6 +566,7 @@ Useful backend sanity checks:
 ```bash
 docker compose config
 python3 -m backend.cli check-config
+python3 -m backend.cli check-config --full-readiness
 curl http://127.0.0.1:8080/healthz
 curl -H "Authorization: Bearer <token>" http://127.0.0.1:8080/readyz
 python3 -m compileall backend
@@ -580,6 +582,7 @@ Dependency packaging:
 ## Notes
 
 - Missing `OPENAI_API_KEY` does not fail backend startup by itself. It fails when a realtime session actually needs OpenAI.
+- `python3 -m backend.cli check-config --full-readiness` is the strict operator preflight mode. It validates provider configuration and runs a storage bootstrap probe.
 - Unsupported `REALTIME_PROVIDER` values fail runtime construction and startup.
 - Visual memory is opt-in. It is enabled only when `VISION_MEMORY_ENABLED=true`.
 - Accepted visual observations are stored as derived events. Raw frames are deleted by default after processing.

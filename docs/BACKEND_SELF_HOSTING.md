@@ -67,11 +67,13 @@ Expected response:
 ```
 
 `GET /healthz` confirms process liveness only. It does not validate upstream provider credentials or provider readiness.
+Use `python3 -m backend.cli check-config --full-readiness` for a stricter preflight that includes provider validation and a storage bootstrap probe.
 
 Optional operator CLI commands from the repo root:
 
 ```bash
 python3 -m backend.cli check-config
+python3 -m backend.cli check-config --full-readiness
 python3 -m backend.cli bootstrap-storage
 python3 -m backend.cli export-memory --output /tmp/portworld-memory-export.zip
 ```
