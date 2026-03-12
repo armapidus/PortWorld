@@ -11,6 +11,51 @@ from backend.core.storage import MemoryExportArtifact, now_ms
 from backend.memory.lifecycle import MemoryExportManifest
 
 
+def _validated_arcname(*, artifact: MemoryExportArtifact) -> str:
+    raw_path = artifact.relative_path
+    if "\x00" in raw_path:
+        raise ValueError(
+            "Invalid memory export artifact path: null byte is not allowed "
+            f"artifact_kind={artifact.artifact_kind!r} session_id={artifact.session_id!r} "
+            f"relative_path={raw_path!r}"
+        )
+
+    candidate = raw_path.strip()
+    if not candidate:
+        raise ValueError(
+            "Invalid memory export artifact path: empty path is not allowed "
+            f"artifact_kind={artifact.artifact_kind!r} session_id={artifact.session_id!r} "
+            f"relative_path={raw_path!r}"
+        )
+    if "\\" in candidate:
+        raise ValueError(
+            "Invalid memory export artifact path: backslashes are not allowed "
+            f"artifact_kind={artifact.artifact_kind!r} session_id={artifact.session_id!r} "
+            f"relative_path={raw_path!r}"
+        )
+    if candidate.startswith("/"):
+        raise ValueError(
+            "Invalid memory export artifact path: absolute paths are not allowed "
+            f"artifact_kind={artifact.artifact_kind!r} session_id={artifact.session_id!r} "
+            f"relative_path={raw_path!r}"
+        )
+    if len(candidate) >= 2 and candidate[1] == ":" and candidate[0].isalpha():
+        raise ValueError(
+            "Invalid memory export artifact path: drive-prefixed paths are not allowed "
+            f"artifact_kind={artifact.artifact_kind!r} session_id={artifact.session_id!r} "
+            f"relative_path={raw_path!r}"
+        )
+
+    parts = candidate.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        raise ValueError(
+            "Invalid memory export artifact path: traversal or empty path segments are not allowed "
+            f"artifact_kind={artifact.artifact_kind!r} session_id={artifact.session_id!r} "
+            f"relative_path={raw_path!r}"
+        )
+    return "/".join(parts)
+
+
 def _build_export_manifest(
     *,
     artifacts: list[MemoryExportArtifact],
@@ -68,7 +113,7 @@ def write_memory_export_zip(
     try:
         with zipfile.ZipFile(export_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
             for artifact in artifacts:
-                archive.write(artifact.absolute_path, arcname=artifact.relative_path)
+                archive.write(artifact.absolute_path, arcname=_validated_arcname(artifact=artifact))
             archive.writestr(
                 "manifest.json",
                 json.dumps(asdict(manifest), ensure_ascii=True, indent=2) + "\n",

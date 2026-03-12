@@ -52,6 +52,8 @@ class ConfigCheckResult:
     vision_provider: str | None
     realtime_tooling_enabled: bool
     web_search_provider: str | None
+    check_mode: str
+    storage_bootstrap_probe: bool | None
     warnings: tuple[str, ...]
 
     def to_dict(self) -> dict[str, object]:
@@ -62,6 +64,8 @@ class ConfigCheckResult:
             "vision_provider": self.vision_provider,
             "realtime_tooling_enabled": self.realtime_tooling_enabled,
             "web_search_provider": self.web_search_provider,
+            "check_mode": self.check_mode,
+            "storage_bootstrap_probe": self.storage_bootstrap_probe,
             "warnings": list(self.warnings),
         }
 
@@ -133,9 +137,19 @@ def build_runtime_dependencies(settings: Settings) -> RuntimeDependencies:
     )
 
 
-def check_runtime_configuration(settings: Settings) -> ConfigCheckResult:
+def check_runtime_configuration(
+    settings: Settings,
+    *,
+    full_readiness: bool = False,
+) -> ConfigCheckResult:
     dependencies = build_runtime_dependencies(settings)
     warnings: list[str] = []
+    check_mode = "full_readiness" if full_readiness else "basic"
+    storage_bootstrap_probe: bool | None = None
+
+    if full_readiness:
+        dependencies.storage.bootstrap()
+        storage_bootstrap_probe = True
 
     dependencies.realtime_provider_factory.validate_configuration()
 
@@ -162,5 +176,7 @@ def check_runtime_configuration(settings: Settings) -> ConfigCheckResult:
         vision_provider=vision_provider,
         realtime_tooling_enabled=settings.realtime_tooling_enabled,
         web_search_provider=web_search_provider,
+        check_mode=check_mode,
+        storage_bootstrap_probe=storage_bootstrap_probe,
         warnings=tuple(warnings),
     )

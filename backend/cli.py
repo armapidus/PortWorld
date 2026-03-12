@@ -43,8 +43,11 @@ def _serve(args: argparse.Namespace) -> int:
     return 0
 
 
-def _check_config(_: argparse.Namespace) -> int:
-    result = check_runtime_configuration(Settings.from_env())
+def _check_config(args: argparse.Namespace) -> int:
+    result = check_runtime_configuration(
+        Settings.from_env(),
+        full_readiness=bool(args.full_readiness),
+    )
     _json_dump(result.to_dict())
     return 0
 
@@ -102,6 +105,11 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser = subparsers.add_parser(
         "check-config",
         help="Validate backend configuration and print a reproducible summary.",
+    )
+    check_parser.add_argument(
+        "--full-readiness",
+        action="store_true",
+        help="Run full readiness checks, including a storage bootstrap probe.",
     )
     check_parser.set_defaults(handler=_check_config)
 
