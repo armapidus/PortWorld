@@ -37,10 +37,6 @@ class AppRuntime:
     )
 
     @classmethod
-    def from_env(cls) -> "AppRuntime":
-        return cls.from_settings(Settings.from_env())
-
-    @classmethod
     def from_settings(cls, settings: Settings) -> "AppRuntime":
         dependencies = build_runtime_dependencies(settings)
         return cls(

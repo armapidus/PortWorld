@@ -43,15 +43,6 @@ EXPORTABLE_SESSION_ARTIFACT_KINDS: Final[tuple[str, ...]] = (
     "vision_routing_event_log",
 )
 
-PROFILE_ONBOARDING_FIELD_DESCRIPTIONS: Final[dict[str, str]] = {
-    "name": "User's preferred name.",
-    "job": "User's stable role or job title.",
-    "company": "User's company or organization when stable and relevant.",
-    "preferences": "Stable personal preferences expressed as short strings.",
-    "projects": "Recurring projects, domains, or areas of work.",
-}
-
-
 @dataclass(frozen=True, slots=True)
 class ProfileLifecycleMetadata:
     schema_version: str = PROFILE_SCHEMA_VERSION
@@ -67,15 +58,6 @@ class ProfileRecord:
     preferences: list[str] = field(default_factory=list)
     projects: list[str] = field(default_factory=list)
     metadata: ProfileLifecycleMetadata = field(default_factory=ProfileLifecycleMetadata)
-
-
-@dataclass(frozen=True, slots=True)
-class ProfileOnboardingPayload:
-    name: str | None = None
-    job: str | None = None
-    company: str | None = None
-    preferences: list[str] = field(default_factory=list)
-    projects: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,14 +88,6 @@ class SessionMemoryRetentionEligibility:
     reason: str
 
 
-@dataclass(frozen=True, slots=True)
-class ProfilePromotionCandidate:
-    source_kind: str
-    source_id: str
-    extracted_at_ms: int
-    fields: dict[str, str | list[str]]
-
-
 def allowed_profile_fields() -> tuple[str, ...]:
     return PROFILE_ALLOWLISTED_FIELDS
 
@@ -125,7 +99,6 @@ __all__ = [
     "PROFILE_ALLOWLISTED_FIELDS",
     "PROFILE_ARTIFACT_FILE_NAMES",
     "PROFILE_METADATA_KEY",
-    "PROFILE_ONBOARDING_FIELD_DESCRIPTIONS",
     "PROFILE_SCHEMA_VERSION",
     "SESSION_MEMORY_ARTIFACT_FILE_NAMES",
     "SESSION_MEMORY_JSON_FILE_NAME",
@@ -136,8 +109,6 @@ __all__ = [
     "VISION_ROUTING_EVENTS_LOG_FILE_NAME",
     "MemoryExportManifest",
     "ProfileLifecycleMetadata",
-    "ProfileOnboardingPayload",
-    "ProfilePromotionCandidate",
     "ProfileRecord",
     "SessionMemoryResetEligibility",
     "SessionMemoryRetentionEligibility",
