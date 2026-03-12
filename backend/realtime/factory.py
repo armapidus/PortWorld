@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Protocol
 
 from backend.core.settings import Settings
+from backend.realtime.contracts import BinarySender, EnvelopeSender
 from backend.tools.runtime import RealtimeToolingRuntime
 from backend.ws.session_registry import SessionBridge, SessionRecord
 
-ControlSender = Callable[..., Awaitable[None]]
-BinarySender = Callable[[int, int, bytes], Awaitable[None]]
+ControlSender = EnvelopeSender
 
 
 class RealtimeProviderBuilder(Protocol):

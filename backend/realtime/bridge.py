@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
-import json
 import logging
 import time
-from collections.abc import Awaitable, Callable
 from typing import Any
 
 from backend.debug.audio_dump import PCM16WavDumpWriter
@@ -14,19 +11,17 @@ from backend.realtime.client import (
     OpenAIRealtimeClient,
     RealtimeClientError,
 )
-from backend.tools.contracts import ToolCall
+from backend.realtime.bridge_audio import BridgeAudioMixin
+from backend.realtime.bridge_tool_dispatch import BridgeToolDispatchMixin
+from backend.realtime.contracts import BinarySender, EnvelopeSender
 from backend.tools.runtime import RealtimeToolingRuntime
 from backend.ws.contracts import now_ms
-from backend.ws.frame_codec import SERVER_AUDIO_FRAME_TYPE
 
 logger = logging.getLogger(__name__)
 SESSION_READY_EVENT_TYPES = {"session.created", "session.updated"}
 
-EnvelopeSender = Callable[[str, dict[str, Any]], Awaitable[None]]
-BinarySender = Callable[[int, int, bytes], Awaitable[None]]
 
-
-class IOSRealtimeBridge:
+class IOSRealtimeBridge(BridgeToolDispatchMixin, BridgeAudioMixin):
     """Relay between iOS websocket transport and OpenAI realtime websocket."""
 
     def __init__(
@@ -147,106 +142,6 @@ class IOSRealtimeBridge:
         self._audio_dump.close()
         with contextlib.suppress(RealtimeClientError):
             await self._upstream_client.close()
-
-    def _ensure_client_audio_sender_task(self) -> None:
-        task = self._client_audio_sender_task
-        if task is not None and not task.done():
-            return
-
-        self._client_audio_sender_task = asyncio.create_task(
-            self._run_client_audio_sender_loop(),
-            name=f"client_audio_sender:{self._session_id}",
-        )
-
-    def _enqueue_client_audio(self, payload_bytes: bytes) -> None:
-        while True:
-            try:
-                self._client_audio_queue.put_nowait(payload_bytes)
-                return
-            except asyncio.QueueFull:
-                try:
-                    self._client_audio_queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    logger.debug(
-                        "Client audio queue unexpectedly empty during overflow handling session=%s",
-                        self._session_id,
-                    )
-                    continue
-                else:
-                    self._client_audio_queue.task_done()
-
-                self._client_audio_dropped_oldest_count += 1
-                drop_count = self._client_audio_dropped_oldest_count
-                if (
-                    drop_count == 1
-                    or drop_count % self._client_audio_drop_log_step == 0
-                ):
-                    logger.warning(
-                        "Client audio queue overflow session=%s policy=drop_oldest dropped=%s queue_max=%s",
-                        self._session_id,
-                        drop_count,
-                        self._client_audio_queue.maxsize,
-                    )
-
-    async def _run_client_audio_sender_loop(self) -> None:
-        try:
-            while True:
-                payload_bytes = await self._client_audio_queue.get()
-                try:
-                    if payload_bytes is None:
-                        return
-                    await self._upstream_client.send_json(
-                        {
-                            "type": "input_audio_buffer.append",
-                            "audio": base64.b64encode(payload_bytes).decode("ascii"),
-                        }
-                    )
-                    self._client_audio_sent_count += 1
-                finally:
-                    self._client_audio_queue.task_done()
-        except asyncio.CancelledError:
-            raise
-        except RealtimeClientError as exc:
-            logger.warning(
-                "Client audio sender closed for %s: %s",
-                self._session_id,
-                exc,
-            )
-        except Exception:
-            logger.exception(
-                "Unexpected client audio sender failure for %s",
-                self._session_id,
-            )
-
-    async def _shutdown_client_audio_sender(self) -> None:
-        task = self._client_audio_sender_task
-        self._client_audio_sender_task = None
-        if task is None:
-            return
-
-        if not task.done():
-            enqueued_stop = False
-            while not enqueued_stop:
-                try:
-                    self._client_audio_queue.put_nowait(None)
-                    enqueued_stop = True
-                except asyncio.QueueFull:
-                    try:
-                        self._client_audio_queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        break
-                    else:
-                        self._client_audio_queue.task_done()
-                        self._client_audio_dropped_oldest_count += 1
-            try:
-                await asyncio.wait_for(task, timeout=1.0)
-            except asyncio.TimeoutError:
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
-        else:
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
 
     async def _interrupt_active_response(self, *, reason: str) -> None:
         response_id = self._current_response_id
@@ -384,251 +279,6 @@ class IOSRealtimeBridge:
             return
 
         logger.debug("Unhandled upstream event type=%s", event_type)
-
-    async def _on_tool_call_event(self, event: dict[str, Any]) -> None:
-        if self._tooling_runtime is None:
-            logger.warning(
-                "Ignoring tool call event without tooling runtime session=%s type=%s",
-                self._session_id,
-                event.get("type"),
-            )
-            return
-
-        call_id, item_id = self._extract_tool_call_dedupe_ids(event)
-        duplicate, dedupe_key = self._is_duplicate_tool_call_event(
-            call_id=call_id,
-            item_id=item_id,
-        )
-        if duplicate:
-            self._saw_duplicate_tool_call_event_for_turn = True
-            logger.warning(
-                "Ignoring duplicate tool call completion session=%s dedupe_key=%s event_type=%s",
-                self._session_id,
-                dedupe_key,
-                event.get("type"),
-            )
-            return
-        self._mark_tool_call_processed(call_id=call_id, item_id=item_id)
-
-        tool_call_or_error = self._extract_tool_call_or_error(event)
-        if isinstance(tool_call_or_error, dict):
-            await self._send_tool_error_output(
-                call_id=tool_call_or_error["call_id"],
-                tool_name=tool_call_or_error["tool_name"],
-                error_code=tool_call_or_error["error_code"],
-                error_message=tool_call_or_error["error_message"],
-            )
-            return
-
-        try:
-            tool_result = await self._tooling_runtime.execute(tool_call_or_error)
-        except Exception as exc:  # pragma: no cover - defensive fallback
-            logger.exception(
-                "Tool execution failed session=%s call_id=%s name=%s",
-                self._session_id,
-                tool_call_or_error.call_id,
-                tool_call_or_error.name,
-            )
-            await self._send_tool_error_output(
-                call_id=tool_call_or_error.call_id,
-                tool_name=tool_call_or_error.name,
-                error_code="TOOL_EXECUTION_FAILED",
-                error_message=str(exc) or "Tool execution failed",
-            )
-            return
-
-        await self._send_tool_output_and_continue(
-            call_id=tool_result.call_id,
-            output=tool_result.to_output_json(),
-        )
-
-    def _extract_tool_call_dedupe_ids(
-        self,
-        event: dict[str, Any],
-    ) -> tuple[str | None, str | None]:
-        item = event.get("item")
-        container = item if isinstance(item, dict) else event
-
-        call_id = self._extract_non_empty_string(container, "call_id")
-        if call_id is None:
-            call_id = self._extract_non_empty_string(event, "call_id")
-        item_id = self._extract_non_empty_string(container, "id")
-        return call_id, item_id
-
-    def _is_duplicate_tool_call_event(
-        self,
-        *,
-        call_id: str | None,
-        item_id: str | None,
-    ) -> tuple[bool, str | None]:
-        if call_id is not None and call_id in self._processed_tool_call_ids:
-            return True, f"call_id:{call_id}"
-        if item_id is not None and item_id in self._processed_tool_item_ids:
-            return True, f"item_id:{item_id}"
-        return False, None
-
-    def _mark_tool_call_processed(
-        self,
-        *,
-        call_id: str | None,
-        item_id: str | None,
-    ) -> None:
-        if call_id is not None:
-            self._remember_processed_tool_id(
-                self._processed_tool_call_ids,
-                call_id,
-            )
-        if item_id is not None:
-            self._remember_processed_tool_id(
-                self._processed_tool_item_ids,
-                item_id,
-            )
-
-    def _remember_processed_tool_id(
-        self,
-        id_store: dict[str, None],
-        processed_id: str,
-    ) -> None:
-        if processed_id in id_store:
-            id_store.pop(processed_id, None)
-        id_store[processed_id] = None
-        while len(id_store) > self._processed_tool_dedupe_limit:
-            oldest_id = next(iter(id_store))
-            id_store.pop(oldest_id, None)
-
-    def _extract_tool_call_or_error(
-        self,
-        event: dict[str, Any],
-    ) -> ToolCall | dict[str, str]:
-        item = event.get("item")
-        container = item if isinstance(item, dict) else event
-
-        tool_name = self._extract_non_empty_string(container, "name")
-        call_id = self._extract_non_empty_string(container, "call_id")
-        if call_id is None:
-            call_id = self._extract_non_empty_string(event, "call_id")
-        if tool_name is None:
-            tool_name = self._extract_non_empty_string(event, "name")
-
-        if call_id is None or tool_name is None:
-            return {
-                "call_id": call_id or f"tool_call_{now_ms()}",
-                "tool_name": tool_name or "unknown_tool",
-                "error_code": "INVALID_TOOL_CALL",
-                "error_message": "Missing tool name or call_id in upstream function call event",
-            }
-
-        parsed_arguments = self._parse_tool_arguments(
-            container.get("arguments", event.get("arguments"))
-        )
-        if isinstance(parsed_arguments, str):
-            return {
-                "call_id": call_id,
-                "tool_name": tool_name,
-                "error_code": "INVALID_TOOL_ARGUMENTS",
-                "error_message": parsed_arguments,
-            }
-
-        return ToolCall(
-            name=tool_name,
-            call_id=call_id,
-            session_id=self._session_id,
-            arguments=parsed_arguments,
-        )
-
-    @staticmethod
-    def _extract_non_empty_string(payload: dict[str, Any], key: str) -> str | None:
-        value = payload.get(key)
-        if isinstance(value, str) and value:
-            return value
-        return None
-
-    @staticmethod
-    def _parse_tool_arguments(raw_arguments: Any) -> dict[str, Any] | str:
-        if raw_arguments is None:
-            return {}
-        if isinstance(raw_arguments, dict):
-            return raw_arguments
-        if isinstance(raw_arguments, str):
-            stripped = raw_arguments.strip()
-            if not stripped:
-                return {}
-            try:
-                parsed = json.loads(stripped)
-            except json.JSONDecodeError:
-                return "Tool arguments were not valid JSON"
-            if not isinstance(parsed, dict):
-                return "Tool arguments must decode to a JSON object"
-            return parsed
-        return "Tool arguments must be a JSON object or JSON string"
-
-    async def _send_tool_error_output(
-        self,
-        *,
-        call_id: str,
-        tool_name: str,
-        error_code: str,
-        error_message: str,
-    ) -> None:
-        output_json = json.dumps(
-            {
-                "ok": False,
-                "tool_name": tool_name,
-                "session_id": self._session_id,
-                "error_code": error_code,
-                "error_message": error_message,
-            },
-            ensure_ascii=True,
-            sort_keys=True,
-        )
-        await self._send_tool_output_and_continue(call_id=call_id, output=output_json)
-
-    async def _send_tool_output_and_continue(self, *, call_id: str, output: str) -> None:
-        await self._upstream_client.send_json(
-            {
-                "type": "conversation.item.create",
-                "item": {
-                    "type": "function_call_output",
-                    "call_id": call_id,
-                    "output": output,
-                },
-            }
-        )
-        await self._send_response_create(source="tool_output")
-
-    async def _on_audio_delta(self, event: dict[str, Any]) -> None:
-        delta_b64 = event.get("delta")
-        if not isinstance(delta_b64, str) or not delta_b64:
-            return
-
-        response_id = self._resolve_response_id(event)
-        if response_id in self._cancelled_response_ids:
-            logger.warning(
-                "Ignoring late audio delta for cancelled response session=%s response_id=%s",
-                self._session_id,
-                response_id,
-            )
-            return
-        if response_id not in self._started_response_ids:
-            self._started_response_ids.add(response_id)
-            if self._last_stopped_response_id == response_id:
-                self._last_stopped_response_id = None
-            await self._send_envelope(
-                "assistant.playback.control",
-                {"command": "start_response", "response_id": response_id},
-            )
-
-        self._current_response_id = response_id
-
-        try:
-            pcm_bytes = base64.b64decode(delta_b64, validate=True)
-        except (ValueError, TypeError):
-            logger.warning(
-                "Invalid base64 audio delta for session=%s", self._session_id
-            )
-            return
-
-        await self._send_binary_frame(SERVER_AUDIO_FRAME_TYPE, now_ms(), pcm_bytes)
 
     async def _on_response_done(self, event: dict[str, Any]) -> None:
         response_id = self._extract_response_id(event)
@@ -852,30 +502,6 @@ class IOSRealtimeBridge:
             },
         )
 
-    def _resolve_response_id(self, event: dict[str, Any]) -> str:
-        resolved = self._extract_response_id(event)
-        if resolved is not None:
-            return resolved
-        if self._current_response_id is not None:
-            return self._current_response_id
-        fallback = f"response_{now_ms()}"
-        self._current_response_id = fallback
-        return fallback
-
-    @staticmethod
-    def _extract_response_id(event: dict[str, Any]) -> str | None:
-        direct = event.get("response_id")
-        if isinstance(direct, str) and direct:
-            return direct
-
-        response = event.get("response")
-        if isinstance(response, dict):
-            rid = response.get("id")
-            if isinstance(rid, str) and rid:
-                return rid
-
-        return None
-
     async def _finalize_turn_if_needed(self, *, reason: str) -> None:
         if not self._manual_turn_fallback_enabled:
             if reason == "client_end_turn":
@@ -967,20 +593,6 @@ class IOSRealtimeBridge:
             source,
         )
 
-    async def _wait_for_client_audio_queue_drain(self) -> None:
-        task = self._client_audio_sender_task
-        if task is None or task.done():
-            return
-
-        try:
-            await asyncio.wait_for(self._client_audio_queue.join(), timeout=1.5)
-        except asyncio.TimeoutError:
-            logger.warning(
-                "Timed out draining client audio queue session=%s pending=%s",
-                self._session_id,
-                self._client_audio_queue.qsize(),
-            )
-
     def _reset_turn_state(self) -> None:
         self._current_turn_audio_seen = False
         self._current_turn_response_started = False
@@ -1006,8 +618,3 @@ class IOSRealtimeBridge:
                 return True
 
         return True
-
-    def _append_input_audio_dump(self, payload_bytes: bytes) -> None:
-        if not self._dump_input_audio_enabled:
-            return
-        self._audio_dump.append(payload_bytes)
