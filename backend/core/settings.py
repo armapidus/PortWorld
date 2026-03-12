@@ -44,7 +44,12 @@ def _parse_bool_env(*names: str, default: bool) -> bool:
     return default
 
 
-def _parse_int_env(*names: str, default: int, minimum: int | None = None) -> int:
+def _parse_int_env(
+    *names: str,
+    default: int,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int:
     raw = _get_env(*names)
     if raw is None:
         value = default
@@ -56,6 +61,8 @@ def _parse_int_env(*names: str, default: int, minimum: int | None = None) -> int
 
     if minimum is not None and value < minimum:
         return minimum
+    if maximum is not None and value > maximum:
+        return maximum
     return value
 
 
@@ -347,6 +354,7 @@ def _load_tooling_settings() -> dict[str, str | int | bool]:
             "REALTIME_WEB_SEARCH_MAX_RESULTS",
             default=3,
             minimum=1,
+            maximum=5,
         ),
     }
 
