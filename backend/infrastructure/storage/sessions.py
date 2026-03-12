@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.infrastructure.storage.errors import SessionNotFoundError
 from backend.infrastructure.storage.types import SessionMemoryResetResult, SessionStorageResult, now_ms
+from backend.memory.events import AcceptedVisionEvent, coerce_accepted_vision_event
 from backend.memory.lifecycle import SessionMemoryResetEligibility, SessionMemoryRetentionEligibility
 
 logger = logging.getLogger(__name__)
@@ -196,19 +197,21 @@ class SessionStorageMixin:
             return dict(default_payload)
         return payload
 
-    def _safe_read_jsonl_file(self, *, path: Path) -> list[dict[str, Any]]:
+    def _safe_read_jsonl_file(self, *, session_id: str, path: Path) -> list[AcceptedVisionEvent]:
         if not path.exists():
             path.write_text("", encoding="utf-8")
             return []
-        valid_events: list[dict[str, Any]] = []
-        had_error = False
-        quarantined_reason = ""
+        valid_events: list[AcceptedVisionEvent] = []
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
         except (OSError, UnicodeDecodeError) as exc:
-            lines = []
-            had_error = True
-            quarantined_reason = str(exc)
+            logger.warning(
+                "VISION_EVENT_RECORD_READ_FAILED session=%s path=%s reason=%s",
+                session_id,
+                path,
+                exc,
+            )
+            return []
 
         for index, line in enumerate(lines, start=1):
             if not line.strip():
@@ -216,20 +219,30 @@ class SessionStorageMixin:
             try:
                 payload = json.loads(line)
             except JSONDecodeError as exc:
-                had_error = True
-                quarantined_reason = f"invalid JSONL line {index}: {exc}"
+                logger.warning(
+                    "VISION_EVENT_RECORD_SKIPPED session=%s line=%d reason=invalid_json details=%s",
+                    session_id,
+                    index,
+                    exc,
+                )
                 continue
-            if isinstance(payload, dict):
-                valid_events.append(payload)
-            else:
-                had_error = True
-                quarantined_reason = f"invalid JSONL line {index}: root must be object"
-
-        if had_error:
-            self._quarantine_corrupt_file(path, reason=quarantined_reason or "invalid JSONL content")
-            with path.open("w", encoding="utf-8") as handle:
-                for event in valid_events:
-                    handle.write(json.dumps(event, ensure_ascii=True, sort_keys=True) + "\n")
+            if not isinstance(payload, dict):
+                logger.warning(
+                    "VISION_EVENT_RECORD_SKIPPED session=%s line=%d reason=non_object_record",
+                    session_id,
+                    index,
+                )
+                continue
+            event, reason = coerce_accepted_vision_event(payload)
+            if event is None:
+                logger.warning(
+                    "VISION_EVENT_RECORD_SKIPPED session=%s line=%d reason=%s",
+                    session_id,
+                    index,
+                    reason or "invalid_record",
+                )
+                continue
+            valid_events.append(event)
         return valid_events
 
     def upsert_session_status(self, *, session_id: str, status: str) -> None:
@@ -265,10 +278,13 @@ class SessionStorageMixin:
         with session_storage.vision_routing_events_log_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(event, ensure_ascii=True, sort_keys=True) + "\n")
 
-    def read_vision_events(self, *, session_id: str) -> list[dict[str, Any]]:
+    def read_vision_events(self, *, session_id: str) -> list[AcceptedVisionEvent]:
         self._require_session_persisted(session_id=session_id)
         session_storage = self.get_session_storage_paths(session_id=session_id)
-        return self._safe_read_jsonl_file(path=session_storage.vision_events_log_path)
+        return self._safe_read_jsonl_file(
+            session_id=session_id,
+            path=session_storage.vision_events_log_path,
+        )
 
     def read_session_memory(self, *, session_id: str) -> dict[str, Any]:
         self._require_session_persisted(session_id=session_id)
