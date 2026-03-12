@@ -4,13 +4,13 @@ import asyncio
 import base64
 import contextlib
 import logging
-import time
 from typing import Any
 
 from backend.realtime.audio_uplink import ClientAudioUplink
 from backend.realtime.client import OpenAIRealtimeClient, RealtimeClientError
 from backend.realtime.contracts import BinarySender, EnvelopeSender
 from backend.realtime.tool_dispatcher import ToolCallDispatcher
+from backend.realtime.turn_state import TurnConfig, TurnManager, TurnState
 from backend.tools.runtime import RealtimeToolingRuntime
 from backend.ws.protocol.contracts import now_ms
 from backend.ws.protocol.frame_codec import SERVER_AUDIO_FRAME_TYPE
@@ -62,19 +62,22 @@ class IOSRealtimeBridge:
         self._cancelled_response_ids: set[str] = set()
         self._started_response_ids: set[str] = set()
         self._last_stopped_response_id: str | None = None
-        self._current_response_id: str | None = None
-        self._has_active_upstream_response = False
-        self._server_turn_detection_enabled = server_turn_detection_enabled
-        self._manual_turn_fallback_enabled = manual_turn_fallback_enabled
-        self._manual_turn_fallback_delay_s = max(100, manual_turn_fallback_delay_ms) / 1000.0
-        self._current_turn_audio_seen = False
-        self._current_turn_response_started = False
-        self._manual_response_sent_for_turn = False
-        self._manual_finalize_error_sent_for_turn = False
-        self._last_client_audio_at_monotonic: float | None = None
-        self._server_vad_speaking = False
-        self._manual_finalize_task: asyncio.Task[None] | None = None
-        self._turn_finalize_lock = asyncio.Lock()
+
+        turn_config = TurnConfig(
+            server_turn_detection_enabled=server_turn_detection_enabled,
+            manual_turn_fallback_enabled=manual_turn_fallback_enabled,
+            manual_turn_fallback_delay_s=max(100, manual_turn_fallback_delay_ms) / 1000.0,
+        )
+        turn_state = TurnState()
+        self._turn_manager = TurnManager(
+            session_id=session_id,
+            config=turn_config,
+            state=turn_state,
+            upstream_client=upstream_client,
+            audio_uplink=self._audio_uplink,
+            tool_dispatcher=self._tool_dispatcher,
+            send_envelope=send_envelope,
+        )
 
     async def connect_and_start(self) -> None:
         self._session_ready_confirmed = False
@@ -105,19 +108,17 @@ class IOSRealtimeBridge:
             return
 
         self._audio_uplink.enqueue(payload_bytes)
-        self._current_turn_audio_seen = True
-        self._last_client_audio_at_monotonic = time.monotonic()
-        self._schedule_inactivity_finalize()
+        self._turn_manager.on_client_audio()
 
     async def finalize_turn(self, *, reason: str = "client_end_turn") -> None:
-        await self._finalize_turn_if_needed_locked(reason=reason)
+        await self._turn_manager.finalize_turn_if_needed(reason=reason)
 
     async def close(self) -> None:
         if self._closed:
             return
         self._closed = True
 
-        self._cancel_manual_finalize_task()
+        self._turn_manager.cancel_all_tasks()
 
         task = self._upstream_task
         self._upstream_task = None
@@ -131,7 +132,7 @@ class IOSRealtimeBridge:
             await self._upstream_client.close()
 
     async def _interrupt_active_response(self, *, reason: str) -> None:
-        response_id = self._current_response_id
+        response_id = self._turn_manager.state.current_response_id
         if response_id is None or response_id in self._cancelled_response_ids:
             return
 
@@ -145,7 +146,7 @@ class IOSRealtimeBridge:
         self._cancelled_response_ids.add(response_id)
         self._started_response_ids.discard(response_id)
         self._last_stopped_response_id = response_id
-        self._current_response_id = None
+        self._turn_manager.state.current_response_id = None
 
         try:
             await self._upstream_client.send_json(
@@ -202,65 +203,71 @@ class IOSRealtimeBridge:
             logger.debug("Ignoring upstream event with non-string type: %s", event)
             return
 
-        if event_type == "response.output_audio.delta":
-            self._current_turn_response_started = True
-            await self._on_audio_delta(event)
+        handler = self._UPSTREAM_EVENT_HANDLERS.get(event_type)
+        if handler is not None:
+            await handler(self, event)
             return
-
-        if event_type == "response.output_audio.done":
-            await self._on_response_done(event)
-            return
-
-        if event_type == "response.done":
-            await self._on_response_done(event)
-            self._reset_turn_state()
-            return
-
-        if event_type == "input_audio_buffer.speech_started":
-            self._server_vad_speaking = True
-            logger.info("Upstream VAD speech_started session=%s", self._session_id)
-            if self._current_response_id is not None:
-                await self._interrupt_active_response(reason="speech_started")
-            await self._send_envelope("assistant.thinking", {"status": "thinking"})
-            return
-
-        if event_type == "input_audio_buffer.speech_stopped":
-            self._server_vad_speaking = False
-            logger.info("Upstream VAD speech_stopped session=%s", self._session_id)
-            await self._finalize_turn_if_needed_locked(reason="speech_stopped")
-            return
-
-        if event_type == "response.created":
-            logger.info("Upstream response.created session=%s", self._session_id)
-            self._has_active_upstream_response = True
-            self._current_turn_response_started = True
-            self._cancel_manual_finalize_task()
-            return
-
-        if event_type == "response.function_call_arguments.done":
-            await self._tool_dispatcher.handle_event(event)
-            return
-
-        if event_type == "response.output_item.done":
-            item = event.get("item")
-            if isinstance(item, dict) and item.get("type") == "function_call":
-                await self._tool_dispatcher.handle_event(event)
-                return
 
         if event_type in SESSION_READY_EVENT_TYPES:
             logger.info("Upstream %s session=%s", event_type, self._session_id)
             self._mark_session_ready()
             return
 
+        if event_type == "response.output_item.done":
+            item = event.get("item")
+            if isinstance(item, dict) and item.get("type") == "function_call":
+                await self._tool_dispatcher.handle_event(event)
+            return
+
         if event_type == "input_audio_buffer.committed":
             logger.debug("Upstream input_audio_buffer.committed session=%s", self._session_id)
             return
 
-        if event_type == "error":
-            await self._on_upstream_error_event(event)
-            return
-
         logger.debug("Unhandled upstream event type=%s", event_type)
+
+    async def _handle_audio_delta(self, event: dict[str, Any]) -> None:
+        self._turn_manager.on_audio_delta()
+        await self._on_audio_delta(event)
+
+    async def _handle_audio_done(self, event: dict[str, Any]) -> None:
+        await self._on_response_done(event)
+
+    async def _handle_response_done(self, event: dict[str, Any]) -> None:
+        await self._on_response_done(event)
+        self._turn_manager.reset(self._tool_dispatcher)
+
+    async def _handle_speech_started(self, event: dict[str, Any]) -> None:
+        self._turn_manager.on_vad_speech_started()
+        logger.info("Upstream VAD speech_started session=%s", self._session_id)
+        if self._turn_manager.state.current_response_id is not None:
+            await self._interrupt_active_response(reason="speech_started")
+        await self._send_envelope("assistant.thinking", {"status": "thinking"})
+
+    async def _handle_speech_stopped(self, event: dict[str, Any]) -> None:
+        self._turn_manager.on_vad_speech_stopped()
+        logger.info("Upstream VAD speech_stopped session=%s", self._session_id)
+        await self._turn_manager.finalize_turn_if_needed(reason="speech_stopped")
+
+    async def _handle_response_created(self, event: dict[str, Any]) -> None:
+        logger.info("Upstream response.created session=%s", self._session_id)
+        self._turn_manager.on_response_created()
+
+    async def _handle_function_call_done(self, event: dict[str, Any]) -> None:
+        await self._tool_dispatcher.handle_event(event)
+
+    async def _handle_error_event(self, event: dict[str, Any]) -> None:
+        await self._on_upstream_error_event(event)
+
+    _UPSTREAM_EVENT_HANDLERS: dict[str, Any] = {
+        "response.output_audio.delta": _handle_audio_delta,
+        "response.output_audio.done": _handle_audio_done,
+        "response.done": _handle_response_done,
+        "input_audio_buffer.speech_started": _handle_speech_started,
+        "input_audio_buffer.speech_stopped": _handle_speech_stopped,
+        "response.created": _handle_response_created,
+        "response.function_call_arguments.done": _handle_function_call_done,
+        "error": _handle_error_event,
+    }
 
     async def _on_response_done(self, event: dict[str, Any]) -> None:
         response_id = self._extract_response_id(event)
@@ -269,7 +276,7 @@ class IOSRealtimeBridge:
             response_id = next(iter(self._started_response_ids))
 
         if response_id is None:
-            response_id = self._current_response_id
+            response_id = self._turn_manager.state.current_response_id
 
         if response_id is None:
             return
@@ -310,7 +317,7 @@ class IOSRealtimeBridge:
                 {"command": "start_response", "response_id": response_id},
             )
 
-        self._current_response_id = response_id
+        self._turn_manager.state.current_response_id = response_id
         try:
             pcm_bytes = base64.b64decode(delta_b64, validate=True)
         except (ValueError, TypeError):
@@ -322,10 +329,10 @@ class IOSRealtimeBridge:
         resolved = self._extract_response_id(event)
         if resolved is not None:
             return resolved
-        if self._current_response_id is not None:
-            return self._current_response_id
+        if self._turn_manager.state.current_response_id is not None:
+            return self._turn_manager.state.current_response_id
         fallback = f"response_{now_ms()}"
-        self._current_response_id = fallback
+        self._turn_manager.state.current_response_id = fallback
         return fallback
 
     @staticmethod
@@ -357,7 +364,11 @@ class IOSRealtimeBridge:
         if not isinstance(message, str) or not message:
             message = "Unknown upstream error"
 
-        if self._is_expected_interrupt_race_error(code=code, message=message):
+        if self._turn_manager.is_interrupt_race_expected(
+            code=code,
+            message=message,
+            saw_duplicate_tool_call=self._tool_dispatcher.saw_duplicate_tool_call_event_for_turn,
+        ):
             logger.info(
                 "Ignoring expected interrupt race error session=%s code=%s message=%s",
                 self._session_id,
@@ -471,36 +482,8 @@ class IOSRealtimeBridge:
         )
         return any(marker in lower_message for marker in schema_markers)
 
-    def _is_expected_interrupt_race_error(self, *, code: str, message: str) -> bool:
-        lower_code = code.strip().lower()
-        lower_message = message.strip().lower()
-        is_interrupt_cancel_race = lower_code == "response_cancel_not_active" or (
-            "cancel" in lower_message and "no active response" in lower_message
-        )
-        if is_interrupt_cancel_race:
-            return True
-
-        is_active_response_race = lower_code == "conversation_already_has_active_response" or (
-            "already" in lower_message and "active response" in lower_message
-        )
-        if not is_active_response_race:
-            return False
-
-        return (
-            self._server_turn_detection_enabled
-            or self._has_active_upstream_response
-            or self._current_turn_response_started
-            or self._tool_dispatcher.saw_duplicate_tool_call_event_for_turn
-        )
-
     def client_end_turn_ignore_reason(self) -> str | None:
-        if not self._server_turn_detection_enabled:
-            return None
-        if self._has_active_upstream_response:
-            return "active_upstream_response"
-        if self._current_turn_response_started:
-            return "response_already_started_for_turn"
-        return None
+        return self._turn_manager.client_end_turn_ignore_reason()
 
     async def _send_upstream_error(
         self,
@@ -518,135 +501,10 @@ class IOSRealtimeBridge:
             },
         )
 
-    def _schedule_inactivity_finalize(self) -> None:
-        if not self._manual_turn_fallback_enabled:
-            return
-        if self._server_turn_detection_enabled:
-            return
-        if self._current_turn_response_started or self._has_active_upstream_response:
-            return
-        self._cancel_manual_finalize_task()
-        self._manual_finalize_task = asyncio.create_task(
-            self._run_inactivity_finalize_after_delay(),
-            name=f"manual_finalize:{self._session_id}",
-        )
-
-    async def _run_inactivity_finalize_after_delay(self) -> None:
-        try:
-            await asyncio.sleep(self._manual_turn_fallback_delay_s)
-            await self._finalize_turn_if_needed_locked(reason="continuous_uplink_timeout")
-        except asyncio.CancelledError:
-            return
-        except RealtimeClientError as exc:
-            logger.warning("Inactivity finalize failed session=%s: %s", self._session_id, exc)
-            await self._send_upstream_error(
-                code="UPSTREAM_TURN_FINALIZE_FAILED",
-                message=str(exc) or "Failed to finalize turn upstream",
-                retriable=True,
-            )
-        except Exception:
-            logger.exception("Unexpected inactivity finalize failure session=%s", self._session_id)
-            await self._send_upstream_error(
-                code="UPSTREAM_TURN_FINALIZE_FAILED",
-                message="Failed to finalize turn upstream",
-                retriable=True,
-            )
-
-    def _cancel_manual_finalize_task(self) -> None:
-        task = self._manual_finalize_task
-        self._manual_finalize_task = None
-        if task is not None:
-            task.cancel()
-
-    async def _finalize_turn_if_needed_locked(self, *, reason: str) -> None:
-        async with self._turn_finalize_lock:
-            await self._finalize_turn_if_needed(reason=reason)
-
-    def _check_turn_finalize_blockers(self, reason: str) -> str | None:
-        """Return a blocker reason if turn finalization should be skipped, else None."""
-        if not self._manual_turn_fallback_enabled:
-            return "manual_fallback_disabled"
-
-        if reason in {"continuous_uplink_timeout", "speech_stopped"} and self._server_turn_detection_enabled:
-            return "server_turn_detection_active"
-
-        if reason == "client_end_turn":
-            ignore_reason = self.client_end_turn_ignore_reason()
-            if ignore_reason is not None:
-                return f"client_end_turn_ignored:{ignore_reason}"
-
-        if not self._current_turn_audio_seen:
-            return "no_audio_seen"
-        if self._current_turn_response_started:
-            return "response_already_started"
-        if self._manual_response_sent_for_turn:
-            return "manual_response_already_sent"
-        if self._has_active_upstream_response:
-            return "active_upstream_response"
-
-        if reason == "continuous_uplink_timeout":
-            if self._server_vad_speaking:
-                return "vad_speaking"
-            if self._last_client_audio_at_monotonic is None:
-                return "no_audio_timestamp"
-            inactivity = time.monotonic() - self._last_client_audio_at_monotonic
-            if inactivity < self._manual_turn_fallback_delay_s:
-                return "inactivity_below_threshold"
-
-        return None
-
-    async def _finalize_turn_if_needed(self, *, reason: str) -> None:
-        blocker = self._check_turn_finalize_blockers(reason)
-        if blocker is not None:
-            if reason == "client_end_turn":
-                logger.debug(
-                    "Skipping turn finalize session=%s reason=%s blocker=%s",
-                    self._session_id,
-                    reason,
-                    blocker,
-                )
-            return
-
-        self._audio_uplink.raise_if_failed()
-        drained = await self._audio_uplink.wait_for_drain(timeout_seconds=1.5)
-        if not drained:
-            if not self._manual_finalize_error_sent_for_turn:
-                self._manual_finalize_error_sent_for_turn = True
-                await self._send_upstream_error(
-                    code="UPSTREAM_AUDIO_FLUSH_TIMEOUT",
-                    message="Timed out flushing client audio before turn finalization",
-                    retriable=True,
-                )
-            return
-
-        logger.info(
-            "Manual turn finalize session=%s reason=%s queued_frames=%s sent_frames=%s",
-            self._session_id,
-            reason,
-            self._audio_uplink.queue_size,
-            self._audio_uplink.sent_count,
-        )
-        await self._upstream_client.send_json({"type": "input_audio_buffer.commit"})
-        self._manual_response_sent_for_turn = True
-        await self._send_response_create(source=f"manual_finalize:{reason}")
-
     async def _send_response_create(self, source: str) -> None:
         await self._upstream_client.send_json({"type": "response.create"})
-        self._has_active_upstream_response = True
-        self._current_turn_response_started = True
-        self._cancel_manual_finalize_task()
+        self._turn_manager.on_response_created()
         logger.info("Upstream response.create sent session=%s source=%s", self._session_id, source)
-
-    def _reset_turn_state(self) -> None:
-        self._current_turn_audio_seen = False
-        self._current_turn_response_started = False
-        self._manual_response_sent_for_turn = False
-        self._manual_finalize_error_sent_for_turn = False
-        self._last_client_audio_at_monotonic = None
-        self._current_response_id = None
-        self._has_active_upstream_response = False
-        self._tool_dispatcher.reset_turn_state()
-        self._cancel_manual_finalize_task()
 
     @staticmethod
     def _parse_retriable_flag(raw: Any) -> bool:
