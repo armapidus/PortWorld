@@ -62,24 +62,12 @@ The backend now boots through one runtime-owned lifecycle:
 
 This keeps startup, storage, and provider selection under one explicit owner instead of spreading them across import-time globals.
 
-## Realtime Modes
-
-### Default realtime mode
+## Realtime Mode
 
 - enabled with `REALTIME_PROVIDER=openai`
 - creates one OpenAI Realtime upstream session per active PortWorld session
 - forwards uplink audio from the phone to OpenAI
 - relays assistant playback control and assistant audio back to the phone
-
-### Mock capture mode
-
-- enabled with `BACKEND_DEBUG_MOCK_CAPTURE_MODE=true`
-- does not connect to OpenAI
-- captures inbound audio only
-- useful for isolating iPhone -> backend transport issues
-- available from a source checkout, but intentionally not included in the production Docker image
-
-Mock capture is a backend debug mode, not a separate realtime provider.
 
 ## WebSocket Contract
 
@@ -106,7 +94,6 @@ Important backend -> client envelope types:
 
 - iPhone -> backend uses frame type `0x01` (`CLIENT_AUDIO_FRAME_TYPE`)
 - backend -> iPhone uses frame type `0x02` (`SERVER_AUDIO_FRAME_TYPE`)
-- devtools-only probe frame type `0x03` (`CLIENT_PROBE_FRAME_TYPE`) remains available only when `BACKEND_ENABLE_DEVTOOLS_PROTOCOL=true`
 
 Expected active audio format:
 
@@ -435,19 +422,10 @@ In production profile, failing checks are intentionally redacted to avoid leakin
 - `BACKEND_ENABLE_IP_RATE_LIMITS`
   default: `false` in development profile, `true` in production profile
   enables extra per-IP limiting on websocket setup and vision ingest
-- `BACKEND_ALLOW_TEXT_AUDIO_FALLBACK`
-  default: `false`
-  compatibility path only; not used by the active iPhone runtime
-- `BACKEND_ENABLE_DEVTOOLS_PROTOCOL`
-  default: `false`
-  enables devtools-only probe frame handling; keep disabled for normal app traffic
 - `BACKEND_DEBUG_DUMP_INPUT_AUDIO`
   default: `false`
 - `BACKEND_DEBUG_DUMP_INPUT_AUDIO_DIR`
   default: `<BACKEND_DATA_DIR>/debug_audio`
-- `BACKEND_DEBUG_MOCK_CAPTURE_MODE`
-  default: `false`
-  source-checkout/local debug mode only; excluded from the production Docker image
 - `BACKEND_DEBUG_TRACE_WS_MESSAGES`
   default: `false`
   must remain `false` when `BACKEND_PROFILE=production`
@@ -599,21 +577,6 @@ Dependency packaging:
   it improves determinism but is not yet a fully hashed cross-platform lockfile
 - refresh `backend/requirements.txt` intentionally when changing backend runtime dependencies
 
-When debugging websocket transport from the terminal, use the devtools probe:
-
-```bash
-source backend/.venv/bin/activate
-python backend/devtools/ws_probe.py \
-  --url ws://127.0.0.1:8080/ws/session \
-  --session-id sess_probe \
-  --probe-count 1 \
-  --frame-size-bytes 4080 \
-  --frame-count 24 \
-  --frame-duration-ms 85 \
-  --frame-interval-ms 85 \
-  --expect-ack-count 2
-```
-
 ## Notes
 
 - Missing `OPENAI_API_KEY` does not fail backend startup by itself. It fails when a realtime session actually needs OpenAI.
@@ -625,8 +588,8 @@ python backend/devtools/ws_probe.py \
 - Persistent profile onboarding, memory export, session reset, and retention are now backend-owned HTTP flows.
 - The backend now exposes a small operator CLI for `serve`, `check-config`, `bootstrap-storage`, and `export-memory`.
 - The active iPhone runtime no longer emits `wakeword.detected`; `session.activate` is the only required conversation-start control message.
-- Probe frames are a devtools-only compatibility surface and stay disabled unless `BACKEND_ENABLE_DEVTOOLS_PROTOCOL=true`.
-- The production image intentionally excludes `backend/devtools/`, `backend/debug/`, `backend/scripts/`, and `backend/var/`; Docker copies only the backend runtime packages needed to serve HTTP, WebSocket, storage, and provider integrations.
+- Audio uplink uses binary websocket frames only (`0x01` client audio, `0x02` server audio); `client.audio` text fallback is not supported.
+- The production image excludes `backend/scripts/` and `backend/var/`; Docker copies only the backend runtime packages needed to serve HTTP, WebSocket, storage, and provider integrations.
 - Automatic profile promotion from conversations or vision is still not active in the current backend slice.
 - MCP-backed tools are not active yet in the current backend slice.
 - Step 4A intentionally keeps the live session registry in memory. SQLite is persistent indexing, not live coordination.

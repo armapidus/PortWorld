@@ -111,12 +111,8 @@ python -m backend.cli serve
 
 The production image intentionally excludes:
 
-- `backend/devtools/`
-- `backend/debug/`
 - `backend/scripts/`
 - `backend/var/`
-
-`BACKEND_DEBUG_MOCK_CAPTURE_MODE=true` is therefore a source-checkout/local debug path, not a Dockerized self-host mode.
 
 ## Operator Reference
 
@@ -151,9 +147,6 @@ Route reference:
 - `VISION_DEBUG_RETAIN_RAW_FRAMES`
   - `false` keeps raw-frame retention off for normal self-host operation
   - `true` keeps raw ingest frames on disk for debug inspection
-- `BACKEND_ENABLE_DEVTOOLS_PROTOCOL`
-  - keep `false` for normal app traffic
-  - set `true` only when using repo devtools that send websocket probe frames such as `backend/devtools/ws_probe.py --probe-count 1`
 
 Minimal examples:
 
