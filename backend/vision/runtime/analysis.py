@@ -229,6 +229,184 @@ class VisionAnalysisMixin:
             reason="deferred_not_selected_lower_priority",
         )
 
+    async def _handle_terminal_analysis_failure(
+        self,
+        *,
+        worker,
+        pending_frame: PendingVisionFrame,
+        signal,
+        route,
+        slot_state,
+        error_code: str,
+        error_details: dict,
+        bootstrap_reason: str,
+    ) -> None:
+        session_id = pending_frame.frame_context.session_id
+        frame_id = pending_frame.frame_context.frame_id
+        await self._run_storage(
+            self.storage.update_vision_frame_processing,
+            session_id=session_id,
+            frame_id=frame_id,
+            processing_status="analysis_failed",
+            gate_status="accepted",
+            gate_reason=route.reason,
+            phash=signal.dhash_hex,
+            provider=self.provider_name,
+            model=self.model_name,
+            analyzed_at_ms=now_ms(),
+            next_retry_at_ms=None,
+            attempt_count=await self._current_attempt_count(
+                session_id=session_id,
+                frame_id=frame_id,
+            ),
+            error_code=error_code,
+            error_details=error_details,
+            routing_status=route.action,
+            routing_reason=route.reason,
+            routing_score=route.priority_score,
+            routing_metadata=self._build_routing_metadata(
+                signal=signal,
+                route=route,
+                provider_budget_state=slot_state,
+                analysis_outcome="analysis_failed",
+                error_details=error_details,
+            ),
+        )
+        await self._append_routing_event(
+            signal=signal,
+            route=route,
+            provider_budget_state=slot_state,
+            did_attempt_analysis=True,
+            analysis_outcome="analysis_failed",
+            error_details=error_details,
+        )
+        worker.last_analysis_failed = True
+        worker.best_deferred_candidate = None
+        if route.memory_bootstrap_required and worker.accepted_event_count == 0:
+            worker.bootstrap_state = "bootstrap_degraded"
+            await self._persist_bootstrap_memory_state(
+                worker=worker,
+                status="bootstrap_degraded",
+                reason=bootstrap_reason,
+                frame_id=frame_id,
+                attempt_count=await self._current_attempt_count(
+                    session_id=session_id,
+                    frame_id=frame_id,
+                ),
+                error_code=error_code,
+                error_details=error_details,
+                last_attempt_at_ms=now_ms(),
+            )
+        logger.exception(
+            "VISION_ANALYSIS_FAILED session=%s frame=%s provider=%s model=%s",
+            session_id,
+            frame_id,
+            self.provider_name,
+            self.model_name,
+        )
+        await self._cleanup_ingest_artifacts(
+            session_id=session_id,
+            frame_id=frame_id,
+        )
+
+    async def _handle_rate_limit_failure(
+        self,
+        *,
+        worker,
+        pending_frame: PendingVisionFrame,
+        signal,
+        route,
+        exc: VisionRateLimitError,
+    ) -> None:
+        await self.provider_budget.record_rate_limit(exc.retry_after_seconds)
+        cooldown_state = await self.provider_budget.get_state()
+        error_details = {
+            "http_status": exc.status_code,
+            "provider_error_code": exc.provider_error_code,
+            "provider_message": exc.provider_message,
+            "payload_excerpt": exc.payload_excerpt,
+        }
+        session_id = pending_frame.frame_context.session_id
+        frame_id = pending_frame.frame_context.frame_id
+        bootstrap_retry = route.memory_bootstrap_required and worker.accepted_event_count == 0
+        await self._run_storage(
+            self.storage.update_vision_frame_processing,
+            session_id=session_id,
+            frame_id=frame_id,
+            processing_status="retry_pending" if bootstrap_retry else "analysis_rate_limited",
+            gate_status="accepted",
+            gate_reason=route.reason,
+            phash=signal.dhash_hex,
+            provider=self.provider_name,
+            model=self.model_name,
+            analyzed_at_ms=now_ms(),
+            next_retry_at_ms=cooldown_state.available_at_ms,
+            attempt_count=await self._current_attempt_count(
+                session_id=session_id,
+                frame_id=frame_id,
+            ),
+            error_code="VISION_ANALYSIS_RATE_LIMITED",
+            error_details=error_details,
+            routing_status="analysis_rate_limited",
+            routing_reason="provider_rate_limited",
+            routing_score=route.priority_score,
+            routing_metadata=self._build_routing_metadata(
+                signal=signal,
+                route=route,
+                provider_budget_state=cooldown_state,
+                analysis_outcome="analysis_rate_limited",
+                retry_after_seconds=exc.retry_after_seconds,
+                error_details=error_details,
+            ),
+        )
+        await self._append_routing_event(
+            signal=signal,
+            route=route,
+            provider_budget_state=cooldown_state,
+            did_attempt_analysis=True,
+            analysis_outcome="analysis_rate_limited",
+            retry_after_seconds=exc.retry_after_seconds,
+            error_details=error_details,
+        )
+        worker.last_analysis_failed = True
+        if bootstrap_retry:
+            worker.best_deferred_candidate = DeferredVisionCandidate(
+                pending_frame=pending_frame,
+                signal=signal,
+                route=route,
+                deferred_at_ms=now_ms(),
+                bootstrap_candidate=True,
+            )
+            worker.bootstrap_state = "bootstrap_pending"
+            await self._persist_bootstrap_memory_state(
+                worker=worker,
+                status="bootstrap_pending",
+                reason="provider_rate_limited",
+                frame_id=frame_id,
+                next_retry_at_ms=cooldown_state.available_at_ms,
+                attempt_count=await self._current_attempt_count(
+                    session_id=session_id,
+                    frame_id=frame_id,
+                ),
+                error_code="VISION_ANALYSIS_RATE_LIMITED",
+                error_details=error_details,
+                last_attempt_at_ms=now_ms(),
+            )
+        logger.warning(
+            "VISION_ANALYSIS_RATE_LIMITED session=%s frame=%s provider=%s model=%s cooldown_until_ms=%s retry_after_seconds=%s",
+            session_id,
+            frame_id,
+            self.provider_name,
+            self.model_name,
+            cooldown_state.cooldown_until_ms,
+            exc.retry_after_seconds,
+        )
+        if not bootstrap_retry:
+            await self._cleanup_ingest_artifacts(
+                session_id=session_id,
+                frame_id=frame_id,
+            )
+
     async def _analyze_now(
         self,
         *,
@@ -294,239 +472,43 @@ class VisionAnalysisMixin:
                 image_media_type=pending_frame.image_media_type,
             )
         except VisionRateLimitError as exc:
-            await self.provider_budget.record_rate_limit(exc.retry_after_seconds)
-            cooldown_state = await self.provider_budget.get_state()
-            error_details = {
-                "http_status": exc.status_code,
-                "provider_error_code": exc.provider_error_code,
-                "provider_message": exc.provider_message,
-                "payload_excerpt": exc.payload_excerpt,
-            }
-            bootstrap_retry = route.memory_bootstrap_required and worker.accepted_event_count == 0
-            await self._run_storage(
-                self.storage.update_vision_frame_processing,
-                session_id=pending_frame.frame_context.session_id,
-                frame_id=pending_frame.frame_context.frame_id,
-                processing_status="retry_pending" if bootstrap_retry else "analysis_rate_limited",
-                gate_status="accepted",
-                gate_reason=route.reason,
-                phash=signal.dhash_hex,
-                provider=self.provider_name,
-                model=self.model_name,
-                analyzed_at_ms=now_ms(),
-                next_retry_at_ms=cooldown_state.available_at_ms,
-                attempt_count=await self._current_attempt_count(
-                    session_id=pending_frame.frame_context.session_id,
-                    frame_id=pending_frame.frame_context.frame_id,
-                ),
-                error_code="VISION_ANALYSIS_RATE_LIMITED",
-                error_details=error_details,
-                routing_status="analysis_rate_limited",
-                routing_reason="provider_rate_limited",
-                routing_score=route.priority_score,
-                routing_metadata=self._build_routing_metadata(
-                    signal=signal,
-                    route=route,
-                    provider_budget_state=cooldown_state,
-                    analysis_outcome="analysis_rate_limited",
-                    retry_after_seconds=exc.retry_after_seconds,
-                    error_details=error_details,
-                ),
-            )
-            await self._append_routing_event(
+            await self._handle_rate_limit_failure(
+                worker=worker,
+                pending_frame=pending_frame,
                 signal=signal,
                 route=route,
-                provider_budget_state=cooldown_state,
-                did_attempt_analysis=True,
-                analysis_outcome="analysis_rate_limited",
-                retry_after_seconds=exc.retry_after_seconds,
-                error_details=error_details,
+                exc=exc,
             )
-            worker.last_analysis_failed = True
-            if bootstrap_retry:
-                worker.best_deferred_candidate = DeferredVisionCandidate(
-                    pending_frame=pending_frame,
-                    signal=signal,
-                    route=route,
-                    deferred_at_ms=now_ms(),
-                    bootstrap_candidate=True,
-                )
-                worker.bootstrap_state = "bootstrap_pending"
-                await self._persist_bootstrap_memory_state(
-                    worker=worker,
-                    status="bootstrap_pending",
-                    reason="provider_rate_limited",
-                    frame_id=pending_frame.frame_context.frame_id,
-                    next_retry_at_ms=cooldown_state.available_at_ms,
-                    attempt_count=await self._current_attempt_count(
-                        session_id=pending_frame.frame_context.session_id,
-                        frame_id=pending_frame.frame_context.frame_id,
-                    ),
-                    error_code="VISION_ANALYSIS_RATE_LIMITED",
-                    error_details=error_details,
-                    last_attempt_at_ms=now_ms(),
-                )
-            logger.warning(
-                "VISION_ANALYSIS_RATE_LIMITED session=%s frame=%s provider=%s model=%s cooldown_until_ms=%s retry_after_seconds=%s",
-                pending_frame.frame_context.session_id,
-                pending_frame.frame_context.frame_id,
-                self.provider_name,
-                self.model_name,
-                cooldown_state.cooldown_until_ms,
-                exc.retry_after_seconds,
-            )
-            if not bootstrap_retry:
-                await self._cleanup_ingest_artifacts(
-                    session_id=pending_frame.frame_context.session_id,
-                    frame_id=pending_frame.frame_context.frame_id,
-                )
             return
         except VisionProviderError as exc:
             await self.provider_budget.record_non_rate_limit_failure()
-            error_details = {
-                "http_status": exc.status_code,
-                "provider_error_code": exc.provider_error_code,
-                "provider_message": exc.provider_message,
-                "payload_excerpt": exc.payload_excerpt,
-            }
-            await self._run_storage(
-                self.storage.update_vision_frame_processing,
-                session_id=pending_frame.frame_context.session_id,
-                frame_id=pending_frame.frame_context.frame_id,
-                processing_status="analysis_failed",
-                gate_status="accepted",
-                gate_reason=route.reason,
-                phash=signal.dhash_hex,
-                provider=self.provider_name,
-                model=self.model_name,
-                analyzed_at_ms=now_ms(),
-                next_retry_at_ms=None,
-                attempt_count=await self._current_attempt_count(
-                    session_id=pending_frame.frame_context.session_id,
-                    frame_id=pending_frame.frame_context.frame_id,
-                ),
-                error_code="VISION_ANALYSIS_FAILED",
-                error_details=error_details,
-                routing_status=route.action,
-                routing_reason=route.reason,
-                routing_score=route.priority_score,
-                routing_metadata=self._build_routing_metadata(
-                    signal=signal,
-                    route=route,
-                    provider_budget_state=slot_state,
-                    analysis_outcome="analysis_failed",
-                    error_details=error_details,
-                ),
-            )
-            await self._append_routing_event(
+            await self._handle_terminal_analysis_failure(
+                worker=worker,
+                pending_frame=pending_frame,
                 signal=signal,
                 route=route,
-                provider_budget_state=slot_state,
-                did_attempt_analysis=True,
-                analysis_outcome="analysis_failed",
-                error_details=error_details,
-            )
-            worker.last_analysis_failed = True
-            worker.best_deferred_candidate = None
-            if route.memory_bootstrap_required and worker.accepted_event_count == 0:
-                worker.bootstrap_state = "bootstrap_degraded"
-                await self._persist_bootstrap_memory_state(
-                    worker=worker,
-                    status="bootstrap_degraded",
-                    reason="provider_request_failed",
-                    frame_id=pending_frame.frame_context.frame_id,
-                    attempt_count=await self._current_attempt_count(
-                        session_id=pending_frame.frame_context.session_id,
-                        frame_id=pending_frame.frame_context.frame_id,
-                    ),
-                    error_code="VISION_ANALYSIS_FAILED",
-                    error_details=error_details,
-                    last_attempt_at_ms=now_ms(),
-                )
-            logger.exception(
-                "VISION_ANALYSIS_FAILED session=%s frame=%s provider=%s model=%s",
-                pending_frame.frame_context.session_id,
-                pending_frame.frame_context.frame_id,
-                self.provider_name,
-                self.model_name,
-            )
-            await self._cleanup_ingest_artifacts(
-                session_id=pending_frame.frame_context.session_id,
-                frame_id=pending_frame.frame_context.frame_id,
+                slot_state=slot_state,
+                error_code="VISION_ANALYSIS_FAILED",
+                error_details={
+                    "http_status": exc.status_code,
+                    "provider_error_code": exc.provider_error_code,
+                    "provider_message": exc.provider_message,
+                    "payload_excerpt": exc.payload_excerpt,
+                },
+                bootstrap_reason="provider_request_failed",
             )
             return
         except Exception:
-            logger.exception(
-                "Unexpected vision analysis failure session=%s frame=%s provider=%s",
-                pending_frame.frame_context.session_id,
-                pending_frame.frame_context.frame_id,
-                self.provider_name,
-            )
             await self.provider_budget.record_non_rate_limit_failure()
-            generic_error_details = {"error_type": "unexpected_analysis_failure"}
-            await self._run_storage(
-                self.storage.update_vision_frame_processing,
-                session_id=pending_frame.frame_context.session_id,
-                frame_id=pending_frame.frame_context.frame_id,
-                processing_status="analysis_failed",
-                gate_status="accepted",
-                gate_reason=route.reason,
-                phash=signal.dhash_hex,
-                provider=self.provider_name,
-                model=self.model_name,
-                analyzed_at_ms=now_ms(),
-                next_retry_at_ms=None,
-                attempt_count=await self._current_attempt_count(
-                    session_id=pending_frame.frame_context.session_id,
-                    frame_id=pending_frame.frame_context.frame_id,
-                ),
-                error_code="VISION_ANALYSIS_FAILED",
-                error_details=generic_error_details,
-                routing_status=route.action,
-                routing_reason=route.reason,
-                routing_score=route.priority_score,
-                routing_metadata=self._build_routing_metadata(
-                    signal=signal,
-                    route=route,
-                    provider_budget_state=slot_state,
-                    analysis_outcome="analysis_failed",
-                    error_details=generic_error_details,
-                ),
-            )
-            await self._append_routing_event(
+            await self._handle_terminal_analysis_failure(
+                worker=worker,
+                pending_frame=pending_frame,
                 signal=signal,
                 route=route,
-                provider_budget_state=slot_state,
-                did_attempt_analysis=True,
-                analysis_outcome="analysis_failed",
-                error_details=generic_error_details,
-            )
-            worker.last_analysis_failed = True
-            worker.best_deferred_candidate = None
-            if route.memory_bootstrap_required and worker.accepted_event_count == 0:
-                worker.bootstrap_state = "bootstrap_degraded"
-                await self._persist_bootstrap_memory_state(
-                    worker=worker,
-                    status="bootstrap_degraded",
-                    reason="unexpected_analysis_failure",
-                    frame_id=pending_frame.frame_context.frame_id,
-                    attempt_count=await self._current_attempt_count(
-                        session_id=pending_frame.frame_context.session_id,
-                        frame_id=pending_frame.frame_context.frame_id,
-                    ),
-                    error_code="VISION_ANALYSIS_FAILED",
-                    last_attempt_at_ms=now_ms(),
-                )
-            logger.exception(
-                "VISION_ANALYSIS_FAILED session=%s frame=%s provider=%s model=%s",
-                pending_frame.frame_context.session_id,
-                pending_frame.frame_context.frame_id,
-                self.provider_name,
-                self.model_name,
-            )
-            await self._cleanup_ingest_artifacts(
-                session_id=pending_frame.frame_context.session_id,
-                frame_id=pending_frame.frame_context.frame_id,
+                slot_state=slot_state,
+                error_code="VISION_ANALYSIS_FAILED",
+                error_details={"error_type": "unexpected_analysis_failure"},
+                bootstrap_reason="unexpected_analysis_failure",
             )
             return
 
