@@ -64,6 +64,17 @@ def _estimate_decoded_frame_bytes(frame_b64: str) -> int:
     return max(0, (ceil(len(normalized) / 4) * 3) - padding_chars)
 
 
+def _reject_frame_if_oversized(frame_size_bytes: int, max_bytes: int) -> None:
+    if frame_size_bytes > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "Decoded vision frame exceeds "
+                f"BACKEND_MAX_VISION_FRAME_BYTES={max_bytes}"
+            ),
+        )
+
+
 @router.post("/vision/frame")
 async def vision_frame(request: Request, payload: VisionFramePayload) -> dict[str, str]:
     runtime = get_app_runtime(request.app)
@@ -83,23 +94,15 @@ async def vision_frame(request: Request, payload: VisionFramePayload) -> dict[st
             headers={"Retry-After": str(ingest_rate_decision.retry_after_seconds)},
         )
     estimated_frame_bytes = _estimate_decoded_frame_bytes(payload.frame_b64)
-    if estimated_frame_bytes > runtime.settings.backend_max_vision_frame_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=(
-                "Decoded vision frame exceeds "
-                f"BACKEND_MAX_VISION_FRAME_BYTES={runtime.settings.backend_max_vision_frame_bytes}"
-            ),
-        )
+    _reject_frame_if_oversized(
+        frame_size_bytes=estimated_frame_bytes,
+        max_bytes=runtime.settings.backend_max_vision_frame_bytes,
+    )
     frame_bytes = _decode_frame_bytes(payload.frame_b64)
-    if len(frame_bytes) > runtime.settings.backend_max_vision_frame_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=(
-                "Decoded vision frame exceeds "
-                f"BACKEND_MAX_VISION_FRAME_BYTES={runtime.settings.backend_max_vision_frame_bytes}"
-            ),
-        )
+    _reject_frame_if_oversized(
+        frame_size_bytes=len(frame_bytes),
+        max_bytes=runtime.settings.backend_max_vision_frame_bytes,
+    )
     ingest_result = await asyncio.to_thread(
         runtime.storage.store_vision_frame_ingest,
         session_id=payload.session_id,
