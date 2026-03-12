@@ -66,6 +66,14 @@ Expected response:
 
 `GET /healthz` confirms process liveness only. It does not validate upstream provider credentials or provider readiness.
 
+Optional operator CLI commands from the repo root:
+
+```bash
+python3 -m backend.cli check-config
+python3 -m backend.cli bootstrap-storage
+python3 -m backend.cli export-memory --output /tmp/portworld-memory-export.zip
+```
+
 ## Persistence
 
 Compose mounts one named volume at `/app/backend/var`.
@@ -92,6 +100,12 @@ docker compose up --build -d
 ```
 
 Both paths preserve the named volume unless it is removed explicitly.
+
+The container image now boots through:
+
+```bash
+python -m backend.cli serve
+```
 
 ## Operator Reference
 

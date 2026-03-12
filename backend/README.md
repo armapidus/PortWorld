@@ -559,6 +559,15 @@ High-signal self-host summary:
 
 The repo-root `docker-compose.yml` remains the supported self-host entrypoint for this backend slice.
 
+Initial operator CLI:
+
+```bash
+python3 -m backend.cli check-config
+python3 -m backend.cli bootstrap-storage
+python3 -m backend.cli export-memory --output /tmp/portworld-memory-export.zip
+python3 -m backend.cli serve
+```
+
 ## Validation
 
 For full operator-facing setup and route workflows, use `docs/BACKEND_SELF_HOSTING.md`.
@@ -567,6 +576,7 @@ Useful backend sanity checks:
 
 ```bash
 docker compose config
+python3 -m backend.cli check-config
 curl http://127.0.0.1:8080/healthz
 curl http://127.0.0.1:8080/readyz
 python3 -m compileall backend
@@ -596,6 +606,7 @@ python backend/devtools/ws_probe.py \
 - Realtime tooling is opt-in. It is enabled only when `REALTIME_TOOLING_ENABLED=true`.
 - `web_search` is optional and only appears when Tavily is configured.
 - Persistent profile onboarding, memory export, session reset, and retention are now backend-owned HTTP flows.
+- The backend now exposes a small operator CLI for `serve`, `check-config`, `bootstrap-storage`, and `export-memory`.
 - The active iPhone runtime no longer emits `wakeword.detected`; `session.activate` is the only required conversation-start control message.
 - Probe frames are a devtools-only compatibility surface and stay disabled unless `BACKEND_ENABLE_DEVTOOLS_PROTOCOL=true`.
 - Automatic profile promotion from conversations or vision is still not active in the current backend slice.
