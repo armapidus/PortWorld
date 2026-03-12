@@ -12,6 +12,7 @@ from fastapi import Request
 from pydantic import BaseModel, Field, field_validator
 
 from backend.core.auth import require_http_bearer_auth
+from backend.core.http import client_ip_from_connection
 from backend.core.runtime import get_app_runtime
 from backend.vision.contracts import VisionFrameContext
 
@@ -19,12 +20,9 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _client_ip_from_request(request: Request) -> str:
-    client = request.client
-    if client is None:
-        return "unknown"
-    host = (client.host or "").strip()
-    return host or "unknown"
+class VisionFrameResponse(BaseModel):
+    status: str
+    frame_id: str
 
 
 class VisionFramePayload(BaseModel):
@@ -75,11 +73,11 @@ def _reject_frame_if_oversized(frame_size_bytes: int, max_bytes: int) -> None:
         )
 
 
-@router.post("/vision/frame")
-async def vision_frame(request: Request, payload: VisionFramePayload) -> dict[str, str]:
+@router.post("/vision/frame", response_model=VisionFrameResponse)
+async def vision_frame(request: Request, payload: VisionFramePayload) -> VisionFrameResponse:
     runtime = get_app_runtime(request.app)
     require_http_bearer_auth(request=request, settings=runtime.settings)
-    client_ip = _client_ip_from_request(request)
+    client_ip = client_ip_from_connection(request)
     ingest_rate_decision = await runtime.limit_vision_frame_ingest(
         client_ip=client_ip,
         session_id=payload.session_id,
@@ -135,4 +133,4 @@ async def vision_frame(request: Request, payload: VisionFramePayload) -> dict[st
             image_media_type="image/jpeg",
         )
 
-    return {"status": "ok", "frame_id": payload.frame_id}
+    return VisionFrameResponse(status="ok", frame_id=payload.frame_id)

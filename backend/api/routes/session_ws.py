@@ -6,6 +6,7 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from backend.core.auth import reject_ws_if_unauthorized
+from backend.core.http import client_ip_from_connection
 from backend.core.runtime import get_app_runtime
 from backend.ws.session_context import SessionConnectionContext
 from backend.ws.session_loop import process_next_websocket_message
@@ -18,18 +19,10 @@ logger = logging.getLogger(__name__)
 _connection_ids = itertools.count(1)
 
 
-def _client_ip_from_websocket(websocket: WebSocket) -> str:
-    client = websocket.client
-    if client is None:
-        return "unknown"
-    host = (client.host or "").strip()
-    return host or "unknown"
-
-
 @router.websocket("/ws/session")
 async def ws_session(websocket: WebSocket) -> None:
     runtime = get_app_runtime(websocket.app)
-    client_ip = _client_ip_from_websocket(websocket)
+    client_ip = client_ip_from_connection(websocket)
     connect_rate_decision = await runtime.limit_ws_connect(client_ip=client_ip)
     if not connect_rate_decision.allowed:
         logger.warning(
