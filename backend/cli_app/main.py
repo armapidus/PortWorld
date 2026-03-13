@@ -24,15 +24,15 @@ from backend.cli_app.commands.ops import ops_group
     help="Path to the PortWorld project root.",
 )
 @click.option("--verbose", is_flag=True, default=False, help="Enable verbose CLI output.")
-@click.option("json_output", "--json", is_flag=True, default=False, help="Emit JSON output.")
+@click.option("--json", "json_output", is_flag=True, default=False, help="Emit JSON output.")
 @click.option(
-    "non_interactive",
     "--non-interactive",
+    "non_interactive",
     is_flag=True,
     default=False,
     help="Fail instead of prompting for missing input.",
 )
-@click.option("yes", "--yes", is_flag=True, default=False, help="Accept confirmation prompts.")
+@click.option("--yes", "yes", is_flag=True, default=False, help="Accept confirmation prompts.")
 @click.version_option(version=__version__, prog_name="portworld")
 @click.pass_context
 def cli(
@@ -45,7 +45,7 @@ def cli(
 ) -> None:
     """PortWorld backend deploy and operator CLI."""
     ctx.obj = CLIContext(
-        project_root=project_root,
+        project_root_override=project_root,
         verbose=verbose,
         json_output=json_output,
         non_interactive=non_interactive,
@@ -61,3 +61,7 @@ cli.add_command(ops_group)
 
 def main() -> None:
     cli()
+
+
+if __name__ == "__main__":
+    main()
