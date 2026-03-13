@@ -2,10 +2,12 @@
 import SwiftUI
 
 struct MainAppView: View {
+  @StateObject private var appSettingsStore = AppSettingsStore()
+  @StateObject private var onboardingStore = OnboardingStore()
   @StateObject private var runtimeViewModel: AssistantRuntimeViewModel
   @ObservedObject private var wearablesRuntimeManager: WearablesRuntimeManager
   @State private var isPresentingFutureHardwareSetup = false
-  @State private var showsStartupLoadingView = true
+  @State private var route: AppRoute = .splash
 
   init(wearablesRuntimeManager: WearablesRuntimeManager) {
     self.wearablesRuntimeManager = wearablesRuntimeManager
@@ -16,40 +18,55 @@ struct MainAppView: View {
 
   var body: some View {
     ZStack {
-      AssistantRuntimeView(
-        viewModel: runtimeViewModel,
-        onOpenFutureHardwareSetup: {
-          isPresentingFutureHardwareSetup = true
+      switch route {
+      case .splash:
+        Color.clear
+      case .welcome:
+        WelcomeShellView {
+          onboardingStore.markWelcomeSeen()
+          route = .legacyRuntime
         }
-      )
+      case .legacyRuntime:
+        AssistantRuntimeView(
+          viewModel: runtimeViewModel,
+          onOpenFutureHardwareSetup: {
+            isPresentingFutureHardwareSetup = true
+          }
+        )
+      }
 
-      if showsStartupLoadingView {
+      if route == .splash {
         StartupLoadingView()
           .transition(.opacity)
       }
     }
-    .animation(.easeOut(duration: 0.24), value: showsStartupLoadingView)
+    .animation(.easeOut(duration: 0.24), value: route)
     .sheet(isPresented: $isPresentingFutureHardwareSetup) {
       FutureHardwareSetupView(wearablesRuntimeManager: wearablesRuntimeManager)
     }
     .onAppear {
-      updateStartupLoadingVisibility(for: wearablesRuntimeManager.configurationState)
+      let _ = appSettingsStore
+      resolveRoute(for: wearablesRuntimeManager.configurationState)
     }
     .onChange(of: wearablesRuntimeManager.configurationState) { _, newValue in
-      updateStartupLoadingVisibility(for: newValue)
+      resolveRoute(for: newValue)
+    }
+    .onChange(of: onboardingStore.progress) { _, _ in
+      guard route != .splash else { return }
+      route = onboardingStore.shouldShowWelcome ? .welcome : .legacyRuntime
     }
   }
 }
 
 private extension MainAppView {
-  func updateStartupLoadingVisibility(
+  func resolveRoute(
     for configurationState: WearablesRuntimeManager.ConfigurationState
   ) {
     switch configurationState {
     case .idle, .configuring:
-      break
+      route = .splash
     case .ready, .failed:
-      showsStartupLoadingView = false
+      route = onboardingStore.shouldShowWelcome ? .welcome : .legacyRuntime
     }
   }
 }

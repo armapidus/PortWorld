@@ -9,22 +9,14 @@ struct StartupLoadingView: View {
       Color.black
         .ignoresSafeArea()
 
-      VStack(spacing: 20) {
-        Image("StartupMark")
-          .resizable()
-          .aspectRatio(contentMode: .fit)
-          .frame(width: artworkSize, height: artworkSize)
-          .accessibilityHidden(true)
-
-        Text("PortWorld")
-          .font(.system(.title, design: .rounded).weight(.bold))
-          .tracking(0.8)
-          .foregroundStyle(.white)
-      }
-      .padding(24)
-      .accessibilityElement(children: .combine)
-      .accessibilityLabel("PortWorld is starting")
+      Image("StartupMark")
+        .resizable()
+        .aspectRatio(contentMode: .fit)
+        .frame(width: artworkSize, height: artworkSize)
+        .accessibilityHidden(true)
     }
     .statusBarHidden(true)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("PortWorld is starting")
   }
 }
