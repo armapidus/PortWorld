@@ -68,6 +68,8 @@ Copy `.env.example` to `.env` and edit. The full reference with all options and 
 | `REALTIME_TOOLING_ENABLED` | Set `true` to register memory and search tools with the realtime session |
 | `TAVILY_API_KEY` | Enables the `web_search` tool (only used when tooling is enabled) |
 
+Some OpenAI-compatible Mistral endpoints reject `response_format` / structured-output mode for their tokenizer backend. When that happens, the backend automatically retries once without `response_format` and falls back to prompt-only JSON extraction.
+
 **Production hardening**
 
 Set `BACKEND_PROFILE=production` to enforce the following at startup:

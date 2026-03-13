@@ -4,6 +4,7 @@ import base64
 import datetime as dt
 import email.utils
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -24,6 +25,8 @@ DEFAULT_MISTRAL_BASE_URL = "https://api.mistral.ai"
 DEFAULT_VISION_TEMPERATURE = 0.0
 DEFAULT_VISION_TOP_P = 0.1
 DEFAULT_VISION_MAX_TOKENS = 280
+
+logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = (
     "You are a vision observation service for a realtime wearable assistant. "
@@ -91,8 +94,15 @@ class MistralVisionAnalyzer:
         try:
             response = await self._post_completion(client=client, request_body=request_body)
         except VisionProviderError as exc:
-            if self._supports_response_format and _is_unsupported_response_format_provider_error(exc):
+            if self._supports_response_format and _is_response_format_compatibility_error(exc):
                 self._supports_response_format = False
+                logger.warning(
+                    "Vision provider rejected response_format; retrying without structured output provider=%s model=%s base_url=%s provider_message=%s",
+                    self.provider_name,
+                    self.model_name,
+                    (self.base_url or DEFAULT_MISTRAL_BASE_URL).rstrip("/"),
+                    (exc.provider_message or "").strip()[:220] or None,
+                )
                 fallback_body = self._build_request_body(
                     image_bytes=image_bytes,
                     frame_context=frame_context,
@@ -364,13 +374,26 @@ def _extract_provider_content_excerpt(response_json: dict[str, Any]) -> str | No
     return str(content)[:400]
 
 
-def _is_unsupported_response_format_provider_error(error: VisionProviderError) -> bool:
+def _is_response_format_compatibility_error(error: VisionProviderError) -> bool:
     if error.status_code != 400:
         return False
     code = (error.provider_error_code or "").strip().lower()
     message = (error.provider_message or "").strip().lower()
-    if "response_format" not in message:
-        return False
-    if not code:
+    if "response_format" in message:
+        if not code:
+            return True
+        return "unknown_parameter" in code or "invalid_parameter" in code
+
+    structured_output_markers = (
+        "structured output backend",
+        "structured outputs",
+        "guidance",
+        "xgrammar",
+        "outlines",
+        "tokenizer_mode='hf'",
+        'tokenizer_mode="hf"',
+        "mistral tokenizer is not supported",
+    )
+    if any(marker in message for marker in structured_output_markers):
         return True
-    return "unknown_parameter" in code or "invalid_parameter" in code
+    return False
