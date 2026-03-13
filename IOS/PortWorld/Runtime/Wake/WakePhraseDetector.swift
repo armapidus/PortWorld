@@ -12,6 +12,7 @@ final class WakePhraseDetector {
   var onWakeDetected: ((WakeWordDetectionEvent) -> Void)?
   var onSleepDetected: ((WakeWordDetectionEvent) -> Void)?
   var onError: ((String) -> Void)?
+  var onStatusChanged: ((StatusSnapshot) -> Void)?
 
   private let engine: WakeWordEngine
   private(set) var lastStatus = StatusSnapshot(
@@ -46,11 +47,13 @@ final class WakePhraseDetector {
       self?.onError?(error.localizedDescription)
     }
     engine.onStatusChanged = { [weak self] snapshot in
-      self?.lastStatus = StatusSnapshot(
+      let status = StatusSnapshot(
         engine: snapshot.engine.rawValue,
         runtime: snapshot.runtime.rawValue,
         authorization: snapshot.authorization.rawValue
       )
+      self?.lastStatus = status
+      self?.onStatusChanged?(status)
     }
   }
 
