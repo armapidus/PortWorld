@@ -24,19 +24,11 @@ struct BackendSetupView: View {
   }
 
   var body: some View {
-    PWScreen {
-      VStack(alignment: .leading, spacing: PWSpace.section) {
-        VStack(alignment: .leading, spacing: PWSpace.md) {
-          Text("Connect your backend")
-            .font(PWTypography.display)
-            .foregroundColor(PWColor.textPrimary)
-
-          Text("Add the address of your self-hosted PortWorld backend. If your deployment uses bearer auth, paste that too.")
-            .font(PWTypography.body)
-            .foregroundColor(PWColor.textSecondary)
-            .fixedSize(horizontal: false, vertical: true)
-        }
-
+    PWOnboardingScaffold(
+      style: .leadingContent,
+      title: "Add your backend",
+      subtitle: "Use your self-hosted PortWorld URL. Add a bearer token only if your deployment requires it.",
+      content: {
         VStack(alignment: .leading, spacing: PWSpace.xl) {
           PWTextFieldRow(
             label: "Backend URL",
@@ -57,7 +49,7 @@ struct BackendSetupView: View {
             label: "Bearer Token",
             placeholder: "Optional",
             text: $bearerToken,
-            message: "Leave blank if your backend does not require authentication.",
+            message: "Optional. Leave blank if your backend does not require bearer auth.",
             isSecure: true,
             textInputAutocapitalization: .never,
             submitLabel: .go
@@ -77,24 +69,17 @@ struct BackendSetupView: View {
           )
           .padding(.top, PWSpace.sm)
         }
-
-        Spacer(minLength: 0)
-
-        HStack {
-          Spacer(minLength: 0)
-          PWOnboardingButton(
-            title: isValidating ? "Checking..." : "Continue",
-            isDisabled: isContinueDisabled,
-            action: {
-              Task { await validateAndContinue() }
-            }
-          )
-          Spacer(minLength: 0)
-        }
-        .padding(.bottom, PWSpace.xl)
+      },
+      footer: {
+        PWOnboardingButton(
+          title: isValidating ? "Checking..." : "Verify backend",
+          isDisabled: isContinueDisabled,
+          action: {
+            Task { await validateAndContinue() }
+          }
+        )
       }
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
+    )
   }
 }
 
@@ -129,7 +114,7 @@ private extension BackendSetupView {
       return "Backend connection verified."
     }
 
-    return "Use the base URL only. The app derives the required endpoints automatically."
+    return "Base URL only. PortWorld derives the required endpoints automatically."
   }
 
   var statusTitle: String {

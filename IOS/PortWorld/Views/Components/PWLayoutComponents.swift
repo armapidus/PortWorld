@@ -1,5 +1,10 @@
 import SwiftUI
 
+enum PWOnboardingScaffoldStyle {
+  case centeredHero
+  case leadingContent
+}
+
 struct PWScreen<Content: View>: View {
   let title: String?
   let horizontalPadding: CGFloat
@@ -36,6 +41,108 @@ struct PWScreen<Content: View>: View {
       .padding(.horizontal, horizontalPadding)
       .padding(.top, topPadding)
     }
+  }
+}
+
+struct PWOnboardingScaffold<Content: View, Footer: View>: View {
+  let style: PWOnboardingScaffoldStyle
+  let title: String
+  let subtitle: String?
+  let horizontalPadding: CGFloat
+  let topPadding: CGFloat
+  let heroSpacing: CGFloat
+  private let content: Content
+  private let footer: Footer
+
+  init(
+    style: PWOnboardingScaffoldStyle,
+    title: String,
+    subtitle: String? = nil,
+    horizontalPadding: CGFloat = PWSpace.screen,
+    topPadding: CGFloat = 28,
+    heroSpacing: CGFloat = PWSpace.section,
+    @ViewBuilder content: () -> Content,
+    @ViewBuilder footer: () -> Footer
+  ) {
+    self.style = style
+    self.title = title
+    self.subtitle = subtitle
+    self.horizontalPadding = horizontalPadding
+    self.topPadding = topPadding
+    self.heroSpacing = heroSpacing
+    self.content = content()
+    self.footer = footer()
+  }
+
+  var body: some View {
+    ZStack {
+      PWColor.background
+        .ignoresSafeArea()
+
+      switch style {
+      case .centeredHero:
+        centeredHeroLayout
+      case .leadingContent:
+        leadingContentLayout
+      }
+    }
+    .safeAreaInset(edge: .bottom) {
+      HStack {
+        Spacer(minLength: 0)
+        footer
+        Spacer(minLength: 0)
+      }
+      .padding(.horizontal, horizontalPadding)
+      .padding(.top, PWSpace.lg)
+      .padding(.bottom, PWSpace.xl)
+    }
+  }
+
+  private var centeredHeroLayout: some View {
+    VStack(spacing: heroSpacing) {
+      Spacer(minLength: 0)
+
+      heroBlock(multilineAlignment: .center)
+        .frame(maxWidth: 332)
+
+      content
+
+      Spacer(minLength: 0)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .padding(.horizontal, horizontalPadding)
+    .padding(.top, topPadding)
+  }
+
+  private var leadingContentLayout: some View {
+    ScrollView(showsIndicators: false) {
+      VStack(alignment: .leading, spacing: heroSpacing) {
+        heroBlock(multilineAlignment: .leading)
+        content
+      }
+      .frame(maxWidth: .infinity, alignment: .topLeading)
+      .padding(.horizontal, horizontalPadding)
+      .padding(.top, topPadding)
+      .padding(.bottom, 120)
+    }
+  }
+
+  private func heroBlock(multilineAlignment: TextAlignment) -> some View {
+    VStack(alignment: multilineAlignment == .center ? .center : .leading, spacing: PWSpace.md) {
+      Text(title)
+        .font(PWTypography.display)
+        .foregroundStyle(PWColor.textPrimary)
+        .multilineTextAlignment(multilineAlignment)
+
+      if let subtitle, subtitle.isEmpty == false {
+        Text(subtitle)
+          .font(PWTypography.body)
+          .foregroundStyle(PWColor.textSecondary)
+          .multilineTextAlignment(multilineAlignment)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: multilineAlignment == .center ? .center : .leading)
   }
 }
 

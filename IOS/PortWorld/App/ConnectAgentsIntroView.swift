@@ -4,28 +4,16 @@ struct ConnectAgentsIntroView: View {
   let onContinue: () -> Void
 
   var body: some View {
-    PWScreen {
-      VStack(spacing: PWSpace.hero) {
-        Spacer(minLength: 0)
-
-        VStack(spacing: PWSpace.lg) {
-          Text("Connect your agents")
-            .font(PWTypography.display)
-            .foregroundColor(PWColor.textPrimary)
-            .multilineTextAlignment(.center)
-
-          Text("Link your self-hosted backend to unlock voice, memory, and live glasses workflows.")
-            .font(PWTypography.body)
-            .foregroundColor(PWColor.textSecondary)
-            .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: 330)
-
+    PWOnboardingScaffold(
+      style: .centeredHero,
+      title: "Connect your agents",
+      subtitle: "PortWorld runs against your own backend. Next, you’ll add its URL and optional bearer token.",
+      content: {
+        EmptyView()
+      },
+      footer: {
         PWOnboardingButton(title: "Set up backend", action: onContinue)
-
-        Spacer(minLength: 0)
       }
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
+    )
   }
 }

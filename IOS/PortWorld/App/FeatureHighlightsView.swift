@@ -4,21 +4,12 @@ struct FeatureHighlightsView: View {
   let onContinue: () -> Void
 
   var body: some View {
-    PWScreen {
-      VStack(alignment: .leading, spacing: PWSpace.hero) {
-        Spacer(minLength: 0)
-
-        VStack(alignment: .leading, spacing: PWSpace.md) {
-          Text("What PortWorld gives you")
-            .font(PWTypography.display)
-            .foregroundColor(PWColor.textPrimary)
-
-          Text("Three things matter on day one.")
-            .font(PWTypography.body)
-            .foregroundColor(PWColor.textSecondary)
-        }
-
-        VStack(alignment: .leading, spacing: PWSpace.xl) {
+    PWOnboardingScaffold(
+      style: .leadingContent,
+      title: "What PortWorld gives you",
+      subtitle: "Three things matter on day one.",
+      content: {
+        VStack(alignment: .leading, spacing: 22) {
           FeatureRow(
             systemImage: "waveform.and.mic",
             title: "Live voice agents",
@@ -37,13 +28,12 @@ struct FeatureHighlightsView: View {
             detail: "Send what you see to your agents without pulling out your phone."
           )
         }
-
+        .padding(.top, PWSpace.sm)
+      },
+      footer: {
         PWOnboardingButton(title: "Continue", action: onContinue)
-
-        Spacer(minLength: 0)
       }
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
+    )
   }
 }
 
@@ -57,7 +47,7 @@ private struct FeatureRow: View {
       Image(systemName: systemImage)
         .font(.system(size: 18, weight: .semibold))
         .foregroundColor(PWColor.textPrimary)
-        .frame(width: 40, height: 40)
+        .frame(width: 44, height: 44)
         .background(
           Circle()
             .fill(PWColor.surface)
@@ -77,6 +67,9 @@ private struct FeatureRow: View {
           .foregroundColor(PWColor.textSecondary)
           .fixedSize(horizontal: false, vertical: true)
       }
+
+      Spacer(minLength: 0)
     }
+    .padding(.bottom, 6)
   }
 }

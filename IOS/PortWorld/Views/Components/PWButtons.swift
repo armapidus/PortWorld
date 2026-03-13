@@ -83,19 +83,31 @@ struct PWOnboardingButton: View {
   var body: some View {
     Button(action: action) {
       Text(title)
-        .font(PWTypography.headline)
+        .font(.system(.body, design: .rounded).weight(.semibold))
         .foregroundStyle(isDisabled ? PWColor.textTertiary : PWColor.textPrimary)
-        .padding(.horizontal, 28)
+        .frame(minWidth: 188)
+        .padding(.horizontal, 30)
         .frame(height: 54)
-        .background(isDisabled ? PWColor.disabledFill : PWColor.surfaceRaised)
-        .overlay(
-          Capsule(style: .continuous)
-            .stroke(isDisabled ? PWColor.borderSubtle : PWColor.borderStrong, lineWidth: 1)
-        )
-        .clipShape(Capsule(style: .continuous))
     }
-    .buttonStyle(.plain)
+    .buttonStyle(PWOnboardingButtonStyle(isDisabled: isDisabled))
     .disabled(isDisabled)
+  }
+}
+
+private struct PWOnboardingButtonStyle: ButtonStyle {
+  let isDisabled: Bool
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .background(isDisabled ? PWColor.disabledFill : PWColor.surfaceRaised)
+      .overlay(
+        Capsule(style: .continuous)
+          .stroke(isDisabled ? PWColor.borderSubtle : PWColor.border, lineWidth: 1)
+      )
+      .clipShape(Capsule(style: .continuous))
+      .scaleEffect(configuration.isPressed && isDisabled == false ? 0.985 : 1.0)
+      .opacity(configuration.isPressed && isDisabled == false ? 0.92 : 1.0)
+      .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
   }
 }
 

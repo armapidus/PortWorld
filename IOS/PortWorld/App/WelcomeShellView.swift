@@ -4,28 +4,16 @@ struct WelcomeShellView: View {
   let onContinue: () -> Void
 
   var body: some View {
-    PWScreen {
-      VStack(spacing: PWSpace.hero) {
-        Spacer(minLength: 0)
-
-        VStack(spacing: PWSpace.lg) {
-          Text("Welcome to PortWorld")
-            .font(PWTypography.display)
-            .foregroundColor(PWColor.textPrimary)
-            .multilineTextAlignment(.center)
-
-          Text("Your hands-free assistant for Meta smart glasses.")
-            .font(PWTypography.body)
-            .foregroundColor(PWColor.textSecondary)
-            .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: 320)
-
+    PWOnboardingScaffold(
+      style: .centeredHero,
+      title: "Welcome to PortWorld",
+      subtitle: "Your hands-free assistant for Meta smart glasses.",
+      content: {
+        EmptyView()
+      },
+      footer: {
         PWOnboardingButton(title: "Continue", action: onContinue)
-
-        Spacer(minLength: 0)
       }
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
+    )
   }
 }
