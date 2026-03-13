@@ -4,16 +4,12 @@ import SwiftUI
 struct MainAppView: View {
   @StateObject private var appSettingsStore = AppSettingsStore()
   @StateObject private var onboardingStore = OnboardingStore()
-  @StateObject private var runtimeViewModel: AssistantRuntimeViewModel
   @ObservedObject private var wearablesRuntimeManager: WearablesRuntimeManager
   @State private var isPresentingFutureHardwareSetup = false
   @State private var route: AppRoute = .splash
 
   init(wearablesRuntimeManager: WearablesRuntimeManager) {
     self.wearablesRuntimeManager = wearablesRuntimeManager
-    _runtimeViewModel = StateObject(
-      wrappedValue: AssistantRuntimeViewModel(wearablesRuntimeManager: wearablesRuntimeManager)
-    )
   }
 
   var body: some View {
@@ -24,15 +20,22 @@ struct MainAppView: View {
       case .welcome:
         WelcomeShellView {
           onboardingStore.markWelcomeSeen()
+          route = nextOnboardingRoute()
+        }
+      case .backendSetup:
+        BackendSetupView(appSettingsStore: appSettingsStore) {
+          onboardingStore.markBackendValidated()
           route = .legacyRuntime
         }
       case .legacyRuntime:
-        AssistantRuntimeView(
-          viewModel: runtimeViewModel,
+        LegacyRuntimeHostView(
+          wearablesRuntimeManager: wearablesRuntimeManager,
+          settings: appSettingsStore.settings,
           onOpenFutureHardwareSetup: {
             isPresentingFutureHardwareSetup = true
           }
         )
+        .id(runtimeHostIdentity)
       }
 
       if route == .splash {
@@ -45,7 +48,6 @@ struct MainAppView: View {
       FutureHardwareSetupView(wearablesRuntimeManager: wearablesRuntimeManager)
     }
     .onAppear {
-      let _ = appSettingsStore
       resolveRoute(for: wearablesRuntimeManager.configurationState)
     }
     .onChange(of: wearablesRuntimeManager.configurationState) { _, newValue in
@@ -53,12 +55,32 @@ struct MainAppView: View {
     }
     .onChange(of: onboardingStore.progress) { _, _ in
       guard route != .splash else { return }
-      route = onboardingStore.shouldShowWelcome ? .welcome : .legacyRuntime
+      route = nextOnboardingRoute()
     }
   }
 }
 
 private extension MainAppView {
+  var runtimeHostIdentity: String {
+    [
+      appSettingsStore.settings.backendBaseURL,
+      appSettingsStore.settings.bearerToken,
+      appSettingsStore.settings.validationState.rawValue,
+    ].joined(separator: "|")
+  }
+
+  func nextOnboardingRoute() -> AppRoute {
+    if onboardingStore.shouldShowWelcome {
+      return .welcome
+    }
+
+    if onboardingStore.progress.backendValidated == false {
+      return .backendSetup
+    }
+
+    return .legacyRuntime
+  }
+
   func resolveRoute(
     for configurationState: WearablesRuntimeManager.ConfigurationState
   ) {
@@ -66,7 +88,7 @@ private extension MainAppView {
     case .idle, .configuring:
       route = .splash
     case .ready, .failed:
-      route = onboardingStore.shouldShowWelcome ? .welcome : .legacyRuntime
+      route = nextOnboardingRoute()
     }
   }
 }

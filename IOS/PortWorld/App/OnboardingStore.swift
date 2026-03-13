@@ -42,6 +42,12 @@ final class OnboardingStore: ObservableObject {
     persist()
   }
 
+  func markBackendValidated() {
+    guard progress.backendValidated == false else { return }
+    progress.backendValidated = true
+    persist()
+  }
+
   private func persist() {
     guard let data = try? encoder.encode(progress) else { return }
     userDefaults.set(data, forKey: Self.progressKey)

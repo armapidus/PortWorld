@@ -44,4 +44,31 @@ final class AppSettingsStore: ObservableObject {
       )
     }
   }
+
+  func updateBackendSettings(
+    backendBaseURL: String,
+    bearerToken: String,
+    validationState: BackendValidationState
+  ) {
+    settings.backendBaseURL = backendBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    settings.bearerToken = bearerToken.trimmingCharacters(in: .whitespacesAndNewlines)
+    settings.validationState = validationState
+    persist()
+  }
+
+  func markValidationState(_ validationState: BackendValidationState) {
+    settings.validationState = validationState
+    persist()
+  }
+
+  private func persist() {
+    do {
+      let data = try encoder.encode(settings)
+      userDefaults.set(data, forKey: Self.settingsKey)
+    } catch {
+      #if DEBUG
+        NSLog("AppSettingsStore: failed to persist settings: \(error)")
+      #endif
+    }
+  }
 }

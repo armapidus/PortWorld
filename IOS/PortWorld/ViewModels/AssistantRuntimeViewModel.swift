@@ -27,9 +27,11 @@ final class AssistantRuntimeViewModel: ObservableObject {
   private var phoneVisionLastErrorText = ""
   private var cancellables = Set<AnyCancellable>()
 
-  init(wearablesRuntimeManager: WearablesRuntimeManager) {
+  init(
+    wearablesRuntimeManager: WearablesRuntimeManager,
+    config: AssistantRuntimeConfig = AssistantRuntimeConfig.load()
+  ) {
     self.wearablesRuntimeManager = wearablesRuntimeManager
-    let config = AssistantRuntimeConfig.load()
     self.controller = AssistantRuntimeController(config: config)
     self.controllerStatus = controller.status
     self.status = controller.status

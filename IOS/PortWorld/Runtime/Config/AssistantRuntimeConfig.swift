@@ -21,10 +21,14 @@ struct AssistantRuntimeConfig {
   let wakeWordDetectionCooldownMs: Int64
   let sleepWordMinActiveStreamMs: Int64
 
-  static func load(from bundle: Bundle = .main, userDefaults: UserDefaults = .standard) -> AssistantRuntimeConfig {
-    let backendBaseURL = resolveURL(
-      infoPlistKey: "SON_BACKEND_BASE_URL",
-      defaultURLString: "http://127.0.0.1:8080",
+  static func load(
+    backendBaseURLOverride: String? = nil,
+    bearerTokenOverride: String? = nil,
+    from bundle: Bundle = .main,
+    userDefaults: UserDefaults = .standard
+  ) -> AssistantRuntimeConfig {
+    let backendBaseURL = resolveBaseURL(
+      override: backendBaseURLOverride,
       bundle: bundle
     )
     let wsPath = resolvePath(
@@ -41,7 +45,12 @@ struct AssistantRuntimeConfig {
     let explicitVisionURL = resolveOptionalURL(infoPlistKey: "SON_VISION_URL", bundle: bundle)
 
     let apiKey = resolveAPIKey(bundle: bundle, userDefaults: userDefaults)
-    let bearerToken = resolveString(infoPlistKey: "SON_BEARER_TOKEN", defaultValue: "", bundle: bundle)
+    let bearerToken = resolveOverrideString(
+      bearerTokenOverride,
+      infoPlistKey: "SON_BEARER_TOKEN",
+      defaultValue: "",
+      bundle: bundle
+    )
 
     return AssistantRuntimeConfig(
       webSocketURL: explicitWebSocketURL ?? deriveWebSocketURL(baseURL: backendBaseURL, path: wsPath),
@@ -213,6 +222,22 @@ struct AssistantRuntimeConfig {
     return defaultValue
   }
 
+  private static func resolveOverrideString(
+    _ override: String?,
+    infoPlistKey: String,
+    defaultValue: String,
+    bundle: Bundle
+  ) -> String {
+    if let override {
+      let trimmed = override.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !trimmed.isEmpty {
+        return trimmed
+      }
+    }
+
+    return resolveString(infoPlistKey: infoPlistKey, defaultValue: defaultValue, bundle: bundle)
+  }
+
   private static func resolveURL(infoPlistKey: String, defaultURLString: String, bundle: Bundle) -> URL {
     if let rawValue = bundle.object(forInfoDictionaryKey: infoPlistKey) as? String {
       let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -222,6 +247,21 @@ struct AssistantRuntimeConfig {
     }
 
     return URL(string: defaultURLString)!
+  }
+
+  private static func resolveBaseURL(override: String?, bundle: Bundle) -> URL {
+    if let override {
+      let trimmed = override.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !trimmed.isEmpty, let resolvedURL = URL(string: trimmed) {
+        return resolvedURL
+      }
+    }
+
+    return resolveURL(
+      infoPlistKey: "SON_BACKEND_BASE_URL",
+      defaultURLString: "http://127.0.0.1:8080",
+      bundle: bundle
+    )
   }
 
   private static func resolveOptionalURL(infoPlistKey: String, bundle: Bundle) -> URL? {
