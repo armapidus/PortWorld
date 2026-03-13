@@ -5,6 +5,8 @@ import Foundation
 final class OnboardingStore: ObservableObject {
   struct Progress: Codable, Equatable {
     var welcomeSeen = false
+    var featuresSeen = false
+    var backendIntroSeen = false
     var backendValidated = false
     var metaCompleted = false
     var metaSkipped = false
@@ -39,6 +41,18 @@ final class OnboardingStore: ObservableObject {
   func markWelcomeSeen() {
     guard progress.welcomeSeen == false else { return }
     progress.welcomeSeen = true
+    persist()
+  }
+
+  func markFeaturesSeen() {
+    guard progress.featuresSeen == false else { return }
+    progress.featuresSeen = true
+    persist()
+  }
+
+  func markBackendIntroSeen() {
+    guard progress.backendIntroSeen == false else { return }
+    progress.backendIntroSeen = true
     persist()
   }
 

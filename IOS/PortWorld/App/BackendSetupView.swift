@@ -31,42 +31,40 @@ struct BackendSetupView: View {
             .font(PWTypography.display)
             .foregroundColor(PWColor.textPrimary)
 
-          Text("Enter the URL of your self-hosted PortWorld backend. Add a bearer token if your deployment requires one.")
+          Text("Add the address of your self-hosted PortWorld backend. If your deployment uses bearer auth, paste that too.")
             .font(PWTypography.body)
             .foregroundColor(PWColor.textSecondary)
             .fixedSize(horizontal: false, vertical: true)
         }
 
-        PWCard {
-          VStack(alignment: .leading, spacing: PWSpace.lg) {
-            PWTextFieldRow(
-              label: "Backend URL",
-              placeholder: "https://your-backend.example.com",
-              text: $backendBaseURL,
-              message: backendURLMessage,
-              tone: backendURLTone,
-              textInputAutocapitalization: .never,
-              keyboardType: .URL,
-              submitLabel: .next
-            )
-            .focused($focusedField, equals: .backendURL)
-            .onSubmit {
-              focusedField = .bearerToken
-            }
+        VStack(alignment: .leading, spacing: PWSpace.xl) {
+          PWTextFieldRow(
+            label: "Backend URL",
+            placeholder: "https://your-backend.example.com",
+            text: $backendBaseURL,
+            message: backendURLMessage,
+            tone: backendURLTone,
+            textInputAutocapitalization: .never,
+            keyboardType: .URL,
+            submitLabel: .next
+          )
+          .focused($focusedField, equals: .backendURL)
+          .onSubmit {
+            focusedField = .bearerToken
+          }
 
-            PWTextFieldRow(
-              label: "Bearer Token",
-              placeholder: "Optional",
-              text: $bearerToken,
-              message: "Leave blank if your backend does not require authentication.",
-              isSecure: true,
-              textInputAutocapitalization: .never,
-              submitLabel: .go
-            )
-            .focused($focusedField, equals: .bearerToken)
-            .onSubmit {
-              Task { await validateAndContinue() }
-            }
+          PWTextFieldRow(
+            label: "Bearer Token",
+            placeholder: "Optional",
+            text: $bearerToken,
+            message: "Leave blank if your backend does not require authentication.",
+            isSecure: true,
+            textInputAutocapitalization: .never,
+            submitLabel: .go
+          )
+          .focused($focusedField, equals: .bearerToken)
+          .onSubmit {
+            Task { await validateAndContinue() }
           }
         }
 
@@ -77,17 +75,25 @@ struct BackendSetupView: View {
             tone: statusTone,
             systemImage: statusSymbol
           )
+          .padding(.top, PWSpace.sm)
         }
 
         Spacer(minLength: 0)
-      }
-    }
-    .safeAreaInset(edge: .bottom) {
-      PWBottomActionBar {
-        PWPrimaryButton(title: isValidating ? "Validating..." : "Continue", isDisabled: isContinueDisabled) {
-          Task { await validateAndContinue() }
+
+        HStack {
+          Spacer(minLength: 0)
+          PWOnboardingButton(
+            title: isValidating ? "Checking..." : "Continue",
+            isDisabled: isContinueDisabled,
+            action: {
+              Task { await validateAndContinue() }
+            }
+          )
+          Spacer(minLength: 0)
         }
+        .padding(.bottom, PWSpace.xl)
       }
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
   }
 }

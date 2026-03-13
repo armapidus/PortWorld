@@ -22,6 +22,16 @@ struct MainAppView: View {
           onboardingStore.markWelcomeSeen()
           route = nextOnboardingRoute()
         }
+      case .features:
+        FeatureHighlightsView {
+          onboardingStore.markFeaturesSeen()
+          route = nextOnboardingRoute()
+        }
+      case .connectAgents:
+        ConnectAgentsIntroView {
+          onboardingStore.markBackendIntroSeen()
+          route = nextOnboardingRoute()
+        }
       case .backendSetup:
         BackendSetupView(appSettingsStore: appSettingsStore) {
           onboardingStore.markBackendValidated()
@@ -70,8 +80,16 @@ private extension MainAppView {
   }
 
   func nextOnboardingRoute() -> AppRoute {
-    if onboardingStore.shouldShowWelcome {
+    if onboardingStore.progress.welcomeSeen == false {
       return .welcome
+    }
+
+    if onboardingStore.progress.featuresSeen == false {
+      return .features
+    }
+
+    if onboardingStore.progress.backendIntroSeen == false {
+      return .connectAgents
     }
 
     if onboardingStore.progress.backendValidated == false {

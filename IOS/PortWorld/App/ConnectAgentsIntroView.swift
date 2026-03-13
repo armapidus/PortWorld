@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct WelcomeShellView: View {
+struct ConnectAgentsIntroView: View {
   let onContinue: () -> Void
 
   var body: some View {
@@ -9,19 +9,19 @@ struct WelcomeShellView: View {
         Spacer(minLength: 0)
 
         VStack(spacing: PWSpace.lg) {
-          Text("Welcome to PortWorld")
+          Text("Connect your agents")
             .font(PWTypography.display)
             .foregroundColor(PWColor.textPrimary)
             .multilineTextAlignment(.center)
 
-          Text("Your hands-free assistant for Meta smart glasses.")
+          Text("Link your self-hosted backend to unlock voice, memory, and live glasses workflows.")
             .font(PWTypography.body)
             .foregroundColor(PWColor.textSecondary)
             .multilineTextAlignment(.center)
         }
-        .frame(maxWidth: 320)
+        .frame(maxWidth: 330)
 
-        PWOnboardingButton(title: "Continue", action: onContinue)
+        PWOnboardingButton(title: "Set up backend", action: onContinue)
 
         Spacer(minLength: 0)
       }

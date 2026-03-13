@@ -69,6 +69,36 @@ struct PWDestructiveButton: View {
   }
 }
 
+struct PWOnboardingButton: View {
+  let title: String
+  let isDisabled: Bool
+  let action: () -> Void
+
+  init(title: String, isDisabled: Bool = false, action: @escaping () -> Void) {
+    self.title = title
+    self.isDisabled = isDisabled
+    self.action = action
+  }
+
+  var body: some View {
+    Button(action: action) {
+      Text(title)
+        .font(PWTypography.headline)
+        .foregroundStyle(isDisabled ? PWColor.textTertiary : PWColor.textPrimary)
+        .padding(.horizontal, 28)
+        .frame(height: 54)
+        .background(isDisabled ? PWColor.disabledFill : PWColor.surfaceRaised)
+        .overlay(
+          Capsule(style: .continuous)
+            .stroke(isDisabled ? PWColor.borderSubtle : PWColor.borderStrong, lineWidth: 1)
+        )
+        .clipShape(Capsule(style: .continuous))
+    }
+    .buttonStyle(.plain)
+    .disabled(isDisabled)
+  }
+}
+
 private struct PWActionButton: View {
   let title: String
   let isDisabled: Bool
