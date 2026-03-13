@@ -1,3 +1,5 @@
+# Transitional dependency artifact kept for compatibility.
+# The authoritative dependency source of truth now lives in pyproject.toml.
 fastapi
 uvicorn[standard]
 python-dotenv

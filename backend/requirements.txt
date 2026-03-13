@@ -1,6 +1,6 @@
-# Pinned backend runtime dependency set for more deterministic installs.
-# This is not yet a fully hashed cross-platform lockfile.
-# Update backend/requirements.in first, then refresh this file intentionally.
+# Transitional pinned dependency artifact kept for compatibility.
+# The authoritative dependency source of truth now lives in pyproject.toml.
+# Refresh intentionally from pyproject.toml when this file is still needed.
 annotated-types==0.7.0
 anyio==4.11.0
 certifi==2025.11.12

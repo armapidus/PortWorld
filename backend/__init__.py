@@ -1,1 +1,3 @@
-"""Backend package for loopa mock service."""
+"""PortWorld backend package."""
+
+__version__ = "0.1.0"

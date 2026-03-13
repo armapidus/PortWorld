@@ -7,13 +7,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # consistently for both local Compose and later container-hosted installs.
 WORKDIR /app
 
-COPY backend/requirements.txt ./backend/requirements.txt
-RUN pip install --no-cache-dir -r ./backend/requirements.txt
-
+COPY pyproject.toml ./pyproject.toml
+COPY backend/README.md ./backend/README.md
 COPY backend/__init__.py ./backend/__init__.py
 COPY backend/cli.py ./backend/cli.py
 COPY backend/api/ ./backend/api/
 COPY backend/bootstrap/ ./backend/bootstrap/
+COPY backend/cli_app/ ./backend/cli_app/
 COPY backend/core/ ./backend/core/
 COPY backend/infrastructure/ ./backend/infrastructure/
 COPY backend/memory/ ./backend/memory/
@@ -21,6 +21,8 @@ COPY backend/realtime/ ./backend/realtime/
 COPY backend/tools/ ./backend/tools/
 COPY backend/vision/ ./backend/vision/
 COPY backend/ws/ ./backend/ws/
+
+RUN pip install --no-cache-dir .
 
 EXPOSE 8080
 
