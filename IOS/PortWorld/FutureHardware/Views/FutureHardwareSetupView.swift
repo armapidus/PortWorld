@@ -60,18 +60,23 @@ struct FutureHardwareSetupView: View {
 
 private struct WearablesInitializationView: View {
   var body: some View {
-    VStack(spacing: 16) {
-      ProgressView()
-        .progressViewStyle(.circular)
-      Text("Initializing Wearables SDK")
-        .font(.headline)
-      Text("Preparing the shared glasses capability layer for this app.")
-        .font(.subheadline)
-        .foregroundColor(.secondary)
-        .multilineTextAlignment(.center)
+    PWScreen {
+      PWCard(isRaised: true, padding: PWSpace.xl) {
+        VStack(spacing: PWSpace.lg) {
+          ProgressView()
+            .progressViewStyle(.circular)
+            .tint(PWColor.textPrimary)
+          Text("Initializing Wearables SDK")
+            .font(PWTypography.title)
+            .foregroundColor(PWColor.textPrimary)
+          Text("Preparing the shared glasses capability layer for this app.")
+            .font(PWTypography.subbody)
+            .foregroundColor(PWColor.textSecondary)
+            .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+      }
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-    .padding(24)
   }
 }
 
@@ -82,26 +87,28 @@ private struct RecoverableWearablesInitializationView: View {
   let onRetry: () -> Void
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      Text("Wearables SDK Initialization Failed")
-        .font(.headline)
-      Text(errorMessage)
-        .font(.subheadline)
-        .multilineTextAlignment(.leading)
-        .foregroundColor(.secondary)
-      VStack(alignment: .leading, spacing: 8) {
-        ForEach(Array(diagnostics.enumerated()), id: \.offset) { _, diagnostic in
-          Text("• \(diagnostic)")
-            .font(.footnote)
-            .foregroundColor(.secondary)
+    PWScreen {
+      PWCard(isRaised: true, padding: PWSpace.xl) {
+        VStack(alignment: .leading, spacing: PWSpace.lg) {
+          Text("Wearables SDK Initialization Failed")
+            .font(PWTypography.title)
+            .foregroundColor(PWColor.textPrimary)
+          Text(errorMessage)
+            .font(PWTypography.subbody)
+            .multilineTextAlignment(.leading)
+            .foregroundColor(PWColor.textSecondary)
+          VStack(alignment: .leading, spacing: PWSpace.sm) {
+            ForEach(Array(diagnostics.enumerated()), id: \.offset) { _, diagnostic in
+              Text("• \(diagnostic)")
+                .font(PWTypography.caption)
+                .foregroundColor(PWColor.textSecondary)
+            }
+          }
+          PWSecondaryButton(title: isRetrying ? "Retrying..." : "Retry initialization", isDisabled: isRetrying) {
+            onRetry()
+          }
         }
       }
-      Button(isRetrying ? "Retrying..." : "Retry initialization") {
-        onRetry()
-      }
-      .disabled(isRetrying)
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-    .padding(24)
   }
 }

@@ -17,28 +17,17 @@ struct AssistantRuntimeView: View {
   var body: some View {
     let status = viewModel.status
 
-    ZStack {
-      LinearGradient(
-        colors: [
-          Color(red: 0.04, green: 0.07, blue: 0.13),
-          Color(red: 0.09, green: 0.14, blue: 0.24),
-          Color(red: 0.05, green: 0.08, blue: 0.16),
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-      )
-      .ignoresSafeArea()
-
+    PWScreen {
       ScrollView(showsIndicators: false) {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: PWSpace.section) {
           VStack(alignment: .leading, spacing: 8) {
             Text("Assistant Runtime")
-              .font(.system(.largeTitle, design: .rounded).weight(.bold))
-              .foregroundColor(.white)
+              .font(PWTypography.display)
+              .foregroundColor(PWColor.textPrimary)
 
             Text("Primary assistant runtime. Phone mode remains stable, and the glasses route now activates through DAT lifecycle with live HFP audio when available, or a labeled phone fallback while developing with the mock device path.")
-              .font(.system(.subheadline, design: .rounded).weight(.medium))
-              .foregroundColor(.white.opacity(0.78))
+              .font(PWTypography.subbody)
+              .foregroundColor(PWColor.textSecondary)
           }
 
           PhoneAssistantPanel(title: "Runtime Route") {
@@ -67,13 +56,13 @@ struct AssistantRuntimeView: View {
                 .fill(glassesReadinessColor(status.glassesReadinessKind))
                 .frame(width: 10, height: 10)
               Text(status.glassesReadinessTitle)
-                .font(.system(.subheadline, design: .rounded).weight(.semibold))
-                .foregroundColor(.white.opacity(0.95))
+                .font(PWTypography.headline)
+                .foregroundColor(PWColor.textPrimary)
             }
 
             Text(status.glassesReadinessDetail)
-              .font(.system(.caption, design: .rounded).weight(.medium))
-              .foregroundColor(.white.opacity(0.74))
+              .font(PWTypography.caption)
+              .foregroundColor(PWColor.textSecondary)
 
             LabeledContent("Glasses session", value: status.glassesSessionText)
             LabeledContent("Active glasses", value: status.activeGlassesDeviceText)
@@ -84,14 +73,14 @@ struct AssistantRuntimeView: View {
             if status.selectedRoute == .phone {
               LabeledContent("Phone vision debug", value: status.debugPhoneVisionModeText)
               Text(status.debugPhoneVisionDetailText)
-                .font(.system(.caption, design: .rounded).weight(.medium))
-                .foregroundColor(.white.opacity(0.68))
+                .font(PWTypography.caption)
+                .foregroundColor(PWColor.textSecondary)
             }
 
             if status.selectedRoute == .glasses {
               Text(status.glassesDevelopmentDetailText)
-                .font(.system(.caption, design: .rounded).weight(.medium))
-                .foregroundColor(.white.opacity(0.68))
+                .font(PWTypography.caption)
+                .foregroundColor(PWColor.textSecondary)
             }
           }
 
@@ -120,114 +109,76 @@ struct AssistantRuntimeView: View {
 
           PhoneAssistantPanel(title: "Notes") {
             Text(status.infoText.isEmpty ? "No runtime notes." : status.infoText)
-              .font(.system(.body, design: .rounded))
-              .foregroundColor(.white.opacity(0.82))
+              .font(PWTypography.body)
+              .foregroundColor(PWColor.textPrimary)
             if !status.visionLastErrorText.isEmpty {
               Text(status.visionLastErrorText)
-                .font(.system(.footnote, design: .rounded).weight(.semibold))
-                .foregroundColor(.orange.opacity(0.92))
+                .font(PWTypography.caption)
+                .foregroundColor(PWColor.warning)
             }
             if !status.errorText.isEmpty {
               Text(status.errorText)
-                .font(.system(.footnote, design: .rounded).weight(.semibold))
-                .foregroundColor(.red.opacity(0.9))
+                .font(PWTypography.caption)
+                .foregroundColor(PWColor.error)
             }
           }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 24)
         .padding(.bottom, 160)
       }
     }
     .safeAreaInset(edge: .bottom) {
-      VStack(spacing: 10) {
+      VStack(spacing: PWSpace.sm) {
         if status.assistantRuntimeState == .inactive {
-          Button {
+          PWPrimaryButton(
+            title: status.activationButtonTitle,
+            isDisabled: status.canActivateSelectedRoute == false
+          ) {
             Task {
               await viewModel.activateAssistant()
             }
-          } label: {
-            Text(status.activationButtonTitle)
-              .font(.system(.headline, design: .rounded).weight(.semibold))
-              .foregroundColor(.white)
-              .frame(maxWidth: .infinity)
-              .frame(height: 52)
           }
-          .buttonStyle(.plain)
-          .background(status.canActivateSelectedRoute ? Color.appPrimary : Color.gray.opacity(0.55))
-          .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-          .disabled(status.canActivateSelectedRoute == false)
         }
 
         if status.canDeactivate {
-          Button {
+          PWDestructiveButton(title: "Deactivate Assistant") {
             Task {
               await viewModel.deactivateAssistant()
             }
-          } label: {
-            Text("Deactivate Assistant")
-              .font(.system(.headline, design: .rounded).weight(.semibold))
-              .foregroundColor(.white)
-              .frame(maxWidth: .infinity)
-              .frame(height: 52)
           }
-          .buttonStyle(.plain)
-          .background(Color.red.opacity(0.82))
-          .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
 
         if status.canEndConversation {
-          Button {
+          PWSecondaryButton(title: "End Conversation") {
             Task {
               await viewModel.endConversation()
             }
-          } label: {
-            Text("End Conversation")
-              .font(.system(.headline, design: .rounded).weight(.semibold))
-              .foregroundColor(.white)
-              .frame(maxWidth: .infinity)
-              .frame(height: 50)
           }
-          .buttonStyle(.plain)
-          .background(Color.orange.opacity(0.82))
-          .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
 
-        Button {
+        PWSecondaryButton(title: "Open Glasses Setup") {
           onOpenFutureHardwareSetup()
-        } label: {
-          Text("Open Glasses Setup")
-            .font(.system(.headline, design: .rounded).weight(.semibold))
-            .foregroundColor(.white)
-            .frame(maxWidth: .infinity)
-            .frame(height: 50)
         }
-        .buttonStyle(.plain)
-        .background(Color.white.opacity(0.16))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
         #if DEBUG
           if status.selectedRoute == .phone {
-            Button {
+            PWSecondaryButton(
+              title: status.debugPhoneVisionToggleTitle,
+              isDisabled: status.canToggleDebugPhoneVision == false
+            ) {
               viewModel.toggleDebugPhoneVisionMode()
-            } label: {
-              Text(status.debugPhoneVisionToggleTitle)
-                .font(.system(.headline, design: .rounded).weight(.semibold))
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 50)
             }
-            .buttonStyle(.plain)
-            .background(status.canToggleDebugPhoneVision ? Color.white.opacity(0.16) : Color.gray.opacity(0.45))
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .disabled(status.canToggleDebugPhoneVision == false)
           }
         #endif
       }
-      .padding(.horizontal, 16)
-      .padding(.top, 12)
-      .padding(.bottom, 12)
-      .background(Color.black.opacity(0.45))
+      .padding(.horizontal, PWSpace.lg)
+      .padding(.top, PWSpace.md)
+      .padding(.bottom, PWSpace.md)
+      .background(PWColor.background)
+      .overlay(alignment: .top) {
+        Rectangle()
+          .fill(PWColor.borderSubtle)
+          .frame(height: 1)
+      }
     }
     .onAppear {
       viewModel.handleScenePhaseChange(scenePhase)
@@ -242,13 +193,13 @@ private extension AssistantRuntimeView {
   func glassesReadinessColor(_ kind: GlassesReadinessKind) -> Color {
     switch kind {
     case .neutral:
-      return Color.white.opacity(0.75)
+      return PWColor.textSecondary
     case .success:
-      return Color.green.opacity(0.9)
+      return PWColor.success
     case .warning:
-      return Color.orange.opacity(0.92)
+      return PWColor.warning
     case .error:
-      return Color.red.opacity(0.92)
+      return PWColor.error
     }
   }
 }
@@ -258,17 +209,15 @@ private struct PhoneAssistantPanel<Content: View>: View {
   @ViewBuilder let content: Content
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      Text(title)
-        .font(.system(.headline, design: .rounded).weight(.semibold))
-        .foregroundColor(.white)
+    PWCard {
+      VStack(alignment: .leading, spacing: PWSpace.sm) {
+        Text(title)
+          .font(PWTypography.headline)
+          .foregroundColor(PWColor.textPrimary)
 
-      content
+        content
+      }
     }
-    .padding(18)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .background(Color.white.opacity(0.1))
-    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
   }
 }
 
@@ -283,19 +232,19 @@ private struct RuntimeRouteButton: View {
     Button(action: action) {
       VStack(alignment: .leading, spacing: 4) {
         Text(title)
-          .font(.system(.subheadline, design: .rounded).weight(.semibold))
-          .foregroundColor(.white)
+          .font(PWTypography.headline)
+          .foregroundColor(isSelected ? PWColor.primaryButtonText : PWColor.textPrimary)
         Text(subtitle)
-          .font(.system(.caption, design: .rounded).weight(.medium))
-          .foregroundColor(.white.opacity(0.72))
+          .font(PWTypography.caption)
+          .foregroundColor(isSelected ? PWColor.primaryButtonText.opacity(0.7) : PWColor.textSecondary)
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(.vertical, 12)
       .padding(.horizontal, 14)
-      .background(isSelected ? Color.appPrimary.opacity(0.9) : Color.white.opacity(0.12))
+      .background(isSelected ? PWColor.primaryButtonFill : PWColor.surfaceRaised)
       .overlay(
         RoundedRectangle(cornerRadius: 14, style: .continuous)
-          .stroke(isSelected ? Color.white.opacity(0.36) : Color.white.opacity(0.12), lineWidth: 1)
+          .stroke(isSelected ? PWColor.primaryButtonFill : PWColor.border, lineWidth: 1)
       )
       .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }

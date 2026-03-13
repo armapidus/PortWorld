@@ -38,40 +38,17 @@ struct HomeScreenView: View {
   }
 
   var body: some View {
-    ZStack {
-      LinearGradient(
-        colors: [
-          Color(red: 0.04, green: 0.07, blue: 0.13),
-          Color(red: 0.09, green: 0.14, blue: 0.24),
-          Color(red: 0.12, green: 0.08, blue: 0.05),
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-      )
-      .ignoresSafeArea()
-
-      Circle()
-        .fill(Color.appPrimary.opacity(0.2))
-        .frame(width: 320, height: 320)
-        .blur(radius: 50)
-        .offset(x: -120, y: -250)
-
-      Circle()
-        .fill(Color(red: 0.35, green: 0.58, blue: 0.95).opacity(0.18))
-        .frame(width: 300, height: 300)
-        .blur(radius: 55)
-        .offset(x: 130, y: -120)
-
+    PWScreen {
       ScrollView(showsIndicators: false) {
-        VStack(alignment: .leading, spacing: 16) {
-          VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: PWSpace.lg) {
+          VStack(alignment: .leading, spacing: PWSpace.sm) {
             Text("PortWorld")
-              .font(.system(.largeTitle, design: .rounded).weight(.bold))
-              .foregroundColor(.white)
+              .font(PWTypography.display)
+              .foregroundColor(PWColor.textPrimary)
 
             Text("Hands-free multimodal assistant for smart glasses")
-              .font(.system(.headline, design: .rounded).weight(.medium))
-              .foregroundColor(.white.opacity(0.78))
+              .font(PWTypography.subbody)
+              .foregroundColor(PWColor.textSecondary)
           }
           .padding(.top, 10)
 
@@ -80,20 +57,20 @@ struct HomeScreenView: View {
               Image(.cameraAccessIcon)
                 .resizable()
                 .renderingMode(.template)
-                .foregroundColor(.white)
+                .foregroundColor(PWColor.textPrimary)
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 46, height: 46)
                 .padding(8)
-                .background(Color.white.opacity(0.16))
+                .background(PWColor.surfaceRaised)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
               VStack(alignment: .leading, spacing: 6) {
                 Text(registrationStatusTitle)
-                  .font(.system(.title3, design: .rounded).weight(.semibold))
-                  .foregroundColor(.white)
+                  .font(PWTypography.title)
+                  .foregroundColor(PWColor.textPrimary)
                 Text(registrationStatusSubtitle)
-                  .font(.system(.subheadline, design: .rounded).weight(.medium))
-                  .foregroundColor(.white.opacity(0.76))
+                  .font(PWTypography.subbody)
+                  .foregroundColor(PWColor.textSecondary)
               }
 
               Spacer(minLength: 0)
@@ -106,10 +83,10 @@ struct HomeScreenView: View {
           }
 
           HomeGlassCard {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: PWSpace.sm) {
               Text("Onboarding progress")
-                .font(.system(.headline, design: .rounded).weight(.semibold))
-                .foregroundColor(.white)
+                .font(PWTypography.headline)
+                .foregroundColor(PWColor.textPrimary)
 
               ForEach(progressRows) { row in
                 HomeProgressRow(row: row)
@@ -119,10 +96,10 @@ struct HomeScreenView: View {
           }
 
           HomeGlassCard {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: PWSpace.sm) {
               Text("Development readiness")
-                .font(.system(.headline, design: .rounded).weight(.semibold))
-                .foregroundColor(.white)
+                .font(PWTypography.headline)
+                .foregroundColor(PWColor.textPrimary)
 
               HomeProgressRow(
                 row: .init(
@@ -152,16 +129,16 @@ struct HomeScreenView: View {
               )
 
               Text(wearablesRuntimeManager.glassesDevelopmentReadinessDetail)
-                .font(.system(.caption, design: .rounded).weight(.medium))
-                .foregroundColor(.white.opacity(0.76))
+                .font(PWTypography.caption)
+                .foregroundColor(PWColor.textSecondary)
             }
           }
 
           HomeGlassCard {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: PWSpace.sm) {
               Text("What you unlock")
-                .font(.system(.headline, design: .rounded).weight(.semibold))
-                .foregroundColor(.white)
+                .font(PWTypography.headline)
+                .foregroundColor(PWColor.textPrimary)
 
               HomeFeatureRow(
                 resource: .smartGlassesIcon,
@@ -181,8 +158,6 @@ struct HomeScreenView: View {
             }
           }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 16)
         .padding(.bottom, 140)
       }
     }
@@ -192,83 +167,50 @@ struct HomeScreenView: View {
       VStack(spacing: 10) {
         if let compatibilityMessage = wearablesRuntimeManager.activeCompatibilityMessage {
           Text(compatibilityMessage)
-            .font(.system(.caption, design: .rounded).weight(.medium))
-            .foregroundColor(.orange.opacity(0.95))
+            .font(PWTypography.caption)
+            .foregroundColor(PWColor.warning)
             .multilineTextAlignment(.leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
 
         Text(wearablesRuntimeManager.glassesDevelopmentReadinessDetail)
-          .font(.system(.caption, design: .rounded).weight(.medium))
-          .foregroundColor(.white.opacity(0.7))
+          .font(PWTypography.caption)
+          .foregroundColor(PWColor.textSecondary)
           .multilineTextAlignment(.leading)
           .frame(maxWidth: .infinity, alignment: .leading)
 
-        Button {
+        PWSecondaryButton(title: "Back to iPhone Assistant") {
           dismiss()
-        } label: {
-          HStack(spacing: 10) {
-            Image(systemName: "iphone")
-            Text("Back to iPhone Assistant")
-          }
-          .font(.system(.headline, design: .rounded).weight(.semibold))
-          .foregroundColor(.white)
-          .frame(maxWidth: .infinity)
-          .frame(height: 50)
         }
-        .buttonStyle(.plain)
-        .background(Color.white.opacity(0.2))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
         #if DEBUG
-          Button {
+          PWSecondaryButton(
+            title: mockButtonTitle,
+            isDisabled: wearablesRuntimeManager.isPreparingMockDevice
+          ) {
             Task {
               await wearablesRuntimeManager.toggleMockMode()
             }
-          } label: {
-            HStack(spacing: 10) {
-              Image(systemName: wearablesRuntimeManager.isPreparingMockDevice ? "hourglass" : "iphone")
-              Text(mockButtonTitle)
-            }
-            .font(.system(.headline, design: .rounded).weight(.semibold))
-            .foregroundColor(.white)
-            .frame(maxWidth: .infinity)
-            .frame(height: 50)
           }
-          .buttonStyle(.plain)
-          .background(Color.white.opacity(0.18))
-          .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-          .disabled(wearablesRuntimeManager.isPreparingMockDevice)
 
           Text("DEBUG: Pair a simulated glasses device for DAT development. Meta registration is still required before the glasses runtime can activate.")
-            .font(.system(.caption2, design: .rounded).weight(.medium))
-            .foregroundColor(.white.opacity(0.72))
+            .font(PWTypography.caption)
+            .foregroundColor(PWColor.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
         #endif
 
-        Button {
+        PWPrimaryButton(title: isRegistering ? "Connecting..." : "Connect my glasses", isDisabled: isRegistering) {
           wearablesRuntimeManager.connectGlasses()
-        } label: {
-          HStack(spacing: 10) {
-            Image(systemName: isRegistering ? "hourglass" : "bolt.horizontal.fill")
-            Text(isRegistering ? "Connecting..." : "Connect my glasses")
-          }
-          .font(.system(.headline, design: .rounded).weight(.semibold))
-          .foregroundColor(.white)
-          .frame(maxWidth: .infinity)
-          .frame(height: 54)
         }
-        .buttonStyle(.plain)
-        .background(isRegistering ? Color.gray.opacity(0.5) : Color.appPrimary)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .disabled(isRegistering)
       }
-      .padding(.horizontal, 16)
-      .padding(.top, 12)
-      .padding(.bottom, 12)
-      .background(Color.black.opacity(0.45))
+      .padding(.horizontal, PWSpace.lg)
+      .padding(.top, PWSpace.md)
+      .padding(.bottom, PWSpace.md)
+      .background(PWColor.background)
       .overlay(alignment: .top) {
-        Divider().overlay(Color.white.opacity(0.16))
+        Rectangle()
+          .fill(PWColor.borderSubtle)
+          .frame(height: 1)
       }
     }
   }
@@ -352,17 +294,9 @@ private struct HomeGlassCard<Content: View>: View {
   @ViewBuilder var content: Content
 
   var body: some View {
-    content
-      .padding(16)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .background(
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
-          .fill(.ultraThinMaterial)
-      )
-      .overlay(
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
-          .stroke(Color.white.opacity(0.3), lineWidth: 1)
-      )
+    PWCard(isRaised: true) {
+      content
+    }
   }
 }
 
@@ -390,11 +324,11 @@ private struct HomeStateBadge: View {
   private var tint: Color {
     switch state {
     case .success:
-      return Color.green.opacity(0.88)
+      return PWColor.success
     case .active:
-      return Color.orange.opacity(0.9)
+      return PWColor.warning
     case .inactive:
-      return Color.white.opacity(0.7)
+      return PWColor.textSecondary
     }
   }
 
@@ -404,11 +338,11 @@ private struct HomeStateBadge: View {
       Text(text.uppercased())
         .lineLimit(1)
     }
-    .font(.system(.caption2, design: .rounded).weight(.bold))
+    .font(PWTypography.caption)
     .foregroundColor(tint)
     .padding(.horizontal, 10)
     .padding(.vertical, 7)
-    .background(Color.white.opacity(0.14))
+    .background(PWColor.surfaceRaised)
     .clipShape(Capsule())
   }
 }
@@ -443,11 +377,11 @@ private struct HomeProgressRow: View {
   private var tint: Color {
     switch row.status {
     case .done:
-      return Color.green.opacity(0.92)
+      return PWColor.success
     case .active:
-      return Color.orange.opacity(0.94)
+      return PWColor.warning
     case .pending:
-      return Color.white.opacity(0.55)
+      return PWColor.textSecondary
     }
   }
 
@@ -460,12 +394,12 @@ private struct HomeProgressRow: View {
 
       VStack(alignment: .leading, spacing: 2) {
         Text(row.title)
-          .font(.system(.subheadline, design: .rounded).weight(.semibold))
-          .foregroundColor(.white.opacity(0.95))
+          .font(PWTypography.headline)
+          .foregroundColor(PWColor.textPrimary)
 
         Text(row.detail)
-          .font(.system(.caption, design: .rounded).weight(.medium))
-          .foregroundColor(.white.opacity(0.72))
+          .font(PWTypography.caption)
+          .foregroundColor(PWColor.textSecondary)
       }
     }
   }
@@ -481,29 +415,29 @@ private struct HomeFeatureRow: View {
       Image(resource)
         .resizable()
         .renderingMode(.template)
-        .foregroundColor(.white.opacity(0.88))
+        .foregroundColor(PWColor.textPrimary)
         .aspectRatio(contentMode: .fit)
         .frame(width: 20, height: 20)
         .padding(10)
-        .background(Color.white.opacity(0.14))
+        .background(PWColor.surfaceRaised)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
       VStack(alignment: .leading, spacing: 3) {
         Text(title)
-          .font(.system(.subheadline, design: .rounded).weight(.semibold))
-          .foregroundColor(.white.opacity(0.95))
+          .font(PWTypography.headline)
+          .foregroundColor(PWColor.textPrimary)
         Text(detail)
-          .font(.system(.caption, design: .rounded).weight(.medium))
-          .foregroundColor(.white.opacity(0.72))
+          .font(PWTypography.caption)
+          .foregroundColor(PWColor.textSecondary)
       }
       Spacer()
     }
     .padding(12)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(Color.white.opacity(0.06))
+    .background(PWColor.surface)
     .overlay(
       RoundedRectangle(cornerRadius: 14, style: .continuous)
-        .stroke(Color.white.opacity(0.2), lineWidth: 1)
+        .stroke(PWColor.border, lineWidth: 1)
     )
     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
   }
