@@ -28,15 +28,13 @@ def build_openai_session_bridge(
 ) -> BridgeBinding:
     context = BridgeBindingContext()
     api_key = settings.require_openai_api_key()
-    effective_instructions = settings.openai_realtime_instructions
+    base_instructions = settings.openai_realtime_instructions
+    if isinstance(session_instructions, str) and session_instructions.strip():
+        base_instructions = session_instructions.strip()
+    effective_instructions = base_instructions
     if realtime_tooling_runtime is not None:
         effective_instructions = realtime_tooling_runtime.build_session_instructions(
-            base_instructions=effective_instructions,
-        )
-    combined_session_instructions = None
-    if isinstance(session_instructions, str) and session_instructions.strip():
-        combined_session_instructions = (
-            effective_instructions.rstrip() + "\n\n" + session_instructions.strip()
+            base_instructions=base_instructions,
         )
     client = OpenAIRealtimeClient(
         api_key=api_key,
@@ -60,7 +58,7 @@ def build_openai_session_bridge(
         manual_turn_fallback_enabled=settings.openai_realtime_enable_manual_turn_fallback,
         manual_turn_fallback_delay_ms=settings.openai_realtime_manual_turn_fallback_delay_ms,
         tooling_runtime=realtime_tooling_runtime,
-        session_instructions=combined_session_instructions,
+        session_instructions=effective_instructions,
         auto_start_response=auto_start_response,
     )
     return BridgeBinding(bridge=bridge, context=context)

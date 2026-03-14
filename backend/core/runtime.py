@@ -10,6 +10,7 @@ from backend.core.rate_limit import RateLimitDecision, SlidingWindowRateLimiter
 from backend.core.settings import Settings
 from backend.core.storage import BackendStorage, StorageBootstrapResult, StoragePaths
 from backend.realtime.factory import RealtimeProviderFactory
+from backend.realtime.session_modes import build_default_realtime_session_mode_registry
 from backend.tools.runtime import RealtimeToolingRuntime
 from backend.vision.runtime import VisionMemoryRuntime
 
@@ -154,12 +155,30 @@ class AppRuntime:
         session_id: str,
         send_control: Any,
         send_server_audio: Any,
+        session_mode: str = "default",
+        session_instructions: str | None = None,
+        auto_start_response: bool = False,
     ) -> "BridgeBinding":
+        mode_definition = build_default_realtime_session_mode_registry(self.settings).resolve(
+            session_mode
+        )
+        tooling_runtime = None
+        if self.realtime_tooling_runtime is not None:
+            tooling_runtime = self.realtime_tooling_runtime.filtered(
+                allowed_tool_names=mode_definition.allowed_tool_names
+            )
+        resolved_instructions = mode_definition.instructions
+        if session_mode == "default" and session_instructions:
+            resolved_instructions = (
+                resolved_instructions.rstrip() + "\n\n" + session_instructions.strip()
+            )
         return self.realtime_provider.build_session_bridge(
             session_id=session_id,
             send_control=send_control,
             send_server_audio=send_server_audio,
-            realtime_tooling_runtime=self.realtime_tooling_runtime,
+            realtime_tooling_runtime=tooling_runtime,
+            session_instructions=resolved_instructions,
+            auto_start_response=auto_start_response,
         )
 
     def _sweep_expired_session_memory_at_startup(self) -> None:

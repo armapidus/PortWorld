@@ -58,6 +58,12 @@ async def activate_session(
         if isinstance(raw_instructions, str) and raw_instructions.strip()
         else None
     )
+    raw_mode = envelope.payload.get("mode")
+    session_mode = (
+        raw_mode.strip()
+        if isinstance(raw_mode, str) and raw_mode.strip()
+        else "default"
+    )
     auto_start_response = bool(envelope.payload.get("auto_start_response"))
 
     try:
@@ -65,6 +71,7 @@ async def activate_session(
             session_id=envelope.session_id,
             send_control=send_control,
             send_server_audio=send_server_audio,
+            session_mode=session_mode,
             session_instructions=session_instructions,
             auto_start_response=auto_start_response,
         )
@@ -74,6 +81,17 @@ async def activate_session(
             {
                 "code": "MISSING_OPENAI_API_KEY",
                 "message": "Server missing OPENAI_API_KEY",
+                "retriable": False,
+            },
+            fallback_session_id=envelope.session_id,
+        )
+        return fallback_session
+    except ValueError as exc:
+        await send_control(
+            "error",
+            {
+                "code": "INVALID_SESSION_MODE",
+                "message": str(exc),
                 "retriable": False,
             },
             fallback_session_id=envelope.session_id,

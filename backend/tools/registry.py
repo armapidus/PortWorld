@@ -45,6 +45,17 @@ class RealtimeToolRegistry:
     def has_tool(self, name: str) -> bool:
         return name in self._tools
 
+    def subset(self, allowed_names: set[str] | frozenset[str]) -> "RealtimeToolRegistry":
+        filtered = RealtimeToolRegistry()
+        for name, registered in self._tools.items():
+            if name not in allowed_names:
+                continue
+            filtered.register(
+                definition=registered.definition,
+                executor=registered.executor,
+            )
+        return filtered
+
     def list_definitions(self) -> list[ToolDefinition]:
         return [registered.definition for registered in self._tools.values()]
 

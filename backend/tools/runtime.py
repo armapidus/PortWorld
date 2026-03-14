@@ -318,6 +318,23 @@ class RealtimeToolingRuntime:
     def to_openai_tools(self) -> list[dict[str, object]]:
         return self.registry.to_openai_tools()
 
+    def filtered(self, *, allowed_tool_names: frozenset[str] | None) -> "RealtimeToolingRuntime":
+        if allowed_tool_names is None:
+            return self
+
+        filtered_registry = self.registry.subset(allowed_tool_names)
+        return RealtimeToolingRuntime(
+            settings=self.settings,
+            storage=self.storage,
+            web_search_enabled=filtered_registry.has_tool("web_search"),
+            web_search_provider=self.web_search_provider,
+            search_provider=self.search_provider,
+            tool_timeout_ms=self.tool_timeout_ms,
+            web_search_max_results=self.web_search_max_results,
+            registry=filtered_registry,
+            search_provider_factory=self.search_provider_factory,
+        )
+
     async def execute(self, call: ToolCall) -> ToolResult:
         try:
             return await asyncio.wait_for(
@@ -416,22 +433,42 @@ class RealtimeToolingRuntime:
         return "\n\n".join(section for section in sections if section).strip() + "\n"
 
     def _build_tool_usage_block(self) -> str:
-        guidance_lines = [
-            "Tool usage policy:",
-            "- Use get_short_term_visual_context when the user asks about what is visible now or what was seen in the last few moments.",
-            "- Use get_session_visual_context when the user asks about what has been seen across the current session.",
-            "- Use get_user_profile to inspect the saved user profile before relying on memory about the user.",
-            "- Use update_user_profile only for facts the user has clearly confirmed.",
-            "- Use complete_profile_onboarding only when the onboarding interview is genuinely complete.",
-        ]
+        guidance_lines = ["Tool usage policy:"]
+        if self.registry.has_tool("get_short_term_visual_context"):
+            guidance_lines.append(
+                "- Use get_short_term_visual_context when the user asks about what is visible now or what was seen in the last few moments."
+            )
+        if self.registry.has_tool("get_session_visual_context"):
+            guidance_lines.append(
+                "- Use get_session_visual_context when the user asks about what has been seen across the current session."
+            )
+        if self.registry.has_tool("get_user_profile"):
+            guidance_lines.append(
+                "- Use get_user_profile to inspect the saved user profile before relying on memory about the user."
+            )
+        if self.registry.has_tool("update_user_profile"):
+            guidance_lines.append(
+                "- Use update_user_profile only for facts the user has clearly confirmed."
+            )
+        if self.registry.has_tool("complete_profile_onboarding"):
+            guidance_lines.append(
+                "- Use complete_profile_onboarding only when the onboarding interview is genuinely complete."
+            )
         if self.registry.has_tool("web_search"):
             guidance_lines.append(
                 "- Use web_search only when the user explicitly asks for fresh external facts or documentation."
             )
+        if self.registry.has_tool("get_short_term_visual_context") or self.registry.has_tool(
+            "get_session_visual_context"
+        ):
+            guidance_lines.extend(
+                [
+                    "- Do not claim visual context you have not retrieved through a tool.",
+                    "- Do not ask for visual memory tools when the request does not depend on recent visual context.",
+                ]
+            )
         guidance_lines.extend(
             [
-                "- Do not claim visual context you have not retrieved through a tool.",
-                "- Do not ask for visual memory tools when the request does not depend on recent visual context.",
                 "- Prefer one relevant tool call, then answer directly instead of chaining tools.",
                 "- Keep answers concise after tool use.",
                 "- Do not mention internal tool names or backend execution details to the user.",
