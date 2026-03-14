@@ -115,7 +115,7 @@ Related docs:
 
 #### Phase 5 mapping
 
-- Add Profile Interview and Confirmation using the live assistant runtime plus the new HTTP profile client.
+- Add Profile Interview using a backend-owned onboarding session mode and auto-complete handoff.
 - Swap in the final monochrome `HomeView`.
 
 ## Test Plan
@@ -125,7 +125,7 @@ Related docs:
 - Meta callback still works through the existing `PortWorldApp` URL path after the shell rewrite.
 - Skipping Meta setup still allows routing forward, but home activation remains disabled until glasses readiness is satisfied.
 - Wake Practice can observe real wake and sleep success counts without exposing developer panels.
-- Profile confirmation can read and write the existing backend profile schema.
+- Profile onboarding can persist the expanded backend profile schema without a separate review screen.
 - Re-theming removes blue, orange, and purple from user-facing screens and shared button styles, while preserving readability and destructive affordances.
 
 ## Assumptions

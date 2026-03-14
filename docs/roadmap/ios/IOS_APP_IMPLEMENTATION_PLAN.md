@@ -2,9 +2,9 @@
 
 Status: active working plan
 
-Last updated: 2026-03-13
+Last updated: 2026-03-14
 
-Related spec: `docs/IOS_APP_UX_SPEC.md`
+Related spec: `docs/roadmap/ios/IOS_APP_UX_SPEC.md`
 
 ## Summary
 
@@ -20,6 +20,51 @@ The goal is to replace the current developer-style runtime shell with:
 The implementation should reuse the existing assistant runtime and wearables manager as much as possible. The rewrite is primarily about shell, navigation, persistence, and user-facing views.
 
 The work should be delivered as phased vertical slices so the app stays usable after each milestone.
+
+## Implementation Status
+
+### Current implemented route order
+
+The app currently routes through:
+
+- `splash`
+- `welcome`
+- `features`
+- `connectAgents`
+- `backendSetup`
+- `metaConnection`
+- `wakePractice`
+- `profileInterview`
+- `legacyRuntime`
+
+The old profile confirmation screen is no longer part of the active onboarding flow.
+
+### Phase status as of 2026-03-14
+
+- `Phase 1` complete
+  - Root shell routing exists.
+  - First-run persistence exists through `OnboardingStore` and `AppSettingsStore`.
+  - Splash now routes into onboarding instead of dropping directly into the runtime shell.
+- `Phase 2` complete
+  - Backend setup screen is implemented.
+  - Backend validation is implemented through `/healthz` and authenticated `/readyz`.
+  - Runtime configuration now consumes persisted backend settings.
+- `Phase 3` complete
+  - Meta glasses onboarding is implemented on top of the existing DAT and wearables runtime.
+  - Skip and continue paths are both supported.
+- `Phase 4` complete
+  - Wake phrase practice is implemented as a dedicated practice flow.
+  - Practice is isolated from the live assistant runtime so wake tests do not start backend conversations.
+- `Phase 5` complete with follow-up refinements
+  - Guided profile onboarding is implemented.
+  - The onboarding interview is now backend-owned through realtime session mode `profile_onboarding`.
+  - Mario speaks first, defaults to English, and can complete onboarding even when users skip questions.
+  - The review screen was removed; onboarding now continues directly after the backend emits readiness.
+- Pending implementation
+  - final minimal home screen
+  - user-facing Settings screen
+  - user-facing Help screen
+  - cleanup/removal of legacy runtime-facing UI from the normal shipping path
 
 ## Implementation Principles
 
@@ -45,7 +90,13 @@ The app should use a single root router from the current app shell.
 Suggested route model:
 
 - `splash`
-- `onboarding(step)`
+- `welcome`
+- `features`
+- `connectAgents`
+- `backendSetup`
+- `metaConnection`
+- `wakePractice`
+- `profileInterview`
 - `home`
 - `settings`
 - `help`
@@ -53,6 +104,8 @@ Suggested route model:
 Suggested onboarding steps:
 
 - `welcome`
+- `features`
+- `connectAgents`
 - `backendSetup`
 - `metaConnection`
 - `wakePractice`
@@ -258,6 +311,12 @@ Purpose:
 
 - collect first-pass personalization using the live assistant
 
+Implementation note:
+
+- The confirmation/review step has been removed from the active flow.
+- The backend now owns onboarding behavior through realtime session mode `profile_onboarding`.
+- The interview auto-completes into the app once the backend emits the onboarding-ready event.
+
 Conversation rules:
 
 - model-led
@@ -270,20 +329,23 @@ For v1, save only the existing backend profile fields:
 - `name`
 - `job`
 - `company`
+- `preferred_language`
+- `location`
+- `intended_use`
 - `preferences`
 - `projects`
 
 Save flow:
 
 - run the live assistant interview
-- then show a compact confirmation form
-- confirmation form is the source of truth
-- write the final confirmed payload to `PUT /profile`
+- update the persisted profile incrementally during the conversation
+- let the backend decide when enough context has been collected
+- auto-continue once onboarding is marked ready
 
 Completion rules:
 
-- only mark `profileCompleted = true` after profile save succeeds
-- if save fails, preserve the draft and allow retry
+- only mark `profileCompleted = true` after the backend emits onboarding readiness
+- if the interview fails before completion, preserve retry behavior from the interview screen
 
 ### Screen 7: Main Home
 
@@ -404,8 +466,8 @@ Goal:
 Deliver:
 
 - assistant-led interview screen
-- confirmation form
-- `PUT /profile` integration
+- backend-owned onboarding session mode
+- realtime profile updates
 - final home state and polish
 
 Goal:

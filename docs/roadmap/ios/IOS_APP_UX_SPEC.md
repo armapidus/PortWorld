@@ -177,15 +177,20 @@ This conversation should be model-led.
 The assistant should:
 
 - ask one question at a time
-- keep the tone short and helpful
+- keep the tone warm, cheerful, and personal
+- default to English unless the user explicitly asks to switch languages
 - collect only a small amount of useful personalization context
+- allow the user to skip any question without blocking onboarding
 - stop once it has enough information
 
-For v1, the saved profile should stay aligned with the current backend profile schema:
+For the current implementation, the saved profile schema includes:
 
 - `name`
 - `job`
 - `company`
+- `preferred_language`
+- `location`
+- `intended_use`
 - `preferences`
 - `projects`
 
@@ -197,15 +202,15 @@ Examples of acceptable question intents:
 - what kinds of situations should I be most helpful with
 - what projects or workflows are you using PortWorld for
 
-The canonical source of truth should be a compact confirmation step immediately after the conversation.
+The onboarding interview is now backend-owned through a dedicated realtime session mode.
 
-That confirmation step should:
+The app should:
 
-- show the profile fields that will be saved
-- allow quick edits
-- write the confirmed result to `PUT /profile`
+- auto-start the conversation
+- let Mario speak first
+- advance directly when the backend marks onboarding ready
 
-For now, do not extend the saved schema to include location or preferred language. Those can be revisited only if the backend profile contract is intentionally expanded.
+There is no longer a separate confirmation screen in the active flow.
 
 ## Main Home Screen
 
