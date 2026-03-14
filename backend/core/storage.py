@@ -35,6 +35,8 @@ class BackendStorage(
     SQLiteStorageMixin,
     StoragePathMixin,
 ):
+    """Local SQLite/filesystem storage implementation used until Task 10 lands."""
+
     def __init__(self, *, paths: StoragePaths) -> None:
         self.paths = paths
 

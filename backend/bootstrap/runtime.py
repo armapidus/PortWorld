@@ -68,12 +68,24 @@ class LocalDoctorRuntimeDetails:
 
 
 def build_backend_storage(settings: Settings) -> tuple[StoragePaths, BackendStorage]:
+    settings.validate_storage_contract()
+    if settings.backend_storage_backend != "local":
+        raise RuntimeError(
+            "Managed storage backend "
+            f"{settings.backend_storage_backend!r} is configured but runtime selection "
+            "is not implemented yet. Task 10 will add the actual backend selection layer."
+        )
     storage_paths = build_storage_paths(settings)
     storage = BackendStorage(paths=storage_paths)
     return storage_paths, storage
 
 
 def build_storage_paths(settings: Settings) -> StoragePaths:
+    if settings.backend_storage_backend != "local":
+        raise RuntimeError(
+            "Local storage paths are only defined when "
+            "BACKEND_STORAGE_BACKEND=local."
+        )
     return StoragePaths(
         data_root=settings.backend_data_dir,
         user_root=settings.backend_data_dir / "user",
@@ -87,6 +99,7 @@ def build_storage_paths(settings: Settings) -> StoragePaths:
 
 def build_runtime_dependencies(settings: Settings) -> RuntimeDependencies:
     settings.validate_production_posture()
+    settings.validate_storage_contract()
     storage_paths, storage = build_backend_storage(settings)
     realtime_provider_factory = RealtimeProviderFactory(settings=settings)
     realtime_provider_factory.validate_startup_configuration()

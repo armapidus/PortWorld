@@ -13,6 +13,8 @@ _BACKEND_ENV_PATH = _BACKEND_ROOT / ".env"
 
 
 DEFAULT_INSTRUCTIONS = "You are a concise assistant. Keep answers short, clear, and practical."
+SUPPORTED_STORAGE_BACKENDS = {"local", "postgres_gcs"}
+SUPPORTED_OBJECT_STORE_PROVIDERS = {"filesystem", "gcs"}
 
 
 class MissingOpenAIAPIKeyError(RuntimeError):
@@ -94,6 +96,11 @@ class Settings:
     backend_uplink_ack_every_n_frames: int
     backend_data_dir: Path
     backend_sqlite_path: Path
+    backend_storage_backend: str
+    backend_database_url: str | None
+    backend_object_store_provider: str
+    backend_object_store_bucket: str | None
+    backend_object_store_prefix: str | None
     backend_debug_trace_ws_messages: bool
     backend_max_vision_request_bytes: int
     backend_max_vision_frame_bytes: int
@@ -170,6 +177,50 @@ class Settings:
             raise RuntimeError(
                 "BACKEND_DEBUG_TRACE_WS_MESSAGES must be false when "
                 "BACKEND_PROFILE=production."
+            )
+
+    def validate_storage_contract(self) -> None:
+        if self.backend_storage_backend not in SUPPORTED_STORAGE_BACKENDS:
+            supported = ", ".join(sorted(SUPPORTED_STORAGE_BACKENDS))
+            raise RuntimeError(
+                "BACKEND_STORAGE_BACKEND must be one of "
+                f"{supported}. Got {self.backend_storage_backend!r}."
+            )
+
+        if self.backend_object_store_provider not in SUPPORTED_OBJECT_STORE_PROVIDERS:
+            supported = ", ".join(sorted(SUPPORTED_OBJECT_STORE_PROVIDERS))
+            raise RuntimeError(
+                "BACKEND_OBJECT_STORE_PROVIDER must be one of "
+                f"{supported}. Got {self.backend_object_store_provider!r}."
+            )
+
+        if self.backend_storage_backend == "local":
+            if self.backend_object_store_provider != "filesystem":
+                raise RuntimeError(
+                    "BACKEND_OBJECT_STORE_PROVIDER must be 'filesystem' when "
+                    "BACKEND_STORAGE_BACKEND=local."
+                )
+            return
+
+        if self.backend_database_url is None:
+            raise RuntimeError(
+                "BACKEND_DATABASE_URL must be set when "
+                "BACKEND_STORAGE_BACKEND=postgres_gcs."
+            )
+        if self.backend_object_store_provider != "gcs":
+            raise RuntimeError(
+                "BACKEND_OBJECT_STORE_PROVIDER must be 'gcs' when "
+                "BACKEND_STORAGE_BACKEND=postgres_gcs."
+            )
+        if self.backend_object_store_bucket is None:
+            raise RuntimeError(
+                "BACKEND_OBJECT_STORE_BUCKET must be set when "
+                "BACKEND_STORAGE_BACKEND=postgres_gcs."
+            )
+        if self.backend_object_store_prefix is None:
+            raise RuntimeError(
+                "BACKEND_OBJECT_STORE_PREFIX must be set when "
+                "BACKEND_STORAGE_BACKEND=postgres_gcs."
             )
 
     def require_openai_api_key(self) -> str:
@@ -256,9 +307,21 @@ def _load_storage_settings() -> dict[str, str | int | bool | Path]:
     backend_sqlite_path = Path(
         _get_env("BACKEND_SQLITE_PATH") or str(backend_data_dir / "portworld.db")
     )
+    backend_storage_backend = (_get_env("BACKEND_STORAGE_BACKEND") or "local").strip().lower()
+    backend_database_url = (_get_env("BACKEND_DATABASE_URL") or "").strip() or None
+    backend_object_store_provider = (
+        _get_env("BACKEND_OBJECT_STORE_PROVIDER") or "filesystem"
+    ).strip().lower()
+    backend_object_store_bucket = (_get_env("BACKEND_OBJECT_STORE_BUCKET") or "").strip() or None
+    backend_object_store_prefix = (_get_env("BACKEND_OBJECT_STORE_PREFIX") or "").strip() or None
     return {
         "backend_data_dir": backend_data_dir,
         "backend_sqlite_path": backend_sqlite_path,
+        "backend_storage_backend": backend_storage_backend,
+        "backend_database_url": backend_database_url,
+        "backend_object_store_provider": backend_object_store_provider,
+        "backend_object_store_bucket": backend_object_store_bucket,
+        "backend_object_store_prefix": backend_object_store_prefix,
         "backend_debug_trace_ws_messages": _parse_bool_env(
             "BACKEND_DEBUG_TRACE_WS_MESSAGES",
             default=False,
