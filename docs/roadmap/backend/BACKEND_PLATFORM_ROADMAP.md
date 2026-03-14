@@ -128,7 +128,23 @@ This is a valid base, but it is still closer to a hardcoded catalog than to a de
 
 ### CLI state
 
-Today the backend already ships a minimal operator CLI with commands for:
+Today the backend has both:
+
+- the legacy internal operator CLI at `python -m backend.cli`
+- the new public `portworld` CLI
+
+The public CLI already covers:
+
+- `portworld init`
+- `portworld doctor --target local`
+- `portworld ops check-config`
+- `portworld ops bootstrap-storage`
+- `portworld ops export-memory`
+- `portworld ops migrate-storage-layout`
+
+The legacy CLI still exists during migration and remains useful for backward compatibility.
+
+The original minimal operator command set was:
 
 - `serve`
 - `check-config`
@@ -136,7 +152,7 @@ Today the backend already ships a minimal operator CLI with commands for:
 - `export-memory`
 - `migrate-storage-layout`
 
-This is useful, but it is not yet the product surface we want. It is an internal operator entrypoint, not a polished deployment CLI.
+The major unfinished CLI milestone is still Cloud Run deployment. The product surface is now in progress rather than hypothetical.
 
 ### Storage and memory state
 
@@ -185,6 +201,27 @@ Memory and storage evolution.
 Phases 2 through 4 should reuse the CLI and deployment contracts established in Phase 1.
 
 ## Phase 1: CLI-First Platformization
+
+### Progress snapshot
+
+Phase 1 is in progress.
+
+Completed inside Phase 1:
+
+- installable CLI scaffold
+- shared repo-aware CLI infrastructure
+- canonical env parsing and writing
+- public `ops` namespace
+- `portworld init`
+- local `portworld doctor`
+
+Remaining Phase 1 work:
+
+- GCP adapter layer
+- real Cloud Run readiness checks
+- managed-storage backend prerequisites
+- `deploy gcp-cloud-run`
+- final docs and migration cleanup
 
 ### Goal
 

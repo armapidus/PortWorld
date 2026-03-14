@@ -32,6 +32,42 @@ The first Cloud Run deployment path is based on:
 - Cloud SQL Postgres
 - Google Cloud Storage
 
+## Implementation Status
+
+This specification is still the design authority for CLI v1, but implementation has progressed through Task 6.
+
+Available today:
+
+- packaging and public `portworld` CLI scaffold
+- shared CLI infrastructure for repo detection, output, and state helpers
+- canonical `backend/.env` parsing and writing
+- `portworld ops ...`
+- `portworld init`
+- `portworld doctor --target local`
+
+Not implemented yet:
+
+- GCP adapter layer
+- real `doctor --target gcp-cloud-run` checks
+- managed storage
+- `deploy gcp-cloud-run`
+
+Current implementation notes:
+
+- `ops` and `doctor` call backend Python functions directly rather than shelling out to `python -m backend.cli`
+- the public `doctor` flag surface already includes GCP-target flags, but GCP behavior is intentionally deferred
+- the CLI package exists, but editable-install behavior has been unreliable in the current local environment; packaged install and wheel build are the validated paths so far
+- legacy `python -m backend.cli` remains supported during migration
+
+## Documentation Authority
+
+Until the broader docs migration is complete, the authoritative CLI implementation-tracking docs are:
+
+- `docs/roadmap/backend/BACKEND_CLI_IMPLEMENTATION_PLAN.md`
+- `docs/roadmap/backend/BACKEND_CLI_SPEC.md`
+
+User-facing docs such as `backend/README.md` and `docs/BACKEND_SELF_HOSTING.md` still contain legacy operator-first flows and should not be treated as the current implementation authority for CLI status.
+
 ## Goals
 
 CLI v1 must let a technical user:
@@ -105,12 +141,18 @@ The current backend already includes:
 
 CLI v1 should reuse these foundations rather than replace them wholesale.
 
-The current backend does not yet include:
+The current backend now includes:
 
 - packaging metadata for an installable CLI
-- a user-facing wizard for config generation
+- a user-facing local config wizard
+- local readiness diagnostics through `portworld doctor --target local`
+- a public `ops` namespace for the existing operator tasks
+
+The current backend does not yet include:
+
 - managed cloud deployment orchestration
 - managed storage support for Cloud Run
+- real `doctor --target gcp-cloud-run` checks
 
 The spec therefore includes both:
 
@@ -295,6 +337,10 @@ portworld ops migrate-storage-layout
 
 ## `portworld init`
 
+### Status
+
+Implemented.
+
 ### Purpose
 
 Initialize or refresh the local backend runtime configuration through a guided wizard.
@@ -416,6 +462,13 @@ Suggested shape:
 ```
 
 ## `portworld doctor`
+
+### Status
+
+Partially implemented.
+
+- implemented today: `--target local`, `--full`, JSON output, staged PASS/WARN/FAIL diagnostics
+- deferred to Task 8: real `--target gcp-cloud-run` readiness checks
 
 ### Purpose
 
@@ -827,6 +880,10 @@ Suggested shape:
 
 ## `portworld ops check-config`
 
+### Status
+
+Implemented.
+
 ### Purpose
 
 Expose the existing backend configuration check as a stable CLI subcommand under the `ops` namespace.
@@ -844,6 +901,10 @@ Default output should be human-readable with an option for raw JSON.
 
 ## `portworld ops bootstrap-storage`
 
+### Status
+
+Implemented.
+
 ### Purpose
 
 Bootstrap storage for local-mode development or self-hosting.
@@ -860,6 +921,10 @@ For v1, this command remains local-storage focused.
 
 ## `portworld ops export-memory`
 
+### Status
+
+Implemented.
+
 ### Purpose
 
 Export current backend memory artifacts to a zip file.
@@ -872,6 +937,10 @@ Export current backend memory artifacts to a zip file.
 This command maps to the current backend memory export implementation.
 
 ## `portworld ops migrate-storage-layout`
+
+### Status
+
+Implemented.
 
 ### Purpose
 
@@ -1035,20 +1104,24 @@ CLI v1 is complete when:
 
 ## Implementation Sequence
 
-Implementation should proceed in this order:
+Completed:
 
 1. package the installable CLI and establish command scaffolding
 2. implement repo-root detection and env file loading/writing
-3. implement `portworld init`
-4. implement `portworld doctor` for local mode
-5. migrate existing raw operator commands into `portworld ops ...`
-6. implement `doctor --target gcp-cloud-run`
+3. implement canonical env parsing and writing
+4. migrate existing raw operator commands into `portworld ops ...`
+5. implement `portworld init`
+6. implement `portworld doctor` for local mode
+
+Next:
+
 7. implement GCP adapter helpers for `gcloud`, Cloud Build, and Artifact Registry
-8. implement Secret Manager integration
-9. implement Cloud SQL Postgres and GCS provisioning helpers
-10. implement `deploy gcp-cloud-run`
-11. connect final deploy output to `.portworld/state/gcp-cloud-run.json`
-12. update docs and migration guidance
+8. implement real `doctor --target gcp-cloud-run`
+9. implement Secret Manager integration
+10. implement Cloud SQL Postgres and GCS provisioning helpers
+11. implement `deploy gcp-cloud-run`
+12. connect final deploy output to `.portworld/state/gcp-cloud-run.json`
+13. finish docs and migration guidance
 
 ## Open Follow-Up Items After CLI v1
 

@@ -19,6 +19,34 @@ The implementation is split across three owned areas:
 
 The critical dependency is managed storage support. `deploy gcp-cloud-run` cannot be completed until the backend supports the managed storage contract defined in `docs/BACKEND_CLI_SPEC.md`.
 
+## Current Status
+
+- implemented through Task 6
+- next task: Task 7
+- available today:
+  - `portworld init`
+  - `portworld doctor --target local`
+  - `portworld ops check-config`
+  - `portworld ops bootstrap-storage`
+  - `portworld ops export-memory`
+  - `portworld ops migrate-storage-layout`
+- not implemented yet:
+  - GCP adapter layer
+  - real `doctor --target gcp-cloud-run` checks
+  - managed storage
+  - `deploy gcp-cloud-run`
+- important implementation note:
+  - editable install has been unreliable in the current local environment; packaged install and wheel build have been the validated paths
+
+## Documentation Authority
+
+Until Task 14 lands, the source of truth for CLI implementation status is:
+
+- `docs/roadmap/backend/BACKEND_CLI_IMPLEMENTATION_PLAN.md`
+- `docs/roadmap/backend/BACKEND_CLI_SPEC.md`
+
+User-facing docs such as `backend/README.md` and `docs/BACKEND_SELF_HOSTING.md` still contain legacy operator-first flows and should not be treated as the implementation authority for CLI status.
+
 ## Ownership Boundaries
 
 ### 1. CLI package and command surface
@@ -77,12 +105,12 @@ Responsibilities:
 
 Implementation should land in this order:
 
-1. package the public CLI
-2. add shared CLI infrastructure
-3. add env parsing and env writing
-4. migrate current operator commands under `portworld ops`
-5. implement `portworld init`
-6. implement `portworld doctor` for local mode
+1. package the public CLI - complete
+2. add shared CLI infrastructure - complete
+3. add env parsing and env writing - complete
+4. migrate current operator commands under `portworld ops` - complete
+5. implement `portworld init` - complete
+6. implement `portworld doctor` for local mode - complete
 7. add the GCP adapter layer
 8. implement `doctor --target gcp-cloud-run`
 9. add the backend managed-storage contract
@@ -95,6 +123,8 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 ## Concrete Backlog
 
 ## Task 1: Package the public CLI
+
+`Status: Complete`
 
 ### Owner area
 
@@ -116,11 +146,20 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 
 ### Acceptance criteria
 
-- editable install exposes `portworld --help`
 - built package exposes `portworld --help`
 - legacy `python -m backend.cli ...` commands still run
+- editable install caveat is documented for environments where hidden editable `.pth` files are skipped
+
+### Implementation notes
+
+- `pyproject.toml` now defines the installable `portworld` console script
+- `backend/cli_app/` contains the public Click CLI scaffold and root options
+- `python -m backend.cli` remains intact as the legacy/internal operator path
+- `backend/Dockerfile` installs from the packaged project
 
 ## Task 2: Add shared CLI infrastructure
+
+`Status: Complete`
 
 ### Owner area
 
@@ -146,7 +185,16 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 - commands fail clearly when repo root cannot be found
 - JSON output is emitted consistently across commands that support it
 
+### Implementation notes
+
+- lazy repo-root detection is implemented via shared path helpers
+- shared human/JSON result rendering is implemented in the CLI layer
+- `.portworld/state` helpers exist for future deploy metadata
+- current stubs and implemented commands use the shared output/context model
+
 ## Task 3: Implement env parsing and env writing
+
+`Status: Complete`
 
 ### Owner area
 
@@ -167,7 +215,16 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 - backup files are created as `backend/.env.bak.<unix_ms>`
 - unknown keys survive rewrite
 
+### Implementation notes
+
+- `backend/cli_app/envfile.py` is the canonical env template/parser/writer module
+- legacy aliases such as `MISTRAL_API_KEY` and `MISTRAL_BASE_URL` are read and preserved
+- unknown keys are retained under a `Custom overrides` section on rewrite
+- canonical writes always rewrite the full file in template order
+
 ## Task 4: Move operator commands under `portworld ops`
+
+`Status: Complete`
 
 ### Owner area
 
@@ -192,7 +249,16 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 - existing backend functionality is preserved
 - JSON output remains available for automation
 
+### Implementation notes
+
+- `portworld ops ...` is implemented as direct Python wrappers around backend functions
+- the public ops commands do not shell out to `python -m backend.cli`
+- the legacy argparse CLI remains available in parallel
+- human-readable output is now the default, with `--json` retaining automation-friendly payloads
+
 ## Task 5: Implement `portworld init`
+
+`Status: Complete`
 
 ### Owner area
 
@@ -225,7 +291,16 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 - non-interactive mode fails when required values are missing
 - success output points the user to `portworld doctor` and deploy/local next steps
 
+### Implementation notes
+
+- `portworld init` is implemented with interactive and non-interactive flows
+- reruns rewrite `backend/.env` canonically and create `.env.bak.<unix_ms>`
+- existing values are reused as defaults on rerun
+- enabling tooling without a Tavily key succeeds but reports a warning because `web_search` remains unavailable
+
 ## Task 6: Implement `portworld doctor` for local mode
+
+`Status: Complete`
 
 ### Owner area
 
@@ -251,7 +326,16 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 - warnings do not produce a non-zero exit code
 - `--json` produces a complete machine-readable report
 
+### Implementation notes
+
+- local `portworld doctor` is implemented with staged `PASS` / `WARN` / `FAIL` checks
+- `--full` runs a storage bootstrap probe
+- `--target gcp-cloud-run` is present only as a forward-compatible not-implemented placeholder for Task 8
+- `doctor` uses repo-local env loading and backend Python validators directly
+
 ## Task 7: Add the GCP adapter layer
+
+`Status: Pending`
 
 ### Owner area
 
@@ -278,6 +362,8 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 
 ## Task 8: Implement `doctor --target gcp-cloud-run`
 
+`Status: Pending`
+
 ### Owner area
 
 - `backend/cli_app/commands/doctor.py`
@@ -301,6 +387,8 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 - no resources are provisioned by the doctor command
 
 ## Task 9: Add the managed-storage contract to the backend
+
+`Status: Pending`
 
 ### Owner area
 
@@ -326,6 +414,8 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 
 ## Task 10: Implement managed storage backend selection
 
+`Status: Pending`
+
 ### Owner area
 
 - `backend/infrastructure/storage/`
@@ -347,6 +437,8 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 
 ## Task 11: Implement Postgres metadata storage
 
+`Status: Pending`
+
 ### Owner area
 
 - `backend/infrastructure/storage/postgres*.py`
@@ -365,6 +457,8 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 
 ## Task 12: Implement GCS artifact storage
 
+`Status: Pending`
+
 ### Owner area
 
 - `backend/infrastructure/storage/gcs*.py`
@@ -382,6 +476,8 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 - export works with GCS-backed artifacts
 
 ## Task 13: Implement `portworld deploy gcp-cloud-run`
+
+`Status: Pending`
 
 ### Owner area
 
@@ -416,6 +512,8 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 - human and JSON outputs include service URL, image, resources, and next steps
 
 ## Task 14: Update docs and migration guidance
+
+`Status: Pending`
 
 ### Owner area
 
@@ -468,9 +566,9 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 
 ### Packaging
 
-- `portworld --help` works after editable install
 - `portworld --help` works after built package install
 - legacy `python -m backend.cli` still works during migration
+- editable install behavior is treated as an environment-specific caveat until it is explicitly fixed
 
 ### Init
 
