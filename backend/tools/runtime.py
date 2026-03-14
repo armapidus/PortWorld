@@ -239,7 +239,7 @@ def _register_profile_tools(
         definition=ToolDefinition(
             name="complete_profile_onboarding",
             description=(
-                "Confirm that the onboarding interview has collected the required profile facts."
+                "Finish onboarding after the user has either shared enough profile context or explicitly chosen to skip the remaining questions."
             ),
             input_schema={
                 "type": "object",
@@ -452,7 +452,7 @@ class RealtimeToolingRuntime:
             )
         if self.registry.has_tool("complete_profile_onboarding"):
             guidance_lines.append(
-                "- Use complete_profile_onboarding only when the onboarding interview is genuinely complete."
+                "- Use complete_profile_onboarding only when the onboarding interview is genuinely complete and the user is ready to move on, even if some questions were skipped."
             )
         if self.registry.has_tool("web_search"):
             guidance_lines.append(

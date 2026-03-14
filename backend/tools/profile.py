@@ -11,16 +11,6 @@ from backend.memory.lifecycle import PROFILE_METADATA_KEY, allowed_profile_field
 from backend.tools.contracts import ToolCall, ToolResult
 
 logger = logging.getLogger(__name__)
-ONBOARDING_REQUIRED_FIELDS = (
-    "name",
-    "job",
-    "company",
-    "preferred_language",
-    "location",
-    "intended_use",
-    "preferences",
-    "projects",
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,13 +73,8 @@ class ProfileToolExecutor:
             "metadata": metadata,
         }
         if self.mode == "complete":
-            missing_required_fields = [
-                field_name
-                for field_name in ONBOARDING_REQUIRED_FIELDS
-                if field_name not in present_fields
-            ]
-            payload["ready"] = not missing_required_fields
-            payload["missing_required_fields"] = missing_required_fields
+            payload["ready"] = True
+            payload["missing_required_fields"] = []
 
         return ToolResult(
             ok=True,
