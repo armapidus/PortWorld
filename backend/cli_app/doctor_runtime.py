@@ -6,9 +6,9 @@ import shutil
 import subprocess
 
 from backend.bootstrap.runtime import (
-    LocalDoctorRuntimeDetails,
+    DoctorRuntimeDetails,
     build_backend_storage,
-    collect_local_doctor_runtime_details,
+    collect_doctor_runtime_details,
 )
 from backend.cli_app.context import CLIContext
 from backend.cli_app.gcp.doctor import evaluate_gcp_cloud_run_readiness
@@ -45,8 +45,10 @@ def _run_local_doctor(cli_context: CLIContext, *, full: bool) -> CommandResult:
     checks: list[DiagnosticCheck] = []
     project_root: str | None = None
     settings: Settings | None = None
+    storage_backend: str | None = None
+    storage_details: dict[str, str | bool] | None = None
     storage_paths: dict[str, str] | None = None
-    details: LocalDoctorRuntimeDetails | None = None
+    details: DoctorRuntimeDetails | None = None
 
     try:
         paths = cli_context.resolve_project_paths()
@@ -150,15 +152,22 @@ def _run_local_doctor(cli_context: CLIContext, *, full: bool) -> CommandResult:
     if settings is not None:
         try:
             settings.validate_production_posture()
-            storage_paths_obj, storage = build_backend_storage(settings)
-            storage_paths = storage_paths_obj.to_dict()
+            storage_info, storage = build_backend_storage(settings)
+            storage_backend = storage_info.backend
+            storage_details = dict(storage_info.details)
+            if storage.is_local_backend:
+                storage_paths = storage.local_storage_paths().to_dict()
             realtime_provider_factory = RealtimeProviderFactory(settings=settings)
             realtime_provider_factory.validate_configuration()
             checks.append(
                 DiagnosticCheck(
                     id="backend_config_valid",
                     status="pass",
-                    message=f"Backend config is valid for realtime provider '{realtime_provider_factory.provider_name}'",
+                    message=(
+                        "Backend config is valid for realtime provider "
+                        f"'{realtime_provider_factory.provider_name}' with storage backend "
+                        f"'{storage.backend_name}'"
+                    ),
                 )
             )
         except Exception as exc:
@@ -254,28 +263,41 @@ def _run_local_doctor(cli_context: CLIContext, *, full: bool) -> CommandResult:
 
     storage_probe_ran = False
     if full and settings is not None and storage is not None and vision_valid and tooling_valid:
-        try:
-            storage.bootstrap()
-            storage_probe_ran = True
-            checks.append(
-                DiagnosticCheck(
-                    id="storage_bootstrap_probe",
-                    status="pass",
-                    message="Storage bootstrap probe succeeded",
+        if storage.is_local_backend:
+            try:
+                storage.bootstrap()
+                storage_probe_ran = True
+                checks.append(
+                    DiagnosticCheck(
+                        id="storage_bootstrap_probe",
+                        status="pass",
+                        message="Storage bootstrap probe succeeded",
+                    )
                 )
-            )
-        except Exception as exc:
+            except Exception as exc:
+                checks.append(
+                    DiagnosticCheck(
+                        id="storage_bootstrap_probe",
+                        status="fail",
+                        message=str(exc),
+                        action="Fix the storage paths and permissions, then rerun `portworld doctor --full`.",
+                    )
+                )
+        else:
             checks.append(
                 DiagnosticCheck(
                     id="storage_bootstrap_probe",
-                    status="fail",
-                    message=str(exc),
-                    action="Fix the storage paths and permissions, then rerun `portworld doctor --full`.",
+                    status="warn",
+                    message=(
+                        "Storage bootstrap probe is only available for "
+                        "BACKEND_STORAGE_BACKEND=local. Managed backend selection is valid, "
+                        "but bootstrap and persistence parity still depend on Tasks 11 and 12."
+                    ),
                 )
             )
     if settings is not None and storage is not None:
         try:
-            details = collect_local_doctor_runtime_details(
+            details = collect_doctor_runtime_details(
                 settings,
                 full_readiness=storage_probe_ran,
             )
@@ -290,10 +312,15 @@ def _run_local_doctor(cli_context: CLIContext, *, full: bool) -> CommandResult:
     }
     if details is not None:
         data["details"] = details.to_dict()
-    elif storage_paths is not None:
-        data["details"] = {
-            "storage_paths": storage_paths,
+    elif storage_backend is not None:
+        fallback_details: dict[str, object] = {
+            "storage_backend": storage_backend,
         }
+        if storage_details is not None:
+            fallback_details["storage_details"] = storage_details
+        if storage_paths is not None:
+            fallback_details["storage_paths"] = storage_paths
+        data["details"] = fallback_details
 
     return CommandResult(
         ok=ok,
@@ -302,6 +329,7 @@ def _run_local_doctor(cli_context: CLIContext, *, full: bool) -> CommandResult:
             ("target", "local"),
             ("full", full),
             ("project_root", project_root),
+            ("storage_backend", storage_backend),
         ),
         data=data,
         checks=tuple(checks),

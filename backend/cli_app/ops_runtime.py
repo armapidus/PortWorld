@@ -74,6 +74,7 @@ def run_check_config(cli_context: CLIContext, *, full_readiness: bool) -> Comman
     )
     message = format_key_value_lines(
         ("check_mode", result.check_mode),
+        ("storage_backend", result.storage_backend),
         ("realtime_provider", result.realtime_provider),
         ("vision_provider", result.vision_provider),
         ("realtime_tooling_enabled", result.realtime_tooling_enabled),
@@ -93,20 +94,21 @@ def run_check_config(cli_context: CLIContext, *, full_readiness: bool) -> Comman
 def run_bootstrap_storage(cli_context: CLIContext) -> CommandResult:
     command = "portworld ops bootstrap-storage"
     try:
-        _, storage = build_backend_storage(_build_settings(cli_context))
+        settings = _build_settings(cli_context)
+        _, storage = build_backend_storage(settings)
+        if not storage.is_local_backend:
+            raise RuntimeError(
+                "portworld ops bootstrap-storage is only supported when "
+                "BACKEND_STORAGE_BACKEND=local. Managed mode runtime selection is available, "
+                "but managed bootstrap remains deferred."
+            )
         result = storage.bootstrap()
     except ProjectRootResolutionError as exc:
         return _repo_resolution_failure(command, exc)
     except Exception as exc:
         return _failure_result(command, exc)
 
-    payload = {
-        "status": "ok",
-        "bootstrapped_at_ms": result.bootstrapped_at_ms,
-        "sqlite_path": str(result.sqlite_path),
-        "user_profile_markdown_path": str(result.user_profile_markdown_path),
-        "user_profile_json_path": str(result.user_profile_json_path),
-    }
+    payload = {"status": "ok", **result.to_dict()}
     message = format_key_value_lines(
         ("bootstrapped_at_ms", result.bootstrapped_at_ms),
         ("sqlite_path", result.sqlite_path),
@@ -126,6 +128,11 @@ def run_export_memory(cli_context: CLIContext, *, output_path: Path | None) -> C
     try:
         settings = _build_settings(cli_context)
         _, storage = build_backend_storage(settings)
+        if not storage.is_local_backend:
+            raise RuntimeError(
+                "portworld ops export-memory is only supported when "
+                "BACKEND_STORAGE_BACKEND=local. Managed memory export still depends on Task 12."
+            )
         storage.bootstrap()
         artifacts = storage.list_memory_export_artifacts()
         final_output_path = output_path or (Path.cwd() / f"portworld-memory-export-{now_ms()}.zip")
@@ -159,7 +166,13 @@ def run_export_memory(cli_context: CLIContext, *, output_path: Path | None) -> C
 def run_migrate_storage_layout(cli_context: CLIContext) -> CommandResult:
     command = "portworld ops migrate-storage-layout"
     try:
-        _, storage = build_backend_storage(_build_settings(cli_context))
+        settings = _build_settings(cli_context)
+        _, storage = build_backend_storage(settings)
+        if not storage.is_local_backend:
+            raise RuntimeError(
+                "portworld ops migrate-storage-layout is only supported when "
+                "BACKEND_STORAGE_BACKEND=local."
+            )
         storage.bootstrap()
         migration_result = storage.migrate_legacy_storage_layout()
     except ProjectRootResolutionError as exc:

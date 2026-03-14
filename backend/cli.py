@@ -54,22 +54,22 @@ def _check_config(args: argparse.Namespace) -> int:
 
 def _bootstrap_storage(_: argparse.Namespace) -> int:
     _, storage = build_backend_storage(Settings.from_env())
+    if not storage.is_local_backend:
+        raise RuntimeError(
+            "bootstrap-storage is only supported when BACKEND_STORAGE_BACKEND=local."
+        )
     result = storage.bootstrap()
-    _json_dump(
-        {
-            "status": "ok",
-            "bootstrapped_at_ms": result.bootstrapped_at_ms,
-            "sqlite_path": str(result.sqlite_path),
-            "user_profile_markdown_path": str(result.user_profile_markdown_path),
-            "user_profile_json_path": str(result.user_profile_json_path),
-        }
-    )
+    _json_dump({"status": "ok", **result.to_dict()})
     return 0
 
 
 def _export_memory(args: argparse.Namespace) -> int:
     settings = Settings.from_env()
     _, storage = build_backend_storage(settings)
+    if not storage.is_local_backend:
+        raise RuntimeError(
+            "export-memory is only supported when BACKEND_STORAGE_BACKEND=local."
+        )
     storage.bootstrap()
     artifacts = storage.list_memory_export_artifacts()
     output_path = (
@@ -94,6 +94,10 @@ def _export_memory(args: argparse.Namespace) -> int:
 
 def _migrate_storage_layout(_: argparse.Namespace) -> int:
     _, storage = build_backend_storage(Settings.from_env())
+    if not storage.is_local_backend:
+        raise RuntimeError(
+            "migrate-storage-layout is only supported when BACKEND_STORAGE_BACKEND=local."
+        )
     storage.bootstrap()
     result = storage.migrate_legacy_storage_layout()
     _json_dump(
