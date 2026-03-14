@@ -30,17 +30,18 @@ struct WakePracticeView: View {
       content: {
         VStack(spacing: PWSpace.hero) {
           VStack(spacing: PWSpace.md) {
-            Text(viewModel.feedbackTitle)
+            Text(viewModel.feedback.title)
               .font(.system(size: 38, weight: .bold, design: .rounded))
               .foregroundStyle(feedbackColor)
               .multilineTextAlignment(.center)
 
-            Text(viewModel.feedbackDetail)
+            Text(viewModel.feedback.detail)
               .font(PWTypography.body)
               .foregroundStyle(PWColor.textSecondary)
               .multilineTextAlignment(.center)
               .frame(maxWidth: 300)
           }
+          .id("\(viewModel.feedback.title)|\(viewModel.feedback.detail)")
 
           PracticeDotRow(
             completedCount: currentCompletedCount,
@@ -70,7 +71,6 @@ struct WakePracticeView: View {
       }
     )
     .animation(.easeOut(duration: 0.22), value: viewModel.stage)
-    .animation(.easeOut(duration: 0.18), value: viewModel.feedbackTitle)
     .onDisappear {
       Task { await viewModel.stopListening() }
     }
@@ -110,7 +110,7 @@ private extension WakePracticeView {
   }
 
   var feedbackColor: Color {
-    switch viewModel.feedbackTone {
+    switch viewModel.feedback.tone {
     case .neutral:
       return PWColor.textPrimary
     case .success:

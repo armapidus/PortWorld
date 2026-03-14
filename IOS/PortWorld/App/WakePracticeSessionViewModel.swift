@@ -3,6 +3,12 @@ import Foundation
 
 @MainActor
 final class WakePracticeSessionViewModel: ObservableObject {
+  struct Feedback {
+    let title: String
+    let detail: String
+    let tone: FeedbackTone
+  }
+
   enum Stage {
     case wake
     case sleep
@@ -20,9 +26,11 @@ final class WakePracticeSessionViewModel: ObservableObject {
   @Published private(set) var wakeCount = 0
   @Published private(set) var sleepCount = 0
   @Published private(set) var isListening = false
-  @Published private(set) var feedbackTitle = "Ready?"
-  @Published private(set) var feedbackDetail = "We’ll listen for your phrase three times."
-  @Published private(set) var feedbackTone: FeedbackTone = .neutral
+  @Published private(set) var feedback = Feedback(
+    title: "Ready?",
+    detail: "We’ll listen for your phrase three times.",
+    tone: .neutral
+  )
   @Published private(set) var errorText = ""
 
   let wakePhrase: String
@@ -57,9 +65,7 @@ final class WakePracticeSessionViewModel: ObservableObject {
     wakePhraseDetector.onError = { [weak self] message in
       Task { @MainActor [weak self] in
         self?.errorText = message
-        self?.feedbackTitle = "Try again"
-        self?.feedbackDetail = message
-        self?.feedbackTone = .error
+        self?.setFeedback(title: "Try again", detail: message, tone: .error)
       }
     }
 
@@ -81,9 +87,7 @@ final class WakePracticeSessionViewModel: ObservableObject {
     let authorization = await wakePhraseDetector.requestAuthorizationIfNeeded()
     guard authorization == .authorized || authorization == .notRequired else {
       errorText = "Speech recognition permission is required to test your voice commands."
-      feedbackTitle = "Permission needed"
-      feedbackDetail = errorText
-      feedbackTone = .error
+      setFeedback(title: "Permission needed", detail: errorText, tone: .error)
       return
     }
 
@@ -95,9 +99,7 @@ final class WakePracticeSessionViewModel: ObservableObject {
       scheduleAttemptTimeout()
     } catch {
       errorText = error.localizedDescription
-      feedbackTitle = "Microphone unavailable"
-      feedbackDetail = error.localizedDescription
-      feedbackTone = .error
+      setFeedback(title: "Microphone unavailable", detail: error.localizedDescription, tone: .error)
     }
   }
 
@@ -137,9 +139,7 @@ final class WakePracticeSessionViewModel: ObservableObject {
 
     if sleepCount == 3 {
       stage = .completed
-      feedbackTitle = "All set"
-      feedbackDetail = "Both phrases were detected three times."
-      feedbackTone = .success
+      setFeedback(title: "All set", detail: "Both phrases were detected three times.", tone: .success)
       Task { await stopListening() }
     } else {
       scheduleFeedbackReset()
@@ -149,9 +149,7 @@ final class WakePracticeSessionViewModel: ObservableObject {
   private func transitionToSleepStage() {
     feedbackResetTask?.cancel()
     attemptTimeoutTask?.cancel()
-    feedbackTitle = "Great!"
-    feedbackDetail = "Now let’s practice your sleep phrase."
-    feedbackTone = .success
+    setFeedback(title: "Great!", detail: "Now let’s practice your sleep phrase.", tone: .success)
 
     Task { @MainActor [weak self] in
       try? await Task.sleep(nanoseconds: 900_000_000)
@@ -165,9 +163,7 @@ final class WakePracticeSessionViewModel: ObservableObject {
   private func showSuccessFeedback(detail: String) {
     feedbackResetTask?.cancel()
     attemptTimeoutTask?.cancel()
-    feedbackTitle = "Great!"
-    feedbackDetail = detail
-    feedbackTone = .success
+    setFeedback(title: "Great!", detail: detail, tone: .success)
   }
 
   private func scheduleFeedbackReset() {
@@ -187,11 +183,13 @@ final class WakePracticeSessionViewModel: ObservableObject {
       guard let self else { return }
       guard self.isListening else { return }
       guard self.stage != .completed else { return }
-      self.feedbackTitle = "Try again"
-      self.feedbackDetail = self.stage == .wake
-        ? "We didn’t catch \"\(self.displayWakePhrase)\" that time."
-        : "We didn’t catch \"\(self.displaySleepPhrase)\" that time."
-      self.feedbackTone = .retry
+      self.setFeedback(
+        title: "Try again",
+        detail: self.stage == .wake
+          ? "We didn’t catch \"\(self.displayWakePhrase)\" that time."
+          : "We didn’t catch \"\(self.displaySleepPhrase)\" that time.",
+        tone: .retry
+      )
       self.scheduleFeedbackReset()
     }
   }
@@ -199,25 +197,35 @@ final class WakePracticeSessionViewModel: ObservableObject {
   private func refreshNeutralFeedback() {
     switch stage {
     case .wake:
-      feedbackTitle = isListening ? "Listening..." : "Ready?"
-      feedbackDetail = "Say \"\(displayWakePhrase)\" clearly."
+      setFeedback(
+        title: isListening ? "Listening..." : "Ready?",
+        detail: "Say \"\(displayWakePhrase)\" clearly.",
+        tone: .neutral
+      )
     case .sleep:
-      feedbackTitle = isListening ? "Listening..." : "Ready?"
-      feedbackDetail = "Say \"\(displaySleepPhrase)\" clearly."
+      setFeedback(
+        title: isListening ? "Listening..." : "Ready?",
+        detail: "Say \"\(displaySleepPhrase)\" clearly.",
+        tone: .neutral
+      )
     case .completed:
-      feedbackTitle = "All set"
-      feedbackDetail = "Both phrases were detected three times."
+      setFeedback(
+        title: "All set",
+        detail: "Both phrases were detected three times.",
+        tone: .success
+      )
     }
-    feedbackTone = .neutral
   }
 
   private func handleStatusChanged(_ status: WakePhraseDetector.StatusSnapshot) {
     if status.authorization == "denied" || status.authorization == "restricted" {
       errorText = "Speech recognition permission is required to test your voice commands."
-      feedbackTitle = "Permission needed"
-      feedbackDetail = errorText
-      feedbackTone = .error
+      setFeedback(title: "Permission needed", detail: errorText, tone: .error)
     }
+  }
+
+  private func setFeedback(title: String, detail: String, tone: FeedbackTone) {
+    feedback = Feedback(title: title, detail: detail, tone: tone)
   }
 
   private var displayWakePhrase: String {
