@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from backend.bootstrap.runtime import build_runtime_dependencies
 from backend.core.rate_limit import RateLimitDecision, SlidingWindowRateLimiter
 from backend.core.settings import Settings
-from backend.core.storage import BackendStorage, StorageBootstrapResult, StoragePaths
+from backend.core.storage import BackendStorage, StorageBootstrapResult, StorageInfo
 from backend.realtime.factory import RealtimeProviderFactory
 from backend.realtime.session_modes import build_default_realtime_session_mode_registry
 from backend.tools.runtime import RealtimeToolingRuntime
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 @dataclass(slots=True)
 class AppRuntime:
     settings: Settings
-    storage_paths: StoragePaths
+    storage_info: StorageInfo
     storage: BackendStorage
     realtime_provider: RealtimeProviderFactory
     vision_memory_runtime: VisionMemoryRuntime | None
@@ -42,7 +42,7 @@ class AppRuntime:
         dependencies = build_runtime_dependencies(settings)
         return cls(
             settings=settings,
-            storage_paths=dependencies.storage_paths,
+            storage_info=dependencies.storage_info,
             storage=dependencies.storage,
             realtime_provider=dependencies.realtime_provider_factory,
             vision_memory_runtime=dependencies.vision_memory_runtime,
