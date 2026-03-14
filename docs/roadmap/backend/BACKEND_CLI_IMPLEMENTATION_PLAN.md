@@ -21,8 +21,8 @@ The critical dependency is managed storage support. `deploy gcp-cloud-run` canno
 
 ## Current Status
 
-- implemented through Task 9
-- next task: Task 10
+- implemented through Task 12
+- next task: Task 13
 - available today:
   - `portworld init`
   - `portworld doctor --target local`
@@ -32,11 +32,11 @@ The critical dependency is managed storage support. `deploy gcp-cloud-run` canno
   - `portworld ops export-memory`
   - `portworld ops migrate-storage-layout`
 - not implemented yet:
-  - managed storage backend selection and persistence implementation
   - `deploy gcp-cloud-run`
+  - Task 14 docs and migration guidance refresh
 - important implementation note:
   - editable install has been unreliable in the current local environment; packaged install and wheel build have been the validated paths
-  - Task 9 added the managed-storage runtime contract and validation, but actual Postgres/GCS backend selection is still deferred to Task 10
+  - managed storage now selects through a shared backend contract and supports Postgres metadata plus GCS artifact persistence
 
 ## Documentation Authority
 
@@ -114,7 +114,7 @@ Implementation should land in this order:
 7. add the GCP adapter layer - complete
 8. implement `doctor --target gcp-cloud-run` - complete
 9. add the backend managed-storage contract - complete
-10. implement managed storage backends
+10. implement managed storage backends - complete
 11. implement `deploy gcp-cloud-run`
 12. update docs and migration guidance
 
@@ -428,11 +428,11 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 
 - Added the managed-storage env contract to `Settings` and the active `backend/.env.example`
 - Added explicit runtime validation for `local` versus `postgres_gcs` storage configuration
-- Managed mode is now recognized and validated, but actual backend selection still fails fast with a Task 10 not-implemented guard
+- Managed mode is now recognized and validated through the shared backend contract used by runtime and CLI flows
 
 ## Task 10: Implement managed storage backend selection
 
-`Status: Pending`
+`Status: Complete`
 
 ### Owner area
 
@@ -453,9 +453,15 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 - the backend can boot with either storage backend through one functional contract
 - local behavior remains unchanged from a user perspective
 
+### Implementation notes
+
+- Storage backend selection now routes `local` and `postgres_gcs` through one shared contract
+- Runtime, doctor, and ops flows consume backend-agnostic storage info instead of assuming local filesystem paths
+- Capability-specific managed-mode behavior is handled behind the shared storage contract rather than a top-level not-implemented guard
+
 ## Task 11: Implement Postgres metadata storage
 
-`Status: Pending`
+`Status: Complete`
 
 ### Owner area
 
@@ -473,9 +479,15 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 - metadata operations needed by runtime, export, reset, and retention work in managed mode
 - schema bootstrap is automated enough for the Cloud Run path
 
+### Implementation notes
+
+- Managed mode now bootstraps Postgres schema automatically during storage bootstrap
+- Session index, artifact index, vision frame index, profile documents, session memory documents, and event-log metadata are stored in Postgres
+- Managed runtime, retention, reset eligibility, and memory-admin flows now use Postgres-backed metadata operations
+
 ## Task 12: Implement GCS artifact storage
 
-`Status: Pending`
+`Status: Complete`
 
 ### Owner area
 
@@ -492,6 +504,12 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 
 - profile/session artifacts persist to GCS in managed mode
 - export works with GCS-backed artifacts
+
+### Implementation notes
+
+- Managed profile/session artifacts, event logs, and raw vision-frame blobs now persist through a provider-neutral object-store contract with a GCS implementation
+- Managed reads prefer GCS artifacts and retain Postgres fallbacks for compatibility with previously stored managed data
+- Memory export is now storage-agnostic and works in managed mode through artifact byte loaders rather than local filesystem paths
 
 ## Task 13: Implement `portworld deploy gcp-cloud-run`
 

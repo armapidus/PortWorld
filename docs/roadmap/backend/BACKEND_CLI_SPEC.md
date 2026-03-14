@@ -34,7 +34,7 @@ The first Cloud Run deployment path is based on:
 
 ## Implementation Status
 
-This specification is still the design authority for CLI v1, but implementation has progressed through Task 9.
+This specification is still the design authority for CLI v1, but implementation has progressed through Task 12.
 
 Available today:
 
@@ -47,17 +47,19 @@ Available today:
 - GCP adapter layer under `backend/cli_app/gcp/`
 - `portworld doctor --target gcp-cloud-run`
 - managed-storage env parsing and validation contract
+- managed storage backend selection
+- managed Postgres metadata persistence
+- managed GCS artifact persistence
 
 Not implemented yet:
 
-- managed storage backend selection and persistence implementation
 - `deploy gcp-cloud-run`
 
 Current implementation notes:
 
 - `ops` and `doctor` call backend Python functions directly rather than shelling out to `python -m backend.cli`
 - the public `doctor` GCP path is implemented as a read-only preflight check; provisioning remains part of `deploy gcp-cloud-run`
-- the managed-storage runtime contract is implemented, but `postgres_gcs` still raises an explicit Task 10 not-implemented runtime guard
+- managed mode now boots through the shared storage contract and supports Postgres metadata plus GCS-backed artifact persistence
 - the CLI package exists, but editable-install behavior has been unreliable in the current local environment; packaged install and wheel build are the validated paths so far
 - legacy `python -m backend.cli` remains supported during migration
 
@@ -1114,16 +1116,18 @@ Completed:
 4. migrate existing raw operator commands into `portworld ops ...`
 5. implement `portworld init`
 6. implement `portworld doctor` for local mode
+7. implement GCP adapter helpers for `gcloud`, Cloud Build, and Artifact Registry
+8. implement real `doctor --target gcp-cloud-run`
+9. implement managed storage backend selection
+10. implement managed Postgres metadata and GCS artifact support
 
 Next:
 
-7. implement GCP adapter helpers for `gcloud`, Cloud Build, and Artifact Registry
-8. implement real `doctor --target gcp-cloud-run`
-9. implement Secret Manager integration
-10. implement Cloud SQL Postgres and GCS provisioning helpers
-11. implement `deploy gcp-cloud-run`
-12. connect final deploy output to `.portworld/state/gcp-cloud-run.json`
-13. finish docs and migration guidance
+11. implement Secret Manager integration
+12. implement Cloud SQL Postgres and GCS provisioning helpers
+13. implement `deploy gcp-cloud-run`
+14. connect final deploy output to `.portworld/state/gcp-cloud-run.json`
+15. finish docs and migration guidance
 
 ## Open Follow-Up Items After CLI v1
 
