@@ -218,6 +218,9 @@ def _register_profile_tools(
                     "name": {"type": "string"},
                     "job": {"type": "string"},
                     "company": {"type": "string"},
+                    "preferred_language": {"type": "string"},
+                    "location": {"type": "string"},
+                    "intended_use": {"type": "string"},
                     "preferences": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -231,6 +234,20 @@ def _register_profile_tools(
             },
         ),
         executor=ProfileToolExecutor(storage=context.profile_storage, mode="update"),
+    )
+    registry.register(
+        definition=ToolDefinition(
+            name="complete_profile_onboarding",
+            description=(
+                "Confirm that the onboarding interview has collected the required profile facts."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        ),
+        executor=ProfileToolExecutor(storage=context.profile_storage, mode="complete"),
     )
 
 
@@ -405,6 +422,7 @@ class RealtimeToolingRuntime:
             "- Use get_session_visual_context when the user asks about what has been seen across the current session.",
             "- Use get_user_profile to inspect the saved user profile before relying on memory about the user.",
             "- Use update_user_profile only for facts the user has clearly confirmed.",
+            "- Use complete_profile_onboarding only when the onboarding interview is genuinely complete.",
         ]
         if self.registry.has_tool("web_search"):
             guidance_lines.append(

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Final
 
 
-PROFILE_SCHEMA_VERSION: Final[str] = "1"
+PROFILE_SCHEMA_VERSION: Final[str] = "2"
 MEMORY_EXPORT_SCHEMA_VERSION: Final[str] = "1"
 DEFAULT_SESSION_MEMORY_RETENTION_DAYS: Final[int] = 30
 PROFILE_METADATA_KEY: Final[str] = "profile_metadata"
@@ -13,6 +13,9 @@ PROFILE_ALLOWLISTED_FIELDS: Final[tuple[str, ...]] = (
     "name",
     "job",
     "company",
+    "preferred_language",
+    "location",
+    "intended_use",
     "preferences",
     "projects",
 )
@@ -55,6 +58,9 @@ class ProfileRecord:
     name: str | None = None
     job: str | None = None
     company: str | None = None
+    preferred_language: str | None = None
+    location: str | None = None
+    intended_use: str | None = None
     preferences: list[str] = field(default_factory=list)
     projects: list[str] = field(default_factory=list)
     metadata: ProfileLifecycleMetadata = field(default_factory=ProfileLifecycleMetadata)

@@ -37,6 +37,9 @@ def parse_profile_record(payload: Mapping[str, object]) -> ProfileRecord:
         name=normalize_optional_string(payload.get("name")),
         job=normalize_optional_string(payload.get("job")),
         company=normalize_optional_string(payload.get("company")),
+        preferred_language=normalize_optional_string(payload.get("preferred_language")),
+        location=normalize_optional_string(payload.get("location")),
+        intended_use=normalize_optional_string(payload.get("intended_use")),
         preferences=_normalize_string_list(payload.get("preferences")),
         projects=_normalize_string_list(payload.get("projects")),
         metadata=metadata,
@@ -84,6 +87,12 @@ def render_profile_markdown(record: ProfileRecord) -> str:
         lines.append(f"Job: {record.job}")
     if record.company:
         lines.append(f"Company: {record.company}")
+    if record.preferred_language:
+        lines.append(f"Preferred Language: {record.preferred_language}")
+    if record.location:
+        lines.append(f"Location: {record.location}")
+    if record.intended_use:
+        lines.append(f"Intended Use: {record.intended_use}")
     if record.preferences:
         lines.append(f"Preferences: {', '.join(record.preferences)}")
     if record.projects:
@@ -122,6 +131,9 @@ def build_profile_record(
         name=existing.name,
         job=existing.job,
         company=existing.company,
+        preferred_language=existing.preferred_language,
+        location=existing.location,
+        intended_use=existing.intended_use,
         preferences=existing.preferences,
         projects=existing.projects,
         metadata=metadata,

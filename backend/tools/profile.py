@@ -11,6 +11,16 @@ from backend.memory.lifecycle import PROFILE_METADATA_KEY, allowed_profile_field
 from backend.tools.contracts import ToolCall, ToolResult
 
 logger = logging.getLogger(__name__)
+ONBOARDING_REQUIRED_FIELDS = (
+    "name",
+    "job",
+    "company",
+    "preferred_language",
+    "location",
+    "intended_use",
+    "preferences",
+    "projects",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +37,8 @@ class ProfileToolExecutor:
                     self._update_profile,
                     call.arguments,
                 )
+            elif self.mode == "complete":
+                profile_payload = await asyncio.to_thread(self.storage.read_user_profile)
             else:
                 raise ValueError(f"Unsupported profile tool mode: {self.mode}")
         except (JSONDecodeError, OSError, ValueError) as exc:
@@ -60,20 +72,30 @@ class ProfileToolExecutor:
         if not isinstance(metadata, dict):
             metadata = {}
 
+        payload = {
+            "session_id": call.session_id,
+            "profile": profile,
+            "missing_fields": [
+                field_name
+                for field_name in allowed_profile_fields()
+                if field_name not in present_fields
+            ],
+            "metadata": metadata,
+        }
+        if self.mode == "complete":
+            missing_required_fields = [
+                field_name
+                for field_name in ONBOARDING_REQUIRED_FIELDS
+                if field_name not in present_fields
+            ]
+            payload["ready"] = not missing_required_fields
+            payload["missing_required_fields"] = missing_required_fields
+
         return ToolResult(
             ok=True,
             name=call.name,
             call_id=call.call_id,
-            payload={
-                "session_id": call.session_id,
-                "profile": profile,
-                "missing_fields": [
-                    field_name
-                    for field_name in allowed_profile_fields()
-                    if field_name not in present_fields
-                ],
-                "metadata": metadata,
-            },
+            payload=payload,
         )
 
     def _update_profile(self, arguments: dict[str, Any]) -> dict[str, object]:

@@ -27,12 +27,22 @@ class ProfileUpdatePayload(BaseModel):
     name: str | None = None
     job: str | None = None
     company: str | None = None
+    preferred_language: str | None = None
+    location: str | None = None
+    intended_use: str | None = None
     preferences: list[str] = Field(default_factory=list)
     projects: list[str] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
 
-    @field_validator("name", "job", "company")
+    @field_validator(
+        "name",
+        "job",
+        "company",
+        "preferred_language",
+        "location",
+        "intended_use",
+    )
     @classmethod
     def validate_optional_string(cls, value: str | None) -> str | None:
         if value is None:

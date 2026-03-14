@@ -24,12 +24,14 @@ class ToolCallDispatcher:
         upstream_client: UpstreamToolSender,
         tooling_runtime: RealtimeToolingRuntime | None,
         send_response_create: Callable[[str], Awaitable[None]],
+        send_onboarding_profile_ready: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         dedupe_limit: int = 512,
     ) -> None:
         self._session_id = session_id
         self._upstream_client = upstream_client
         self._tooling_runtime = tooling_runtime
         self._send_response_create = send_response_create
+        self._send_onboarding_profile_ready = send_onboarding_profile_ready
         self._processed_tool_call_ids: dict[str, None] = {}
         self._processed_tool_item_ids: dict[str, None] = {}
         self._processed_tool_dedupe_limit = max(1, dedupe_limit)
@@ -99,6 +101,7 @@ class ToolCallDispatcher:
             call_id=tool_result.call_id,
             output=tool_result.to_output_json(),
         )
+        await self._maybe_emit_onboarding_ready(tool_result)
 
     def _extract_tool_call_dedupe_ids(
         self,
@@ -253,3 +256,14 @@ class ToolCallDispatcher:
             }
         )
         await self._send_response_create("tool_output")
+
+    async def _maybe_emit_onboarding_ready(self, tool_result) -> None:
+        if self._send_onboarding_profile_ready is None:
+            return
+        if tool_result.name != "complete_profile_onboarding":
+            return
+        if tool_result.ok is False:
+            return
+        if tool_result.payload.get("ready") is not True:
+            return
+        await self._send_onboarding_profile_ready(tool_result.payload)

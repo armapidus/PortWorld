@@ -61,6 +61,7 @@ class IOSRealtimeBridge:
             upstream_client=upstream_client,
             tooling_runtime=tooling_runtime,
             send_response_create=self._send_response_create,
+            send_onboarding_profile_ready=self._send_onboarding_profile_ready,
         )
 
         self._cancelled_response_ids: set[str] = set()
@@ -517,6 +518,18 @@ class IOSRealtimeBridge:
         await self._upstream_client.send_json({"type": "response.create"})
         self._turn_manager.on_response_created()
         logger.info("Upstream response.create sent session=%s source=%s", self._session_id, source)
+
+    async def _send_onboarding_profile_ready(self, payload: dict[str, Any]) -> None:
+        missing_required_fields = payload.get("missing_required_fields")
+        if not isinstance(missing_required_fields, list):
+            missing_required_fields = []
+        await self._send_envelope(
+            "onboarding.profile_ready",
+            {
+                "ready": True,
+                "missing_required_fields": missing_required_fields,
+            },
+        )
 
     @staticmethod
     def _parse_retriable_flag(raw: Any) -> bool:
