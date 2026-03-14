@@ -34,12 +34,16 @@ class IOSRealtimeBridge:
         manual_turn_fallback_delay_ms: int = 900,
         client_audio_queue_maxsize: int = 32,
         tooling_runtime: RealtimeToolingRuntime | None = None,
+        session_instructions: str | None = None,
+        auto_start_response: bool = False,
     ) -> None:
         self._session_id = session_id
         self._upstream_client = upstream_client
         self._send_envelope = send_envelope
         self._send_binary_frame = send_binary_frame
         self._tooling_runtime = tooling_runtime
+        self._session_instructions = session_instructions
+        self._auto_start_response = auto_start_response
 
         self._upstream_task: asyncio.Task[None] | None = None
         self._closed = False
@@ -96,11 +100,16 @@ class IOSRealtimeBridge:
         tools = None
         if self._tooling_runtime is not None:
             tools = self._tooling_runtime.to_openai_tools()
-        await self._upstream_client.initialize_session(tools=tools)
+        await self._upstream_client.initialize_session(
+            tools=tools,
+            instructions=self._session_instructions,
+        )
 
         logger.info("Waiting for upstream session readiness session=%s", self._session_id)
         await self._wait_for_upstream_session_ready()
         logger.info("Upstream session ready session=%s", self._session_id)
+        if self._auto_start_response:
+            await self._send_response_create("session_auto_start")
 
     async def append_client_audio(self, payload_bytes: bytes) -> None:
         if not payload_bytes:
@@ -449,7 +458,10 @@ class IOSRealtimeBridge:
             tools = None
             if self._tooling_runtime is not None:
                 tools = self._tooling_runtime.to_openai_tools()
-            did_retry = await retry_method(tools=tools)
+            did_retry = await retry_method(
+                tools=tools,
+                instructions=self._session_instructions,
+            )
         except RealtimeClientError:
             return False
         except Exception:  # pragma: no cover - defensive fallback

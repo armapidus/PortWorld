@@ -11,6 +11,7 @@ from backend.core.storage import BackendStorage, RealtimeReadOnlyStorageView
 from backend.memory.lifecycle import PROFILE_ALLOWLISTED_FIELDS
 from backend.tools.contracts import ToolCall, ToolDefinition, ToolResult
 from backend.tools.memory import MemoryToolExecutor
+from backend.tools.profile import ProfileToolExecutor
 from backend.tools.providers.tavily import TavilySearchProvider
 from backend.tools.registry import RealtimeToolRegistry, ToolRegistryError, UnknownToolError
 from backend.tools.search import SearchProvider
@@ -100,6 +101,7 @@ class SearchProviderFactory:
 @dataclass(frozen=True, slots=True)
 class ToolCatalogContext:
     storage: RealtimeReadOnlyStorageView
+    profile_storage: BackendStorage
     search_provider: SearchProvider | None
     web_search_provider: str | None
     web_search_max_results: int
@@ -187,8 +189,54 @@ def _register_web_search_tool(
     )
 
 
+def _register_profile_tools(
+    *,
+    registry: RealtimeToolRegistry,
+    context: ToolCatalogContext,
+) -> None:
+    registry.register(
+        definition=ToolDefinition(
+            name="get_user_profile",
+            description="Read the saved user profile facts collected for this user.",
+            input_schema={
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        ),
+        executor=ProfileToolExecutor(storage=context.profile_storage, mode="get"),
+    )
+    registry.register(
+        definition=ToolDefinition(
+            name="update_user_profile",
+            description=(
+                "Update confirmed user profile facts. Omit fields that are still unknown."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "job": {"type": "string"},
+                    "company": {"type": "string"},
+                    "preferences": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "projects": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+                "additionalProperties": False,
+            },
+        ),
+        executor=ProfileToolExecutor(storage=context.profile_storage, mode="update"),
+    )
+
+
 DEFAULT_TOOL_CATALOG_CONTRIBUTORS: tuple[ToolCatalogContributor, ...] = (
     _register_memory_tools,
+    _register_profile_tools,
     _register_web_search_tool,
 )
 
@@ -219,6 +267,7 @@ class RealtimeToolingRuntime:
         registry = cls._build_registry(
             context=ToolCatalogContext(
                 storage=read_only_storage,
+                profile_storage=storage,
                 search_provider=search_provider,
                 web_search_provider=web_search_provider,
                 web_search_max_results=settings.realtime_web_search_max_results,
@@ -354,6 +403,8 @@ class RealtimeToolingRuntime:
             "Tool usage policy:",
             "- Use get_short_term_visual_context when the user asks about what is visible now or what was seen in the last few moments.",
             "- Use get_session_visual_context when the user asks about what has been seen across the current session.",
+            "- Use get_user_profile to inspect the saved user profile before relying on memory about the user.",
+            "- Use update_user_profile only for facts the user has clearly confirmed.",
         ]
         if self.registry.has_tool("web_search"):
             guidance_lines.append(

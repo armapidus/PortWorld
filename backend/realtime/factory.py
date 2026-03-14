@@ -20,6 +20,8 @@ class RealtimeProviderBuilder(Protocol):
         send_control: ControlSender,
         send_server_audio: BinarySender,
         realtime_tooling_runtime: RealtimeToolingRuntime | None = None,
+        session_instructions: str | None = None,
+        auto_start_response: bool = False,
     ) -> "BridgeBinding": ...
 
 
@@ -120,6 +122,8 @@ class RealtimeProviderFactory:
         send_control: ControlSender,
         send_server_audio: BinarySender,
         realtime_tooling_runtime: RealtimeToolingRuntime | None = None,
+        session_instructions: str | None = None,
+        auto_start_response: bool = False,
     ) -> BridgeBinding:
         return self._definition.build_bridge(
             settings=self.settings,
@@ -127,4 +131,6 @@ class RealtimeProviderFactory:
             send_control=send_control,
             send_server_audio=send_server_audio,
             realtime_tooling_runtime=realtime_tooling_runtime,
+            session_instructions=session_instructions,
+            auto_start_response=auto_start_response,
         )

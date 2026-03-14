@@ -23,6 +23,8 @@ def build_openai_session_bridge(
     send_control: ControlSender,
     send_server_audio: BinarySender,
     realtime_tooling_runtime: RealtimeToolingRuntime | None = None,
+    session_instructions: str | None = None,
+    auto_start_response: bool = False,
 ) -> BridgeBinding:
     context = BridgeBindingContext()
     api_key = settings.require_openai_api_key()
@@ -53,5 +55,7 @@ def build_openai_session_bridge(
         manual_turn_fallback_enabled=settings.openai_realtime_enable_manual_turn_fallback,
         manual_turn_fallback_delay_ms=settings.openai_realtime_manual_turn_fallback_delay_ms,
         tooling_runtime=realtime_tooling_runtime,
+        session_instructions=session_instructions,
+        auto_start_response=auto_start_response,
     )
     return BridgeBinding(bridge=bridge, context=context)

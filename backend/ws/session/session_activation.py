@@ -52,11 +52,21 @@ async def activate_session(
         )
         return fallback_session
 
+    raw_instructions = envelope.payload.get("instructions")
+    session_instructions = (
+        raw_instructions.strip()
+        if isinstance(raw_instructions, str) and raw_instructions.strip()
+        else None
+    )
+    auto_start_response = bool(envelope.payload.get("auto_start_response"))
+
     try:
         binding = build_session_bridge(
             session_id=envelope.session_id,
             send_control=send_control,
             send_server_audio=send_server_audio,
+            session_instructions=session_instructions,
+            auto_start_response=auto_start_response,
         )
     except MissingOpenAIAPIKeyError:
         await send_control(
