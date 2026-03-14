@@ -21,22 +21,22 @@ The critical dependency is managed storage support. `deploy gcp-cloud-run` canno
 
 ## Current Status
 
-- implemented through Task 6
-- next task: Task 7
+- implemented through Task 9
+- next task: Task 10
 - available today:
   - `portworld init`
   - `portworld doctor --target local`
+  - `portworld doctor --target gcp-cloud-run`
   - `portworld ops check-config`
   - `portworld ops bootstrap-storage`
   - `portworld ops export-memory`
   - `portworld ops migrate-storage-layout`
 - not implemented yet:
-  - GCP adapter layer
-  - real `doctor --target gcp-cloud-run` checks
-  - managed storage
+  - managed storage backend selection and persistence implementation
   - `deploy gcp-cloud-run`
 - important implementation note:
   - editable install has been unreliable in the current local environment; packaged install and wheel build have been the validated paths
+  - Task 9 added the managed-storage runtime contract and validation, but actual Postgres/GCS backend selection is still deferred to Task 10
 
 ## Documentation Authority
 
@@ -111,9 +111,9 @@ Implementation should land in this order:
 4. migrate current operator commands under `portworld ops` - complete
 5. implement `portworld init` - complete
 6. implement `portworld doctor` for local mode - complete
-7. add the GCP adapter layer
-8. implement `doctor --target gcp-cloud-run`
-9. add the backend managed-storage contract
+7. add the GCP adapter layer - complete
+8. implement `doctor --target gcp-cloud-run` - complete
+9. add the backend managed-storage contract - complete
 10. implement managed storage backends
 11. implement `deploy gcp-cloud-run`
 12. update docs and migration guidance
@@ -335,7 +335,7 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 
 ## Task 7: Add the GCP adapter layer
 
-`Status: Pending`
+`Status: Complete`
 
 ### Owner area
 
@@ -360,9 +360,15 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 - GCP helpers can be used independently by `doctor` and deploy
 - failures are returned in a structured form suitable for human and JSON summaries
 
+### Implementation notes
+
+- Added `backend/cli_app/gcp/` as the shared adapter package for `gcloud` execution and typed GCP helper results
+- Landed read-only and mutating helper surfaces now so Task 8 and Task 13 can reuse the same adapter contract
+- Kept CLI prompts, summaries, and `.portworld/state` handling outside the adapter layer
+
 ## Task 8: Implement `doctor --target gcp-cloud-run`
 
-`Status: Pending`
+`Status: Complete`
 
 ### Owner area
 
@@ -386,9 +392,15 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 - failures include exact remediation steps
 - no resources are provisioned by the doctor command
 
+### Implementation notes
+
+- Replaced the stubbed GCP doctor path with real read-only checks using the Task 7 adapters
+- Added checks for auth, project, region, required APIs, deployable image naming, local secret readiness, and production-posture compatibility
+- Kept the command non-provisioning: it inspects GCP state but does not enable APIs, create resources, or write CLI state
+
 ## Task 9: Add the managed-storage contract to the backend
 
-`Status: Pending`
+`Status: Complete`
 
 ### Owner area
 
@@ -411,6 +423,12 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 
 - backend starts in local mode without regression
 - backend validates managed mode without ambiguous config errors
+
+### Implementation notes
+
+- Added the managed-storage env contract to `Settings` and the active `backend/.env.example`
+- Added explicit runtime validation for `local` versus `postgres_gcs` storage configuration
+- Managed mode is now recognized and validated, but actual backend selection still fails fast with a Task 10 not-implemented guard
 
 ## Task 10: Implement managed storage backend selection
 

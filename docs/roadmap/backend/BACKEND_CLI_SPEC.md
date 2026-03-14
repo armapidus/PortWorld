@@ -34,7 +34,7 @@ The first Cloud Run deployment path is based on:
 
 ## Implementation Status
 
-This specification is still the design authority for CLI v1, but implementation has progressed through Task 6.
+This specification is still the design authority for CLI v1, but implementation has progressed through Task 9.
 
 Available today:
 
@@ -44,18 +44,20 @@ Available today:
 - `portworld ops ...`
 - `portworld init`
 - `portworld doctor --target local`
+- GCP adapter layer under `backend/cli_app/gcp/`
+- `portworld doctor --target gcp-cloud-run`
+- managed-storage env parsing and validation contract
 
 Not implemented yet:
 
-- GCP adapter layer
-- real `doctor --target gcp-cloud-run` checks
-- managed storage
+- managed storage backend selection and persistence implementation
 - `deploy gcp-cloud-run`
 
 Current implementation notes:
 
 - `ops` and `doctor` call backend Python functions directly rather than shelling out to `python -m backend.cli`
-- the public `doctor` flag surface already includes GCP-target flags, but GCP behavior is intentionally deferred
+- the public `doctor` GCP path is implemented as a read-only preflight check; provisioning remains part of `deploy gcp-cloud-run`
+- the managed-storage runtime contract is implemented, but `postgres_gcs` still raises an explicit Task 10 not-implemented runtime guard
 - the CLI package exists, but editable-install behavior has been unreliable in the current local environment; packaged install and wheel build are the validated paths so far
 - legacy `python -m backend.cli` remains supported during migration
 
