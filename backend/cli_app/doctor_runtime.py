@@ -11,6 +11,7 @@ from backend.bootstrap.runtime import (
     collect_local_doctor_runtime_details,
 )
 from backend.cli_app.context import CLIContext
+from backend.cli_app.gcp.doctor import evaluate_gcp_cloud_run_readiness
 from backend.cli_app.output import CommandResult, DiagnosticCheck, format_key_value_lines
 from backend.cli_app.paths import ProjectPaths, ProjectRootResolutionError
 from backend.core.settings import Settings, load_environment_files
@@ -32,7 +33,7 @@ class DoctorOptions:
 
 def run_doctor(cli_context: CLIContext, options: DoctorOptions) -> CommandResult:
     if options.target == "gcp-cloud-run":
-        return _gcp_not_implemented_result(options)
+        return _run_gcp_cloud_run_doctor(cli_context, options=options)
     if options.project is not None or options.region is not None:
         return _usage_error_result(
             "--project and --region are only supported with --target gcp-cloud-run."
@@ -313,30 +314,74 @@ def _build_settings(paths: ProjectPaths) -> Settings:
     return Settings.from_env()
 
 
-def _gcp_not_implemented_result(options: DoctorOptions) -> CommandResult:
+def _run_gcp_cloud_run_doctor(
+    cli_context: CLIContext,
+    *,
+    options: DoctorOptions,
+) -> CommandResult:
+    try:
+        paths = cli_context.resolve_project_paths()
+    except ProjectRootResolutionError as exc:
+        return CommandResult(
+            ok=False,
+            command=COMMAND_NAME,
+            message=format_key_value_lines(
+                ("target", options.target),
+                ("full", options.full),
+                ("project", options.project),
+                ("region", options.region),
+            ),
+            data={
+                "target": options.target,
+                "project_root": None,
+                "full": options.full,
+                "status": "error",
+                "error_type": type(exc).__name__,
+            },
+            checks=(
+                DiagnosticCheck(
+                    id="project_root_detected",
+                    status="fail",
+                    message=str(exc),
+                    action="Run from a PortWorld repo checkout or pass --project-root.",
+                ),
+            ),
+            exit_code=1,
+        )
+
+    evaluation = evaluate_gcp_cloud_run_readiness(
+        paths,
+        full=options.full,
+        explicit_project=options.project,
+        explicit_region=options.region,
+    )
+    checks = (
+        DiagnosticCheck(
+            id="project_root_detected",
+            status="pass",
+            message=f"PortWorld repo detected at {paths.project_root}",
+        ),
+        *evaluation.checks,
+    )
+    details = evaluation.details
     return CommandResult(
-        ok=False,
+        ok=evaluation.ok,
         command=COMMAND_NAME,
         message=format_key_value_lines(
             ("target", options.target),
             ("full", options.full),
-            ("project", options.project),
-            ("region", options.region),
+            ("project_root", paths.project_root),
+            ("project", details.project_id or options.project),
+            ("region", details.region or options.region),
         ),
         data={
             "target": options.target,
-            "project_root": None,
+            "project_root": str(paths.project_root),
             "full": options.full,
+            "details": details.to_dict(),
         },
-        checks=(
-            DiagnosticCheck(
-                id="target_not_implemented",
-                status="fail",
-                message="GCP Cloud Run readiness checks land in Task 8 and are not implemented yet.",
-                action="Run 'portworld doctor --target local' for current local readiness.",
-            ),
-        ),
-        exit_code=1,
+        checks=checks,
+        exit_code=0 if evaluation.ok else 1,
     )
 
 
