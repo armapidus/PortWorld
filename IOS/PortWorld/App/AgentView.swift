@@ -22,7 +22,7 @@ struct AgentView: View {
       wearablesRuntimeManager: wearablesRuntimeManager
     )
 
-    PWScreen(title: "Agent", topPadding: PWSpace.md) {
+    PWScreen(title: "Agent", titleAlignment: .center, topPadding: PWSpace.md) {
       VStack(spacing: PWSpace.section) {
         Spacer(minLength: 0)
 

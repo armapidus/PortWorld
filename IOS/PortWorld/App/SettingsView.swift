@@ -50,7 +50,7 @@ struct SettingsView: View {
       wearablesRuntimeManager: wearablesRuntimeManager
     )
 
-    PWScreen(title: "Settings", topPadding: PWSpace.md) {
+    PWScreen(title: "Settings", titleAlignment: .center, topPadding: PWSpace.md) {
       ScrollViewReader { proxy in
         ScrollView(showsIndicators: false) {
           VStack(alignment: .leading, spacing: PWSpace.section) {

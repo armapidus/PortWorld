@@ -5,19 +5,27 @@ enum PWOnboardingScaffoldStyle {
   case leadingContent
 }
 
+enum PWScreenTitleAlignment {
+  case leading
+  case center
+}
+
 struct PWScreen<Content: View>: View {
   let title: String?
+  let titleAlignment: PWScreenTitleAlignment
   let horizontalPadding: CGFloat
   let topPadding: CGFloat
   private let content: Content
 
   init(
     title: String? = nil,
+    titleAlignment: PWScreenTitleAlignment = .leading,
     horizontalPadding: CGFloat = PWSpace.screen,
     topPadding: CGFloat = PWSpace.xl,
     @ViewBuilder content: () -> Content
   ) {
     self.title = title
+    self.titleAlignment = titleAlignment
     self.horizontalPadding = horizontalPadding
     self.topPadding = topPadding
     self.content = content()
@@ -33,6 +41,11 @@ struct PWScreen<Content: View>: View {
           Text(title)
             .font(PWTypography.title)
             .foregroundStyle(PWColor.textPrimary)
+            .multilineTextAlignment(titleAlignment == .center ? .center : .leading)
+            .frame(
+              maxWidth: .infinity,
+              alignment: titleAlignment == .center ? .center : .leading
+            )
         }
 
         content

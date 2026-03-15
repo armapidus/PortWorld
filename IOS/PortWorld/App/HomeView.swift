@@ -28,7 +28,7 @@ struct HomeView: View {
       wearablesRuntimeManager: wearablesRuntimeManager
     )
 
-    PWScreen(title: "Home", topPadding: PWSpace.md) {
+    PWScreen(title: "Home", titleAlignment: .center, topPadding: PWSpace.md) {
       ScrollView(showsIndicators: false) {
         VStack(alignment: .leading, spacing: PWSpace.section) {
           heroCard(readiness: readiness)
