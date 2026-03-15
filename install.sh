@@ -3,8 +3,10 @@ set -euo pipefail
 
 REPO_OWNER="armapidus"
 REPO_NAME="PortWorld"
-INSTALLER_URL="https://openclaw.ai/install.sh"
+INSTALLER_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/install.sh"
 DEFAULT_RELEASE_API_URL="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
+PYPI_PACKAGE_NAME="${PORTWORLD_PYPI_PACKAGE:-portworld}"
+PYPI_PACKAGE_FALLBACK_NAME="${PORTWORLD_PYPI_PACKAGE_FALLBACK:-portworld-cli}"
 
 PORTWORLD_VERSION="${PORTWORLD_VERSION:-latest}"
 PORTWORLD_NO_INIT="${PORTWORLD_NO_INIT:-0}"
@@ -75,6 +77,7 @@ Environment overrides:
   PORTWORLD_VERSION=<tag|latest>
   PORTWORLD_NO_INIT=1
   PORTWORLD_NON_INTERACTIVE=1
+  PORTWORLD_PYPI_PACKAGE=<name>
 
 Internal/test overrides:
   PORTWORLD_INSTALL_SOURCE_URL=<path-or-url>
@@ -263,6 +266,7 @@ run_install() {
   if [[ "$RESOLVED_VERSION" != "custom" ]]; then
     log_info "Version: $RESOLVED_VERSION"
   fi
+  log_info "PyPI package name: $PYPI_PACKAGE_NAME (fallback: $PYPI_PACKAGE_FALLBACK_NAME)"
   python3 -m pipx install --force "$INSTALL_SOURCE"
   ensure_portworld_on_path
   portworld --version >/dev/null
