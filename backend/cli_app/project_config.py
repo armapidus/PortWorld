@@ -11,6 +11,7 @@ SCHEMA_VERSION = 1
 PROJECT_MODE_LOCAL = "local"
 PROJECT_MODE_MANAGED = "managed"
 GCP_CLOUD_RUN_TARGET = "gcp-cloud-run"
+CLOUD_PROVIDER_GCP = "gcp"
 
 DEFAULT_REALTIME_PROVIDER = "openai"
 DEFAULT_VISION_PROVIDER = "mistral"
@@ -155,6 +156,7 @@ class DeployConfig:
 class ProjectConfig:
     schema_version: int = SCHEMA_VERSION
     project_mode: str = PROJECT_MODE_LOCAL
+    cloud_provider: str | None = None
     providers: ProvidersConfig = field(default_factory=ProvidersConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
     deploy: DeployConfig = field(default_factory=DeployConfig)
@@ -163,6 +165,7 @@ class ProjectConfig:
         return {
             "schema_version": self.schema_version,
             "project_mode": self.project_mode,
+            "cloud_provider": self.cloud_provider,
             "providers": self.providers.to_payload(),
             "security": self.security.to_payload(),
             "deploy": self.deploy.to_payload(),
@@ -192,10 +195,18 @@ class ProjectConfig:
             "preferred_target",
             allowed={GCP_CLOUD_RUN_TARGET},
         )
+        cloud_provider = _read_optional_string(
+            payload,
+            "cloud_provider",
+            allowed={CLOUD_PROVIDER_GCP},
+        )
+        if cloud_provider is None and preferred_target == GCP_CLOUD_RUN_TARGET:
+            cloud_provider = CLOUD_PROVIDER_GCP
 
         return cls(
             schema_version=schema_version,
             project_mode=project_mode,
+            cloud_provider=cloud_provider,
             providers=ProvidersConfig(
                 realtime=RealtimeProviderConfig(
                     provider=_read_string(
@@ -364,6 +375,9 @@ def derive_project_config(
     return ProjectConfig(
         project_mode=(
             PROJECT_MODE_MANAGED if remembered_target_exists else PROJECT_MODE_LOCAL
+        ),
+        cloud_provider=(
+            CLOUD_PROVIDER_GCP if remembered_target_exists else None
         ),
         providers=ProvidersConfig(
             realtime=RealtimeProviderConfig(

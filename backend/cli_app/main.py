@@ -5,6 +5,7 @@ from pathlib import Path
 import click
 
 from backend import __version__
+from backend.cli_app.commands.config import config_group
 from backend.cli_app.context import CLIContext
 from backend.cli_app.commands.deploy import deploy_group
 from backend.cli_app.commands.doctor import doctor_command
@@ -56,6 +57,7 @@ def cli(
 cli.add_command(init_command)
 cli.add_command(doctor_command)
 cli.add_command(deploy_group)
+cli.add_command(config_group)
 cli.add_command(ops_group)
 
 
