@@ -14,7 +14,6 @@ COPY backend/cli.py ./backend/cli.py
 COPY portworld_cli/ ./portworld_cli/
 COPY backend/api/ ./backend/api/
 COPY backend/bootstrap/ ./backend/bootstrap/
-COPY backend/cli_app/ ./backend/cli_app/
 COPY backend/core/ ./backend/core/
 COPY backend/infrastructure/ ./backend/infrastructure/
 COPY backend/memory/ ./backend/memory/
