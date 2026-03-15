@@ -34,7 +34,7 @@ The first Cloud Run deployment path is based on:
 
 ## Implementation Status
 
-This specification is still the design authority for CLI v1, but implementation has progressed through Task 12.
+This specification is still the design authority for CLI v1, and implementation has now progressed through Task 14.
 
 Available today:
 
@@ -46,20 +46,21 @@ Available today:
 - `portworld doctor --target local`
 - GCP adapter layer under `backend/cli_app/gcp/`
 - `portworld doctor --target gcp-cloud-run`
+- `portworld deploy gcp-cloud-run`
 - managed-storage env parsing and validation contract
 - managed storage backend selection
 - managed Postgres metadata persistence
 - managed GCS artifact persistence
+- deploy state reuse through `.portworld/state/gcp-cloud-run.json`
 
-Not implemented yet:
-
-- `deploy gcp-cloud-run`
+No remaining CLI v1 implementation gaps from this spec are intentionally left pending. Later follow-up items are listed in the final section of this document.
 
 Current implementation notes:
 
 - `ops` and `doctor` call backend Python functions directly rather than shelling out to `python -m backend.cli`
 - the public `doctor` GCP path is implemented as a read-only preflight check; provisioning remains part of `deploy gcp-cloud-run`
 - managed mode now boots through the shared storage contract and supports Postgres metadata plus GCS-backed artifact persistence
+- verified Cloud Run deploys use `/livez` for public liveness and authenticated `/readyz` for readiness; `/healthz` remains a compatibility alias
 - the CLI package exists, but editable-install behavior has been unreliable in the current local environment; packaged install and wheel build are the validated paths so far
 - legacy `python -m backend.cli` remains supported during migration
 
@@ -152,10 +153,10 @@ The current backend now includes:
 - local readiness diagnostics through `portworld doctor --target local`
 - a public `ops` namespace for the existing operator tasks
 
-The current backend does not yet include:
+The current backend now includes:
 
-- managed cloud deployment orchestration
-- managed storage support for Cloud Run
+- managed cloud deployment orchestration for GCP Cloud Run
+- managed storage support for Cloud Run via Postgres + GCS
 - real `doctor --target gcp-cloud-run` checks
 
 The spec therefore includes both:
@@ -571,6 +572,10 @@ JSON output shape:
 
 ## `portworld deploy gcp-cloud-run`
 
+### Status
+
+Implemented.
+
 ### Purpose
 
 Provision and deploy PortWorld backend to Cloud Run through a guided official path.
@@ -790,12 +795,18 @@ Deploy the service with:
 After deploy, print:
 
 - Cloud Run service URL
-- health check command
+- liveness check command
 - readiness check command
 - next operator commands
 - which secrets and resources were used
 
 The CLI should optionally run a final liveness probe.
+
+For public Cloud Run validation, the liveness endpoint should be:
+
+- `GET /livez`
+
+`GET /healthz` remains available as a compatibility alias, but `/livez` is the public probe target because it has been validated against the default Cloud Run service URL.
 
 ### Flags
 
@@ -876,7 +887,7 @@ Suggested shape:
     "web_search_provider": "tavily"
   },
   "next_steps": [
-    "curl https://portworld-backend-abc-uc.a.run.app/healthz",
+    "curl https://portworld-backend-abc-uc.a.run.app/livez",
     "Run 'portworld doctor --target gcp-cloud-run --project my-project --region us-central1'"
   ]
 }
@@ -1120,9 +1131,6 @@ Completed:
 8. implement real `doctor --target gcp-cloud-run`
 9. implement managed storage backend selection
 10. implement managed Postgres metadata and GCS artifact support
-
-Next:
-
 11. implement Secret Manager integration
 12. implement Cloud SQL Postgres and GCS provisioning helpers
 13. implement `deploy gcp-cloud-run`

@@ -21,26 +21,25 @@ The critical dependency is managed storage support. `deploy gcp-cloud-run` canno
 
 ## Current Status
 
-- implemented through Task 12
-- next task: Task 13
+- implemented through Task 14
+- CLI v1 implementation is complete for the scope of this plan
 - available today:
   - `portworld init`
   - `portworld doctor --target local`
   - `portworld doctor --target gcp-cloud-run`
+  - `portworld deploy gcp-cloud-run`
   - `portworld ops check-config`
   - `portworld ops bootstrap-storage`
   - `portworld ops export-memory`
   - `portworld ops migrate-storage-layout`
-- not implemented yet:
-  - `deploy gcp-cloud-run`
-  - Task 14 docs and migration guidance refresh
 - important implementation note:
   - editable install has been unreliable in the current local environment; packaged install and wheel build have been the validated paths
   - managed storage now selects through a shared backend contract and supports Postgres metadata plus GCS artifact persistence
+  - verified Cloud Run deploys use `/livez` for public liveness checks; `/healthz` remains a compatibility alias
 
 ## Documentation Authority
 
-Until Task 14 lands, the source of truth for CLI implementation status is:
+The source of truth for CLI implementation status is:
 
 - `docs/roadmap/backend/BACKEND_CLI_IMPLEMENTATION_PLAN.md`
 - `docs/roadmap/backend/BACKEND_CLI_SPEC.md`
@@ -115,8 +114,8 @@ Implementation should land in this order:
 8. implement `doctor --target gcp-cloud-run` - complete
 9. add the backend managed-storage contract - complete
 10. implement managed storage backends - complete
-11. implement `deploy gcp-cloud-run`
-12. update docs and migration guidance
+11. implement `deploy gcp-cloud-run` - complete
+12. update docs and migration guidance - complete
 
 This order avoids building deploy orchestration on top of an unstable CLI surface or on top of a storage model that Cloud Run cannot use durably.
 
@@ -513,11 +512,11 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 
 ## Task 13: Implement `portworld deploy gcp-cloud-run`
 
-`Status: Pending`
+`Status: Complete`
 
 ### Owner area
 
-- `backend/cli_app/commands/deploy_gcp_cloud_run.py`
+- `backend/cli_app/commands/deploy.py`
 - `backend/cli_app/gcp/`
 - `backend/cli_app/state.py`
 
@@ -547,9 +546,16 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 - partial failures report what was created and how to rerun safely
 - human and JSON outputs include service URL, image, resources, and next steps
 
+### Implementation notes
+
+- `portworld deploy gcp-cloud-run` is implemented through a dedicated deploy runtime that resolves parameters from flags, current `gcloud` config, and `.portworld/state/gcp-cloud-run.json`
+- the deploy path provisions or reuses Artifact Registry, Secret Manager, Cloud SQL, GCS, and Cloud Run resources through the `gcloud`-backed adapter layer
+- verified Cloud Run deploys assemble `BACKEND_DATABASE_URL` with the Cloud SQL Unix socket mount rather than a public-IP connection string
+- deploy summaries and post-deploy probes now use `/livez` for public liveness and authenticated `/readyz` for readiness
+
 ## Task 14: Update docs and migration guidance
 
-`Status: Pending`
+`Status: Complete`
 
 ### Owner area
 
@@ -569,6 +575,12 @@ This order avoids building deploy orchestration on top of an unstable CLI surfac
 
 - docs reflect the new CLI-first onboarding path
 - local Docker self-hosting remains documented as the default simple route
+
+### Implementation notes
+
+- `backend/README.md` now treats `portworld` as the primary operator CLI surface for init, doctor, deploy, and `ops` workflows
+- `docs/BACKEND_SELF_HOSTING.md` now documents the CLI-first local path and the migration mapping from `python -m backend.cli` operator commands to `portworld ops ...`
+- backend-facing docs now document `/livez` as the public liveness endpoint for deployed services; `/healthz` remains available as a compatibility alias
 
 ## Public Interfaces To Land
 

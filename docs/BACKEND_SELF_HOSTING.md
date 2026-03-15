@@ -26,10 +26,11 @@ Optional, depending on enabled features:
 From the repo root:
 
 ```bash
-cp backend/.env.example backend/.env
+pipx install .
+portworld init
 ```
 
-Edit `backend/.env` for one supported runtime mode:
+If you prefer the manual path, `cp backend/.env.example backend/.env` still works. Edit `backend/.env` for one supported runtime mode:
 
 - realtime-only self-host
   - set `OPENAI_API_KEY`
@@ -57,7 +58,7 @@ The image installs the pinned backend runtime set from `backend/requirements.txt
 Verify process health:
 
 ```bash
-curl http://127.0.0.1:8080/healthz
+curl http://127.0.0.1:8080/livez
 ```
 
 Expected response:
@@ -66,10 +67,21 @@ Expected response:
 {"status":"ok","service":"portworld-backend"}
 ```
 
-`GET /healthz` confirms process liveness only. It does not validate upstream provider credentials or provider readiness.
-Use `python3 -m backend.cli check-config --full-readiness` for a stricter preflight that includes provider validation and a storage bootstrap probe.
+`GET /livez` confirms process liveness only. It does not validate upstream provider credentials or provider readiness.
+Use `GET /livez` for public and Cloud Run liveness checks. `GET /healthz` remains available as a compatibility alias for older local tooling.
+Use `portworld ops check-config --full-readiness` for a stricter preflight that includes provider validation and a storage bootstrap probe. The legacy `python3 -m backend.cli check-config --full-readiness` path still works.
 
 Optional operator CLI commands from the repo root:
+
+```bash
+portworld doctor --target local
+portworld ops check-config
+portworld ops check-config --full-readiness
+portworld ops bootstrap-storage
+portworld ops export-memory --output /tmp/portworld-memory-export.zip
+```
+
+Legacy compatibility path:
 
 ```bash
 python3 -m backend.cli check-config
@@ -126,6 +138,10 @@ Authorization: Bearer <token>
 
 Route reference:
 
+- `GET /livez`
+  - public liveness endpoint for local and Cloud Run probes
+- `GET /healthz`
+  - compatibility liveness alias retained for older tooling
 - `GET /profile`
   - read the current persistent profile scaffold or populated profile
 - `GET /readyz`
@@ -153,11 +169,26 @@ Route reference:
 Minimal examples:
 
 ```bash
+curl http://127.0.0.1:8080/livez
 curl http://127.0.0.1:8080/profile
 curl -X POST http://127.0.0.1:8080/profile/reset
 curl -OJ http://127.0.0.1:8080/memory/export
 curl -X POST http://127.0.0.1:8080/memory/session/<session_id>/reset
 ```
+
+## Cloud Run Migration Notes
+
+Use the public CLI for the managed deploy path:
+
+```bash
+portworld doctor --target gcp-cloud-run --project <project> --region <region>
+portworld deploy gcp-cloud-run --project <project> --region <region> --cors-origins https://app.example.com
+```
+
+Repeat deploys reuse `.portworld/state/gcp-cloud-run.json`. After deploy, use:
+
+- public liveness: `GET /livez`
+- authenticated readiness: `GET /readyz`
 
 ## Notes
 
