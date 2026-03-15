@@ -1155,7 +1155,7 @@ def _deploy_cloud_run_service(
 
 def _probe_liveness(service_url: str) -> bool:
     try:
-        response = httpx.get(f"{service_url.rstrip('/')}/healthz", timeout=10.0)
+        response = httpx.get(f"{service_url.rstrip('/')}/livez", timeout=10.0)
     except Exception:
         return False
     return response.status_code == 200
@@ -1187,7 +1187,7 @@ def _build_next_steps(
         ]
     base_url = service_url.rstrip("/")
     return [
-        f"curl {base_url}/healthz",
+        f"curl {base_url}/livez",
         (
             "curl -H \"Authorization: Bearer $(gcloud secrets versions access latest "
             f"--secret={bearer_secret_name} --project={project_id})\" {base_url}/readyz"
