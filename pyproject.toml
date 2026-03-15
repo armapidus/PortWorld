@@ -35,8 +35,8 @@ dependencies = [
 ]
 
 [project.scripts]
-portworld = "backend.cli_app.main:main"
+portworld = "portworld_cli.main:main"
 
 [tool.setuptools.packages.find]
-include = ["backend*"]
+include = ["backend*", "portworld_cli*"]
 exclude = ["backend.var*"]

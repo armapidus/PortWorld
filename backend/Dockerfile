@@ -11,6 +11,7 @@ COPY pyproject.toml ./pyproject.toml
 COPY backend/README.md ./backend/README.md
 COPY backend/__init__.py ./backend/__init__.py
 COPY backend/cli.py ./backend/cli.py
+COPY portworld_cli/ ./portworld_cli/
 COPY backend/api/ ./backend/api/
 COPY backend/bootstrap/ ./backend/bootstrap/
 COPY backend/cli_app/ ./backend/cli_app/
