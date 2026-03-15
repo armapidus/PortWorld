@@ -473,10 +473,9 @@ Suggested shape:
 
 ### Status
 
-Partially implemented.
+Implemented.
 
-- implemented today: `--target local`, `--full`, JSON output, staged PASS/WARN/FAIL diagnostics
-- deferred to Task 8: real `--target gcp-cloud-run` readiness checks
+- implemented today: `--target local`, `--target gcp-cloud-run`, `--full`, JSON output, staged PASS/WARN/FAIL diagnostics
 
 ### Purpose
 
@@ -507,7 +506,7 @@ Default target:
 
 ### Checks for `local`
 
-`doctor --target local` should check:
+`doctor --target local` checks:
 
 - repo root detected
 - `backend/.env` exists
@@ -519,7 +518,7 @@ Default target:
 
 ### Checks for `gcp-cloud-run`
 
-`doctor --target gcp-cloud-run` should check:
+`doctor --target gcp-cloud-run` checks:
 
 - repo root detected
 - `backend/.env` exists
@@ -533,7 +532,7 @@ Default target:
 
 ### Flags
 
-`doctor` should support:
+`doctor` supports:
 
 - `--target local|gcp-cloud-run`
 - `--full`
@@ -803,7 +802,7 @@ After deploy, print:
 - next operator commands
 - which secrets and resources were used
 
-The CLI should optionally run a final liveness probe.
+The CLI optionally runs a final liveness probe.
 
 For public Cloud Run validation, the liveness endpoint should be:
 
@@ -813,7 +812,7 @@ For public Cloud Run validation, the liveness endpoint should be:
 
 ### Flags
 
-`deploy gcp-cloud-run` should support:
+`deploy gcp-cloud-run` supports:
 
 - `--project PROJECT_ID`
 - `--region REGION`
@@ -908,7 +907,7 @@ Expose the existing backend configuration check as a stable CLI subcommand under
 
 ### Behavior
 
-This command should be a close wrapper around the current backend config check implementation.
+This command is a close wrapper around the current backend config check implementation.
 
 Flags:
 
