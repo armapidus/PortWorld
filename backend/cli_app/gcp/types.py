@@ -8,6 +8,7 @@ T = TypeVar("T")
 
 ResolvedValueSource = Literal[
     "explicit",
+    "project_config",
     "gcloud_config",
     "remembered_state",
     "default",

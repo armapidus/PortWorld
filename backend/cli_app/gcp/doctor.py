@@ -11,16 +11,21 @@ from backend.cli_app.gcp import (
 )
 from backend.cli_app.output import DiagnosticCheck
 from backend.cli_app.paths import ProjectPaths
+from backend.cli_app.project_config import (
+    DEFAULT_GCP_ARTIFACT_REPOSITORY,
+    DEFAULT_GCP_REGION,
+    ProjectConfig,
+)
 from backend.core.settings import Settings, load_environment_files
 from backend.realtime.factory import RealtimeProviderFactory
 from backend.tools.runtime import SearchProviderFactory
 from backend.vision.factory import VisionAnalyzerFactory
 
 
-DEFAULT_ARTIFACT_REPOSITORY = "portworld"
+DEFAULT_ARTIFACT_REPOSITORY = DEFAULT_GCP_ARTIFACT_REPOSITORY
 DEFAULT_IMAGE_NAME = "portworld-backend"
 DOCTOR_IMAGE_TAG = "doctor-check"
-SUGGESTED_DEFAULT_REGION = "us-central1"
+SUGGESTED_DEFAULT_REGION = DEFAULT_GCP_REGION
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +107,7 @@ def evaluate_gcp_cloud_run_readiness(
     full: bool,
     explicit_project: str | None,
     explicit_region: str | None,
+    project_config: ProjectConfig | None = None,
 ) -> GCPDoctorEvaluation:
     adapters = GCPAdapters.create()
     checks: list[DiagnosticCheck] = []
@@ -200,6 +206,11 @@ def evaluate_gcp_cloud_run_readiness(
             checks.append(configured_project.error_check)
     resolved_project = resolve_project_id(
         explicit_project_id=explicit_project,
+        project_config_project_id=(
+            None
+            if project_config is None
+            else project_config.deploy.gcp_cloud_run.project_id
+        ),
         configured_project_id=configured_project.value,
     )
     project_id = resolved_project.value
@@ -232,6 +243,11 @@ def evaluate_gcp_cloud_run_readiness(
             checks.append(configured_region.error_check)
     resolved_region = resolve_region(
         explicit_region=explicit_region,
+        project_config_region=(
+            None
+            if project_config is None
+            else project_config.deploy.gcp_cloud_run.region
+        ),
         configured_region=configured_region.value,
     )
     region = resolved_region.value
@@ -284,10 +300,15 @@ def evaluate_gcp_cloud_run_readiness(
         checks.extend(_build_production_posture_checks(production_posture))
 
     if project_id is not None and region is not None:
+        artifact_repository = (
+            DEFAULT_ARTIFACT_REPOSITORY
+            if project_config is None
+            else project_config.deploy.gcp_cloud_run.artifact_repository
+        )
         image_uri = build_image_uri(
             project_id=project_id,
             region=region,
-            repository=DEFAULT_ARTIFACT_REPOSITORY,
+            repository=artifact_repository,
             image_name=DEFAULT_IMAGE_NAME,
             tag=DOCTOR_IMAGE_TAG,
         )

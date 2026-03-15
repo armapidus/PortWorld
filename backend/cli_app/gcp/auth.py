@@ -76,12 +76,18 @@ class AuthAdapter:
 def resolve_project_id(
     *,
     explicit_project_id: str | None,
+    project_config_project_id: str | None = None,
     configured_project_id: str | None,
     remembered_project_id: str | None = None,
     allow_remembered: bool = False,
 ) -> ResolvedValue[str]:
     if explicit_project_id and explicit_project_id.strip():
         return ResolvedValue(value=explicit_project_id.strip(), source="explicit")
+    if project_config_project_id and project_config_project_id.strip():
+        return ResolvedValue(
+            value=project_config_project_id.strip(),
+            source="project_config",
+        )
     if configured_project_id and configured_project_id.strip():
         return ResolvedValue(value=configured_project_id.strip(), source="gcloud_config")
     if allow_remembered and remembered_project_id and remembered_project_id.strip():
@@ -92,6 +98,7 @@ def resolve_project_id(
 def resolve_region(
     *,
     explicit_region: str | None,
+    project_config_region: str | None = None,
     configured_region: str | None,
     remembered_region: str | None = None,
     allow_remembered: bool = False,
@@ -99,6 +106,11 @@ def resolve_region(
 ) -> ResolvedValue[str]:
     if explicit_region and explicit_region.strip():
         return ResolvedValue(value=explicit_region.strip(), source="explicit")
+    if project_config_region and project_config_region.strip():
+        return ResolvedValue(
+            value=project_config_region.strip(),
+            source="project_config",
+        )
     if configured_region and configured_region.strip():
         return ResolvedValue(value=configured_region.strip(), source="gcloud_config")
     if allow_remembered and remembered_region and remembered_region.strip():
