@@ -2,13 +2,37 @@ from __future__ import annotations
 
 import click
 
+from backend.cli_app.config_runtime import (
+    CloudEditOptions,
+    ProviderEditOptions,
+    SecurityEditOptions,
+    run_config_show,
+    run_edit_cloud,
+    run_edit_providers,
+    run_edit_security,
+)
 from backend.cli_app.context import CLIContext
-from backend.cli_app.init_runtime import InitOptions, run_init
 from backend.cli_app.output import exit_with_result
 
 
-@click.command("init")
-@click.option("--force", is_flag=True, default=False, help="Rewrite backend/.env without overwrite confirmation.")
+@click.group("config")
+def config_group() -> None:
+    """Inspect or edit project configuration."""
+
+
+@config_group.command("show")
+@click.pass_obj
+def config_show_command(cli_context: CLIContext) -> None:
+    """Show the current project configuration."""
+    exit_with_result(cli_context, run_config_show(cli_context))
+
+
+@config_group.group("edit")
+def config_edit_group() -> None:
+    """Edit one configuration section."""
+
+
+@config_edit_group.command("providers")
 @click.option("--with-vision", is_flag=True, default=False, help="Enable visual memory.")
 @click.option("--without-vision", is_flag=True, default=False, help="Disable visual memory.")
 @click.option("--with-tooling", is_flag=True, default=False, help="Enable realtime tooling.")
@@ -16,6 +40,36 @@ from backend.cli_app.output import exit_with_result
 @click.option("--openai-api-key", default=None, help="OpenAI API key for realtime sessions.")
 @click.option("--vision-provider-api-key", default=None, help="Vision provider API key.")
 @click.option("--tavily-api-key", default=None, help="Tavily API key for web search.")
+@click.pass_obj
+def config_edit_providers_command(
+    cli_context: CLIContext,
+    with_vision: bool,
+    without_vision: bool,
+    with_tooling: bool,
+    without_tooling: bool,
+    openai_api_key: str | None,
+    vision_provider_api_key: str | None,
+    tavily_api_key: str | None,
+) -> None:
+    """Edit provider choices, feature toggles, and related credentials."""
+    exit_with_result(
+        cli_context,
+        run_edit_providers(
+            cli_context,
+            ProviderEditOptions(
+                with_vision=with_vision,
+                without_vision=without_vision,
+                with_tooling=with_tooling,
+                without_tooling=without_tooling,
+                openai_api_key=openai_api_key,
+                vision_provider_api_key=vision_provider_api_key,
+                tavily_api_key=tavily_api_key,
+            ),
+        ),
+    )
+
+
+@config_edit_group.command("security")
 @click.option(
     "--backend-profile",
     type=click.Choice(["development", "production"]),
@@ -27,6 +81,34 @@ from backend.cli_app.output import exit_with_result
 @click.option("--bearer-token", default=None, help="Explicit bearer token to store in backend/.env.")
 @click.option("--generate-bearer-token", is_flag=True, default=False, help="Generate a new bearer token.")
 @click.option("--clear-bearer-token", is_flag=True, default=False, help="Clear the bearer token.")
+@click.pass_obj
+def config_edit_security_command(
+    cli_context: CLIContext,
+    backend_profile: str | None,
+    cors_origins: str | None,
+    allowed_hosts: str | None,
+    bearer_token: str | None,
+    generate_bearer_token: bool,
+    clear_bearer_token: bool,
+) -> None:
+    """Edit security defaults and local bearer token behavior."""
+    exit_with_result(
+        cli_context,
+        run_edit_security(
+            cli_context,
+            SecurityEditOptions(
+                backend_profile=backend_profile,
+                cors_origins=cors_origins,
+                allowed_hosts=allowed_hosts,
+                bearer_token=bearer_token,
+                generate_bearer_token=generate_bearer_token,
+                clear_bearer_token=clear_bearer_token,
+            ),
+        ),
+    )
+
+
+@config_edit_group.command("cloud")
 @click.option(
     "--project-mode",
     type=click.Choice(["local", "managed"]),
@@ -46,22 +128,8 @@ from backend.cli_app.output import exit_with_result
 @click.option("--cpu", default=None, help="Default Cloud Run CPU.")
 @click.option("--memory", default=None, help="Default Cloud Run memory.")
 @click.pass_obj
-def init_command(
+def config_edit_cloud_command(
     cli_context: CLIContext,
-    force: bool,
-    with_vision: bool,
-    without_vision: bool,
-    with_tooling: bool,
-    without_tooling: bool,
-    openai_api_key: str | None,
-    vision_provider_api_key: str | None,
-    tavily_api_key: str | None,
-    backend_profile: str | None,
-    cors_origins: str | None,
-    allowed_hosts: str | None,
-    bearer_token: str | None,
-    generate_bearer_token: bool,
-    clear_bearer_token: bool,
     project_mode: str | None,
     project: str | None,
     region: str | None,
@@ -76,26 +144,12 @@ def init_command(
     cpu: str | None,
     memory: str | None,
 ) -> None:
-    """Initialize local PortWorld backend configuration."""
+    """Edit project mode and managed cloud defaults."""
     exit_with_result(
         cli_context,
-        run_init(
+        run_edit_cloud(
             cli_context,
-            InitOptions(
-                force=force,
-                with_vision=with_vision,
-                without_vision=without_vision,
-                with_tooling=with_tooling,
-                without_tooling=without_tooling,
-                openai_api_key=openai_api_key,
-                vision_provider_api_key=vision_provider_api_key,
-                tavily_api_key=tavily_api_key,
-                backend_profile=backend_profile,
-                cors_origins=cors_origins,
-                allowed_hosts=allowed_hosts,
-                bearer_token=bearer_token,
-                generate_bearer_token=generate_bearer_token,
-                clear_bearer_token=clear_bearer_token,
+            CloudEditOptions(
                 project_mode=project_mode,
                 project=project,
                 region=region,
