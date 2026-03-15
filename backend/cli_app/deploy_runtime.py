@@ -27,6 +27,21 @@ from backend.cli_app.gcp import (
 )
 from backend.cli_app.output import CommandResult, DiagnosticCheck, format_key_value_lines
 from backend.cli_app.paths import ProjectRootResolutionError
+from backend.cli_app.project_config import (
+    DEFAULT_GCP_ARTIFACT_REPOSITORY,
+    DEFAULT_GCP_CONCURRENCY,
+    DEFAULT_GCP_CPU,
+    DEFAULT_GCP_DATABASE_NAME,
+    DEFAULT_GCP_MAX_INSTANCES,
+    DEFAULT_GCP_MEMORY,
+    DEFAULT_GCP_MIN_INSTANCES,
+    DEFAULT_GCP_REGION,
+    DEFAULT_GCP_SERVICE_NAME,
+    DEFAULT_GCP_SQL_INSTANCE_NAME,
+    ProjectConfig,
+    ProjectConfigError,
+    load_project_config,
+)
 from backend.cli_app.state import (
     CLIStateDecodeError,
     CLIStateTypeError,
@@ -37,17 +52,17 @@ from backend.core.settings import Settings
 
 
 COMMAND_NAME = "portworld deploy gcp-cloud-run"
-DEFAULT_REGION = "us-central1"
-DEFAULT_SERVICE_NAME = "portworld-backend"
-DEFAULT_ARTIFACT_REPOSITORY = "portworld"
-DEFAULT_SQL_INSTANCE_NAME = "portworld-pg"
-DEFAULT_DATABASE_NAME = "portworld"
+DEFAULT_REGION = DEFAULT_GCP_REGION
+DEFAULT_SERVICE_NAME = DEFAULT_GCP_SERVICE_NAME
+DEFAULT_ARTIFACT_REPOSITORY = DEFAULT_GCP_ARTIFACT_REPOSITORY
+DEFAULT_SQL_INSTANCE_NAME = DEFAULT_GCP_SQL_INSTANCE_NAME
+DEFAULT_DATABASE_NAME = DEFAULT_GCP_DATABASE_NAME
 DEFAULT_TIMEOUT = "3600s"
-DEFAULT_CPU = "1"
-DEFAULT_MEMORY = "1Gi"
-DEFAULT_MIN_INSTANCES = 1
-DEFAULT_MAX_INSTANCES = 10
-DEFAULT_CONCURRENCY = 10
+DEFAULT_CPU = DEFAULT_GCP_CPU
+DEFAULT_MEMORY = DEFAULT_GCP_MEMORY
+DEFAULT_MIN_INSTANCES = DEFAULT_GCP_MIN_INSTANCES
+DEFAULT_MAX_INSTANCES = DEFAULT_GCP_MAX_INSTANCES
+DEFAULT_CONCURRENCY = DEFAULT_GCP_CONCURRENCY
 DEFAULT_ALLOWED_HOSTS = "*.a.run.app"
 DEFAULT_SQL_DATABASE_VERSION = "POSTGRES_16"
 DEFAULT_SQL_CPU_COUNT = 1
@@ -201,14 +216,16 @@ def run_deploy_gcp_cloud_run(
         parsed_env = parse_env_file(project_paths.env_file, template=template)
         env_values = template.defaults()
         env_values.update(parsed_env.known_values)
+        project_config = load_project_config(project_paths.project_config_file)
         remembered_state = _read_deploy_state(project_paths.gcp_cloud_run_state_file)
         _record_stage(
             stage_records,
             stage="repo_config_discovery",
-            message="Resolved repo root and loaded backend/.env.",
+            message="Resolved repo root and loaded CLI config inputs.",
             details={
                 "project_root": str(project_paths.project_root),
                 "env_file": str(project_paths.env_file),
+                "project_config_file": str(project_paths.project_config_file),
                 "state_file": str(project_paths.gcp_cloud_run_state_file),
             },
         )
@@ -226,6 +243,7 @@ def run_deploy_gcp_cloud_run(
             cli_context,
             adapters=adapters,
             env_values=env_values,
+            project_config=project_config,
             remembered_state=remembered_state,
             options=options,
             project_root=project_paths.project_root,
@@ -499,7 +517,13 @@ def run_deploy_gcp_cloud_run(
             action="Run from a PortWorld repo checkout or pass --project-root.",
             error_type=type(exc).__name__,
         )
-    except (EnvFileParseError, CLIStateDecodeError, CLIStateTypeError, DeployUsageError) as exc:
+    except (
+        EnvFileParseError,
+        CLIStateDecodeError,
+        CLIStateTypeError,
+        DeployUsageError,
+        ProjectConfigError,
+    ) as exc:
         return _failure_result(
             stage="parameter_resolution",
             exc=exc,
@@ -547,13 +571,18 @@ def _resolve_deploy_config(
     *,
     adapters: GCPAdapters,
     env_values: OrderedDict[str, str],
+    project_config: ProjectConfig | None,
     remembered_state: DeployState,
     options: DeployGCPCloudRunOptions,
     project_root: Path,
 ) -> ResolvedDeployConfig:
+    gcp_defaults = None if project_config is None else project_config.deploy.gcp_cloud_run
     configured_project = adapters.auth.get_configured_project()
     project_id = resolve_project_id(
         explicit_project_id=options.project,
+        project_config_project_id=(
+            None if gcp_defaults is None else gcp_defaults.project_id
+        ),
         configured_project_id=configured_project.value if configured_project.ok else None,
         remembered_project_id=remembered_state.project_id,
         allow_remembered=True,
@@ -568,6 +597,7 @@ def _resolve_deploy_config(
     configured_region = adapters.auth.get_configured_run_region()
     region = resolve_region(
         explicit_region=options.region,
+        project_config_region=None if gcp_defaults is None else gcp_defaults.region,
         configured_region=configured_region.value if configured_region.ok else None,
         remembered_region=remembered_state.region,
         allow_remembered=True,
@@ -583,42 +613,72 @@ def _resolve_deploy_config(
 
     service_name = _resolve_text_value(
         explicit=options.service,
-        remembered=remembered_state.service_name,
+        remembered=_first_non_empty(
+            None if gcp_defaults is None else gcp_defaults.service_name,
+            remembered_state.service_name,
+        ),
         default=DEFAULT_SERVICE_NAME,
     )
     artifact_repository = _resolve_text_value(
         explicit=options.artifact_repo,
-        remembered=remembered_state.artifact_repository,
+        remembered=_first_non_empty(
+            None if gcp_defaults is None else gcp_defaults.artifact_repository,
+            remembered_state.artifact_repository,
+        ),
         default=DEFAULT_ARTIFACT_REPOSITORY,
     )
     sql_instance_name = _resolve_text_value(
         explicit=options.sql_instance,
-        remembered=remembered_state.cloud_sql_instance,
+        remembered=_first_non_empty(
+            None if gcp_defaults is None else gcp_defaults.sql_instance_name,
+            remembered_state.cloud_sql_instance,
+        ),
         default=DEFAULT_SQL_INSTANCE_NAME,
     )
     database_name = _resolve_text_value(
         explicit=options.database,
-        remembered=remembered_state.database_name,
+        remembered=_first_non_empty(
+            None if gcp_defaults is None else gcp_defaults.database_name,
+            remembered_state.database_name,
+        ),
         default=DEFAULT_DATABASE_NAME,
     )
     bucket_name = _resolve_text_value(
         explicit=options.bucket,
-        remembered=remembered_state.bucket_name,
+        remembered=_first_non_empty(
+            None if gcp_defaults is None else gcp_defaults.bucket_name,
+            remembered_state.bucket_name,
+        ),
         default=_default_bucket_name(project_id),
     )
 
     existing_cors = _explicit_csv_or_none(env_values.get("CORS_ORIGINS"))
+    configured_cors = (
+        None
+        if project_config is None
+        else _csv_or_none(project_config.security.cors_origins)
+    )
     cors_origins = _prompt_or_require_text(
         cli_context,
         prompt="Production CORS origins (comma-separated)",
-        value=_first_non_empty(options.cors_origins, existing_cors),
+        value=_first_non_empty(options.cors_origins, configured_cors, existing_cors),
         error_message="Explicit production CORS origins are required for deploy.",
     )
     if cors_origins.strip() == "*":
         raise DeployUsageError("CORS_ORIGINS cannot be '*' for production deploy.")
 
     existing_allowed_hosts = _explicit_csv_or_none(env_values.get("BACKEND_ALLOWED_HOSTS"))
-    allowed_hosts = _first_non_empty(options.allowed_hosts, existing_allowed_hosts, DEFAULT_ALLOWED_HOSTS)
+    configured_allowed_hosts = (
+        None
+        if project_config is None
+        else _csv_or_none(project_config.security.allowed_hosts)
+    )
+    allowed_hosts = _first_non_empty(
+        options.allowed_hosts,
+        configured_allowed_hosts,
+        existing_allowed_hosts,
+        DEFAULT_ALLOWED_HOSTS,
+    )
     if allowed_hosts is None:
         raise DeployUsageError("Explicit allowed hosts could not be resolved for deploy.")
     if allowed_hosts.strip() == "*":
@@ -629,11 +689,43 @@ def _resolve_deploy_config(
         remembered=None,
         default=_default_image_tag(project_root=project_root),
     )
-    min_instances = options.min_instances if options.min_instances is not None else DEFAULT_MIN_INSTANCES
-    max_instances = options.max_instances if options.max_instances is not None else DEFAULT_MAX_INSTANCES
-    concurrency = options.concurrency if options.concurrency is not None else DEFAULT_CONCURRENCY
-    cpu = _resolve_text_value(explicit=options.cpu, remembered=None, default=DEFAULT_CPU)
-    memory = _resolve_text_value(explicit=options.memory, remembered=None, default=DEFAULT_MEMORY)
+    min_instances = (
+        options.min_instances
+        if options.min_instances is not None
+        else (
+            gcp_defaults.min_instances
+            if gcp_defaults is not None
+            else DEFAULT_MIN_INSTANCES
+        )
+    )
+    max_instances = (
+        options.max_instances
+        if options.max_instances is not None
+        else (
+            gcp_defaults.max_instances
+            if gcp_defaults is not None
+            else DEFAULT_MAX_INSTANCES
+        )
+    )
+    concurrency = (
+        options.concurrency
+        if options.concurrency is not None
+        else (
+            gcp_defaults.concurrency
+            if gcp_defaults is not None
+            else DEFAULT_CONCURRENCY
+        )
+    )
+    cpu = _resolve_text_value(
+        explicit=options.cpu,
+        remembered=None if gcp_defaults is None else gcp_defaults.cpu,
+        default=DEFAULT_CPU,
+    )
+    memory = _resolve_text_value(
+        explicit=options.memory,
+        remembered=None if gcp_defaults is None else gcp_defaults.memory,
+        default=DEFAULT_MEMORY,
+    )
 
     if min_instances < 0:
         raise DeployUsageError("--min-instances must be >= 0.")
@@ -1445,6 +1537,13 @@ def _explicit_csv_or_none(raw_value: str | None) -> str | None:
     if normalized is None or normalized == "*":
         return None
     return normalized
+
+
+def _csv_or_none(values: tuple[str, ...]) -> str | None:
+    normalized = _first_non_empty(*values)
+    if normalized is None:
+        return None
+    return ",".join(value.strip() for value in values if value.strip())
 
 
 def _parse_bool_string(raw_value: str) -> bool:

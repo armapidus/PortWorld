@@ -14,6 +14,7 @@ from backend.cli_app.context import CLIContext
 from backend.cli_app.gcp.doctor import evaluate_gcp_cloud_run_readiness
 from backend.cli_app.output import CommandResult, DiagnosticCheck, format_key_value_lines
 from backend.cli_app.paths import ProjectPaths, ProjectRootResolutionError
+from backend.cli_app.project_config import ProjectConfigError, load_project_config
 from backend.core.settings import Settings, load_environment_files
 from backend.realtime.factory import RealtimeProviderFactory
 from backend.tools.runtime import RealtimeToolingRuntime
@@ -341,6 +342,21 @@ def _run_gcp_cloud_run_doctor(
 ) -> CommandResult:
     try:
         paths = cli_context.resolve_project_paths()
+        project_config = load_project_config(paths.project_config_file)
+    except ProjectConfigError as exc:
+        return CommandResult(
+            ok=False,
+            command=COMMAND_NAME,
+            message=str(exc),
+            data={
+                "target": options.target,
+                "project_root": str(paths.project_root),
+                "full": options.full,
+                "status": "error",
+                "error_type": type(exc).__name__,
+            },
+            exit_code=2,
+        )
     except ProjectRootResolutionError as exc:
         return CommandResult(
             ok=False,
@@ -374,6 +390,7 @@ def _run_gcp_cloud_run_doctor(
         full=options.full,
         explicit_project=options.project,
         explicit_region=options.region,
+        project_config=project_config,
     )
     checks = (
         DiagnosticCheck(

@@ -24,6 +24,7 @@ class ProjectPaths:
     dockerfile: Path
     compose_file: Path
     cli_dir: Path
+    project_config_file: Path
     cli_state_dir: Path
     gcp_cloud_run_state_file: Path
 
@@ -38,6 +39,7 @@ class ProjectPaths:
             dockerfile=root / "backend" / "Dockerfile",
             compose_file=root / "docker-compose.yml",
             cli_dir=root / ".portworld",
+            project_config_file=root / ".portworld" / "project.json",
             cli_state_dir=root / ".portworld" / "state",
             gcp_cloud_run_state_file=root / ".portworld" / "state" / "gcp-cloud-run.json",
         )
@@ -70,6 +72,7 @@ class ProjectPaths:
             "dockerfile": str(self.dockerfile),
             "compose_file": str(self.compose_file),
             "cli_dir": str(self.cli_dir),
+            "project_config_file": str(self.project_config_file),
             "cli_state_dir": str(self.cli_state_dir),
             "gcp_cloud_run_state_file": str(self.gcp_cloud_run_state_file),
         }

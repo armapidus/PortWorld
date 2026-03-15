@@ -11,18 +11,35 @@ from backend.cli_app.envfile import (
     EnvFileParseError,
     EnvTemplateError,
     ParsedEnvFile,
+    EnvTemplate,
     load_env_template,
     parse_env_file,
     write_canonical_env,
 )
 from backend.cli_app.output import CommandResult, DiagnosticCheck
 from backend.cli_app.paths import ProjectRootResolutionError
+from backend.cli_app.project_config import (
+    DEFAULT_REALTIME_PROVIDER,
+    DEFAULT_VISION_PROVIDER,
+    DEFAULT_WEB_SEARCH_PROVIDER,
+    ProjectConfig,
+    ProjectConfigError,
+    ProvidersConfig,
+    RealtimeProviderConfig,
+    ToolingConfig,
+    VisionProviderConfig,
+    build_env_overrides_from_project_config,
+    derive_project_config,
+    load_project_config,
+    write_project_config,
+)
+from backend.cli_app.state import CLIStateDecodeError, CLIStateTypeError, read_json_state
 
 
 COMMAND_NAME = "portworld init"
-FIXED_REALTIME_PROVIDER = "openai"
-FIXED_VISION_PROVIDER = "mistral"
-FIXED_WEB_SEARCH_PROVIDER = "tavily"
+FIXED_REALTIME_PROVIDER = DEFAULT_REALTIME_PROVIDER
+FIXED_VISION_PROVIDER = DEFAULT_VISION_PROVIDER
+FIXED_WEB_SEARCH_PROVIDER = DEFAULT_WEB_SEARCH_PROVIDER
 
 
 class InitUsageError(RuntimeError):
@@ -61,6 +78,13 @@ def run_init(cli_context: CLIContext, options: InitOptions) -> CommandResult:
         project_paths = cli_context.resolve_project_paths()
         template = load_env_template(project_paths.env_example_file)
         existing_env = parse_env_file(project_paths.env_file, template=template)
+        remembered_deploy_state = read_json_state(project_paths.gcp_cloud_run_state_file)
+        project_config = load_project_config(project_paths.project_config_file)
+        if project_config is None:
+            project_config = derive_project_config(
+                env_values=_merged_env_values(template=template, existing_env=existing_env),
+                deploy_state=remembered_deploy_state,
+            )
         _validate_flag_conflicts(options)
         _confirm_overwrite_if_needed(
             cli_context,
@@ -70,9 +94,19 @@ def run_init(cli_context: CLIContext, options: InitOptions) -> CommandResult:
         selections = _collect_selections(
             cli_context,
             existing_env=existing_env,
+            project_config=project_config,
             options=options,
         )
-        overrides = _build_env_overrides(existing_env=existing_env, selections=selections)
+        updated_project_config = _apply_selections_to_project_config(
+            project_config=project_config,
+            selections=selections,
+        )
+        overrides = _build_env_overrides(
+            existing_env=existing_env,
+            project_config=updated_project_config,
+            selections=selections,
+        )
+        write_project_config(project_paths.project_config_file, updated_project_config)
         write_result = write_canonical_env(
             project_paths.env_file,
             template=template,
@@ -81,7 +115,14 @@ def run_init(cli_context: CLIContext, options: InitOptions) -> CommandResult:
         )
     except ProjectRootResolutionError as exc:
         return _repo_resolution_failure(exc)
-    except (EnvTemplateError, EnvFileParseError, InitUsageError) as exc:
+    except (
+        CLIStateDecodeError,
+        CLIStateTypeError,
+        EnvTemplateError,
+        EnvFileParseError,
+        InitUsageError,
+        ProjectConfigError,
+    ) as exc:
         return _failure_result(exc, exit_code=2)
     except InitValidationError as exc:
         return _failure_result(exc, exit_code=2)
@@ -128,6 +169,7 @@ def run_init(cli_context: CLIContext, options: InitOptions) -> CommandResult:
         message=message,
         data={
             "project_root": str(project_paths.project_root),
+            "project_config_path": str(project_paths.project_config_file),
             "env_path": str(write_result.env_path),
             "backup_path": str(write_result.backup_path) if write_result.backup_path else None,
             "features": features,
@@ -166,6 +208,7 @@ def _collect_selections(
     cli_context: CLIContext,
     *,
     existing_env: ParsedEnvFile,
+    project_config: ProjectConfig,
     options: InitOptions,
 ) -> InitSelections:
     openai_api_key = _resolve_secret_value(
@@ -176,9 +219,7 @@ def _collect_selections(
         required=True,
     )
 
-    current_vision_enabled = _parse_bool_string(
-        existing_env.known_values.get("VISION_MEMORY_ENABLED", "false")
-    )
+    current_vision_enabled = project_config.providers.vision.enabled
     vision_enabled = _resolve_toggle(
         cli_context,
         prompt="Enable visual memory?",
@@ -199,9 +240,7 @@ def _collect_selections(
             required=True,
         )
 
-    current_tooling_enabled = _parse_bool_string(
-        existing_env.known_values.get("REALTIME_TOOLING_ENABLED", "false")
-    )
+    current_tooling_enabled = project_config.providers.tooling.enabled
     tooling_enabled = _resolve_toggle(
         cli_context,
         prompt="Enable realtime tooling?",
@@ -321,21 +360,45 @@ def _resolve_bearer_token(cli_context: CLIContext, *, existing_value: str) -> st
 def _build_env_overrides(
     *,
     existing_env: ParsedEnvFile,
+    project_config: ProjectConfig,
     selections: InitSelections,
 ) -> dict[str, str]:
     existing_token = existing_env.known_values.get("BACKEND_BEARER_TOKEN", "")
     bearer_token = selections.bearer_token if selections.bearer_token or not existing_token else existing_token
-    return {
-        "REALTIME_PROVIDER": FIXED_REALTIME_PROVIDER,
+    env_overrides = build_env_overrides_from_project_config(project_config)
+    env_overrides.update(
+        {
         "OPENAI_API_KEY": selections.openai_api_key,
-        "VISION_MEMORY_ENABLED": _bool_env_value(selections.vision_enabled),
-        "VISION_MEMORY_PROVIDER": FIXED_VISION_PROVIDER,
         "VISION_PROVIDER_API_KEY": selections.vision_provider_api_key if selections.vision_enabled else "",
-        "REALTIME_TOOLING_ENABLED": _bool_env_value(selections.tooling_enabled),
-        "REALTIME_WEB_SEARCH_PROVIDER": FIXED_WEB_SEARCH_PROVIDER,
         "TAVILY_API_KEY": selections.tavily_api_key if selections.tooling_enabled else "",
         "BACKEND_BEARER_TOKEN": bearer_token,
-    }
+        }
+    )
+    return env_overrides
+
+
+def _apply_selections_to_project_config(
+    *,
+    project_config: ProjectConfig,
+    selections: InitSelections,
+) -> ProjectConfig:
+    return ProjectConfig(
+        schema_version=project_config.schema_version,
+        project_mode=project_config.project_mode,
+        providers=ProvidersConfig(
+            realtime=RealtimeProviderConfig(provider=FIXED_REALTIME_PROVIDER),
+            vision=VisionProviderConfig(
+                enabled=selections.vision_enabled,
+                provider=FIXED_VISION_PROVIDER,
+            ),
+            tooling=ToolingConfig(
+                enabled=selections.tooling_enabled,
+                web_search_provider=FIXED_WEB_SEARCH_PROVIDER,
+            ),
+        ),
+        security=project_config.security,
+        deploy=project_config.deploy,
+    )
 
 
 def _build_success_message(
@@ -369,12 +432,14 @@ def _build_success_message(
     return "\n".join(lines)
 
 
-def _parse_bool_string(value: str) -> bool:
-    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
-
-
-def _bool_env_value(value: bool) -> str:
-    return "true" if value else "false"
+def _merged_env_values(
+    *,
+    template: EnvTemplate,
+    existing_env: ParsedEnvFile,
+) -> dict[str, str]:
+    env_values = template.defaults()
+    env_values.update(existing_env.known_values)
+    return dict(env_values)
 
 
 def _repo_resolution_failure(exc: ProjectRootResolutionError) -> CommandResult:
