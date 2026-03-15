@@ -101,6 +101,8 @@ Introduce a stable CLI-owned project configuration layer without breaking the cu
 
 ## Phase B: Setup And Config UX Expansion
 
+`Status: Complete`
+
 ### Goal
 
 Expand setup beyond the current narrow init flow and let users edit one configuration area at a time.
@@ -125,6 +127,46 @@ Expand setup beyond the current narrow init flow and let users edit one configur
 - a user can inspect current config without opening raw files
 - a user can change providers, security settings, or cloud defaults without repeating the full setup flow
 - current init behavior remains compatible for users who still only want local setup
+
+### Implementation notes
+
+- Added a shared config UX/runtime layer in `backend/cli_app/config_runtime.py` so `init` and `config edit ...` use the same section logic and env/project-config sync path.
+- Added the public `portworld config` surface:
+  - `portworld config show`
+  - `portworld config edit providers`
+  - `portworld config edit security`
+  - `portworld config edit cloud`
+- `config show` now:
+  - reads `.portworld/project.json` when present
+  - derives config from `backend/.env` plus deploy state when the project config file is missing
+  - reports non-secret secret-readiness status from `backend/.env`
+  - supports JSON output with the effective project config, env path, and `derived_from_legacy` state
+- `config edit providers` now owns:
+  - provider feature toggles for vision and tooling
+  - provider-related credentials in `backend/.env`
+  - preserving provider choices in `.portworld/project.json`
+- `config edit security` now owns:
+  - backend profile
+  - CORS origins
+  - allowed hosts
+  - local bearer-token generation, replacement, and clearing in `backend/.env`
+- `config edit cloud` now owns:
+  - `project_mode`
+  - `cloud_provider`
+  - `deploy.preferred_target`
+  - GCP Cloud Run defaults under `deploy.gcp_cloud_run`
+- Phase B minimally expanded the project-config shape with `cloud_provider` while keeping `schema_version` at `1`.
+- `init` is now a staged full-project setup path built from the same provider, security, and cloud section workflows.
+- `init` still preserves the compatibility-era flags:
+  - `--with-vision|--without-vision`
+  - `--with-tooling|--without-tooling`
+  - provider credential flags
+- `init` also now accepts security and cloud-default flags so the full setup can run non-interactively.
+- `backend/.env` remains the generated runtime artifact:
+  - secrets remain env-only
+  - advanced runtime tuning remains env-only
+  - unknown custom overrides continue to survive canonical rewrites
+- Switching a project back to local mode clears the active cloud target fields at the top level but preserves stored GCP Cloud Run defaults under `deploy.gcp_cloud_run`.
 
 ## Phase C: Inspection Commands
 
