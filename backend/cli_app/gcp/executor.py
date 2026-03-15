@@ -152,6 +152,7 @@ def _classify_gcloud_error(stderr: str) -> tuple[str, str | None]:
         or "not_found" in normalized
         or "was not found" in normalized
         or "could not be found" in normalized
+        or "cannot find service" in normalized
         or "unknown service account" in normalized
         or "httperror 404" in normalized
         or "http error 404" in normalized
