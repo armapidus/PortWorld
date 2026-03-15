@@ -1,11 +1,3 @@
-from __future__ import annotations
+"""Compatibility shim for the extracted public PortWorld CLI module."""
 
-
-REQUIRED_GCP_SERVICES: tuple[str, ...] = (
-    "run.googleapis.com",
-    "cloudbuild.googleapis.com",
-    "artifactregistry.googleapis.com",
-    "secretmanager.googleapis.com",
-    "sqladmin.googleapis.com",
-    "storage.googleapis.com",
-)
+from portworld_cli.gcp.constants import *  # noqa: F401,F403
