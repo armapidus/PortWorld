@@ -24,7 +24,7 @@ FastAPI + Uvicorn backend that relays realtime voice sessions to OpenAI, with op
 Public install path:
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash
+curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/armapidus/PortWorld/main/install.sh | bash
 portworld doctor --target local
 docker compose up --build
 ```
@@ -55,13 +55,13 @@ Repeat Cloud Run deploys reuse `.portworld/state/gcp-cloud-run.json` after expli
 For CLI updates, rerun the installer:
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash
+curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/armapidus/PortWorld/main/install.sh | bash
 ```
 
 You can also pin the installer to a specific tagged release:
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash -s -- --version <tag>
+curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/armapidus/PortWorld/main/install.sh | bash -s -- --version <tag>
 ```
 
 Public installer flags:
@@ -169,7 +169,7 @@ Protected profile and memory-admin HTTP routes are IP-rate-limited when `BACKEND
 
 ```bash
 # Install or update the public CLI
-curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash
+curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/armapidus/PortWorld/main/install.sh | bash
 
 # Initialize/update backend/.env through the public CLI
 portworld init

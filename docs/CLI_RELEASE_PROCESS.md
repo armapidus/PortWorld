@@ -28,8 +28,8 @@ This documents the manual tagged-release flow for the public `portworld` CLI.
    - `git push origin vX.Y.Z`
 7. Draft and publish a GitHub Release for the tag
 8. Verify the public install paths against the new release
-   - installer: `curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash`
-   - pinned installer: `curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash -s -- --version vX.Y.Z`
+   - installer: `curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/armapidus/PortWorld/main/install.sh | bash`
+   - pinned installer: `curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/armapidus/PortWorld/main/install.sh | bash -s -- --version vX.Y.Z`
    - manual fallback: `python3 -m pipx install --force "https://github.com/armapidus/PortWorld/archive/refs/tags/vX.Y.Z.zip"`
 
 ## Post-Release Smoke

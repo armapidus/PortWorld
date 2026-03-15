@@ -26,7 +26,7 @@ Optional, depending on enabled features:
 Public install path:
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash
+curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/armapidus/PortWorld/main/install.sh | bash
 ```
 
 Manual install fallback for a pinned release tag:
@@ -88,7 +88,7 @@ Optional operator CLI commands from the repo root:
 
 ```bash
 # Install or update the public CLI
-curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash
+curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/armapidus/PortWorld/main/install.sh | bash
 
 portworld doctor --target local
 portworld ops check-config
@@ -100,7 +100,7 @@ portworld ops export-memory --output /tmp/portworld-memory-export.zip
 You can pin the installer to a specific tagged release:
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash -s -- --version <tag>
+curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/armapidus/PortWorld/main/install.sh | bash -s -- --version <tag>
 ```
 
 For CLI updates without rerunning the installer, the manual fallback is:
