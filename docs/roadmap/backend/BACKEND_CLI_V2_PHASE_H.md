@@ -189,16 +189,36 @@ These stages are intentionally deferred. They extend the Phase H packaging/relea
     - `deploy gcp-cloud-run`
     - `update deploy`
     - `ops ...`
-  - This stage adds the runtime-source plumbing only. It does not yet create zero-clone workspaces or switch deploys to published images; those remain H+3/H+4 work.
+  - This stage adds the runtime-source plumbing only. Zero-clone workspace creation and local published-runtime execution land in H+3; managed published-image deploys remain H+4 work.
 
-### Stage H+3. Zero-clone workspace bootstrap
+### Stage H+3. Zero-clone workspace bootstrap - done
 
-- Add a CLI command (or `init` branch) that creates a managed workspace under user home (for example `~/.portworld/stacks/<name>/`).
-- Generate:
-  - stack-local `.env`
-  - compose/deploy manifest referencing published backend image
-  - `.portworld/project.json` and `.portworld/state/*` for this stack
-- Ensure `doctor`, `ops`, and `deploy` can run against this workspace without requiring repository files.
+- Extend `portworld init` for published-mode workspace bootstrap:
+  - `--runtime-source published`
+  - `--stack-name`
+  - `--release-tag`
+  - `--host-port`
+- Generated published workspaces now contain:
+  - root `.env`
+  - root `docker-compose.yml`
+  - `.portworld/project.json`
+  - `.portworld/state/*`
+- Published workspace defaults:
+  - target path: `~/.portworld/stacks/<name>` unless `--project-root` is passed
+  - release pin: exact tag, defaulting to `v{backend.__version__}`
+  - image ref: `ghcr.io/portworld/portworld-backend:vX.Y.Z`
+- Local published-mode support now works without a repo checkout for:
+  - `status`
+  - `doctor --target local`
+  - `ops check-config`
+  - `ops bootstrap-storage`
+  - `ops migrate-storage-layout`
+  - `ops export-memory`
+- Implementation notes:
+  - `.portworld/project.json` is now schema version `3` and persists `deploy.published_runtime` metadata: `release_tag`, `image_ref`, and `host_port`.
+  - `status` now reports pinned published-runtime metadata and local Compose/container health when `runtime_source=published`.
+  - Published local doctor/ops commands execute through `docker compose` one-off runs against the generated workspace files instead of repo-backed backend paths.
+  - Managed published-mode deploys are still intentionally deferred. `deploy gcp-cloud-run` and `update deploy` remain source-only until H+4.
 
 ### Stage H+4. Cloud deploy from published image
 
