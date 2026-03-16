@@ -56,3 +56,40 @@ jobs:
           python -m pip install --user build twine
           python -m build
           python -m twine check dist/*
+
+  backend-image-smoke:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Build backend image
+        run: docker build -f backend/Dockerfile -t portworld-backend-smoke:${{ github.sha }} .
+
+      - name: Run backend image smoke
+        env:
+          TEST_IMAGE: portworld-backend-smoke:${{ github.sha }}
+        run: |
+          docker run --detach --rm \
+            --name portworld-backend-smoke \
+            -e OPENAI_API_KEY=test-key \
+            -p 18080:8080 \
+            "$TEST_IMAGE"
+
+          cleanup() {
+            docker logs portworld-backend-smoke || true
+            docker stop portworld-backend-smoke || true
+          }
+          trap cleanup EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:18080/livez >/tmp/portworld-backend-smoke.json; then
+              cat /tmp/portworld-backend-smoke.json
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "Backend image did not become healthy in time." >&2
+          exit 1
