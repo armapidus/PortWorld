@@ -26,16 +26,14 @@ from portworld_cli.config_runtime import (
     write_config_artifacts,
 )
 from portworld_cli.context import CLIContext
-from portworld_cli.envfile import EnvFileParseError, parse_env_file
-from portworld_cli.machine_state import remember_active_workspace
+from portworld_cli.envfile import EnvFileParseError
+from portworld_cli.machine_state import load_machine_state, remember_active_workspace
 from portworld_cli.output import CommandResult, DiagnosticCheck
 from portworld_cli.paths import ProjectRootResolutionError, WorkspacePaths
 from portworld_cli.project_config import (
     ProjectConfigError,
     RUNTIME_SOURCE_SOURCE,
     build_env_overrides_from_project_config,
-    derive_project_config,
-    load_project_config_record,
 )
 from portworld_cli.published_workspace import (
     DEFAULT_PUBLISHED_HOST_PORT,
@@ -47,7 +45,8 @@ from portworld_cli.published_workspace import (
     resolve_published_workspace_target,
     write_published_workspace_artifacts,
 )
-from portworld_cli.state import CLIStateDecodeError, CLIStateTypeError, read_json_state
+from portworld_cli.state import CLIStateDecodeError, CLIStateTypeError
+from portworld_cli.workspace.session import build_workspace_session
 
 
 COMMAND_NAME = "portworld init"
@@ -293,7 +292,6 @@ def _run_published_init(
             force=options.force,
         )
         machine_state = remember_active_workspace(workspace_paths.workspace_root)
-        cli_context._active_workspace_root = machine_state.active_workspace_root
         final_session = _build_published_init_session(
             cli_context,
             workspace_paths=workspace_paths,
@@ -472,48 +470,23 @@ def _build_published_init_session(
     *,
     workspace_paths: WorkspacePaths,
 ) -> ConfigSession:
-    template = load_published_env_template()
-    existing_env = parse_env_file(workspace_paths.workspace_env_file, template=template)
-    remembered_deploy_state = read_json_state(workspace_paths.gcp_cloud_run_state_file)
-    loaded_project_config = load_project_config_record(workspace_paths.project_config_file)
-    project_config = None if loaded_project_config is None else loaded_project_config.config
-    derived_from_legacy = project_config is None
-    if project_config is None:
-        env_values = template.defaults()
-        env_values.update(existing_env.known_values)
-        project_config = derive_project_config(
-            env_values=env_values,
-            deploy_state=remembered_deploy_state,
-            default_runtime_source=RUNTIME_SOURCE_PUBLISHED,
-        )
-        configured_runtime_source = None
-        runtime_source_derived_from_legacy = True
-    else:
-        configured_runtime_source = project_config.runtime_source
-        runtime_source_derived_from_legacy = not loaded_project_config.runtime_source_explicit
-
-    return ConfigSession(
-        cli_context=replace(cli_context, project_root_override=workspace_paths.workspace_root),
-        workspace_paths=workspace_paths,
-        project_paths=None,
-        template=template,
-        existing_env=existing_env,
-        project_config=project_config,
-        derived_from_legacy=derived_from_legacy,
-        configured_runtime_source=configured_runtime_source,
-        effective_runtime_source=RUNTIME_SOURCE_PUBLISHED,
-        runtime_source_derived_from_legacy=runtime_source_derived_from_legacy,
-        remembered_deploy_state=remembered_deploy_state,
-        workspace_resolution_source=(
-            "explicit"
-            if cli_context.project_root_override is not None
-            else (
-                "active_workspace"
-                if cli_context.active_workspace_root == workspace_paths.workspace_root
-                else "cwd"
-            )
+    active_workspace_root = load_machine_state().active_workspace_root
+    return replace(
+        build_workspace_session(
+            replace(cli_context, project_root_override=workspace_paths.workspace_root),
+            workspace_paths=workspace_paths,
+            workspace_resolution_source=(
+                "explicit"
+                if cli_context.project_root_override is not None
+                else (
+                    "active_workspace"
+                    if active_workspace_root == workspace_paths.workspace_root
+                    else "cwd"
+                )
+            ),
+            active_workspace_root=active_workspace_root,
         ),
-        active_workspace_root=cli_context.active_workspace_root,
+        effective_runtime_source=RUNTIME_SOURCE_PUBLISHED,
     )
 
 

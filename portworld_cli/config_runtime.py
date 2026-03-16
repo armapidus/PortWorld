@@ -1,25 +1,20 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 import secrets
-from typing import Any
 
 import click
 
 from portworld_cli.context import CLIContext
 from portworld_cli.envfile import (
     EnvFileParseError,
-    EnvTemplate,
     EnvWriteResult,
-    ParsedEnvFile,
-    load_env_template,
     parse_env_file,
     write_canonical_env,
 )
 from portworld_cli.output import CommandResult, format_key_value_lines
-from portworld_cli.paths import ProjectPaths, ProjectRootResolutionError, WorkspacePaths
-from portworld_cli.published_workspace import load_published_env_template
+from portworld_cli.paths import ProjectRootResolutionError
 from portworld_cli.project_config import (
     CLOUD_PROVIDER_GCP,
     DEFAULT_BACKEND_PROFILE,
@@ -35,11 +30,15 @@ from portworld_cli.project_config import (
     ToolingConfig,
     VisionProviderConfig,
     build_env_overrides_from_project_config,
-    derive_project_config,
-    load_project_config_record,
     write_project_config,
 )
-from portworld_cli.state import CLIStateDecodeError, CLIStateTypeError, read_json_state
+from portworld_cli.state import CLIStateDecodeError, CLIStateTypeError
+from portworld_cli.workspace.session import (
+    SecretReadiness,
+    WorkspaceSession as ConfigSession,
+    load_workspace_session,
+    require_source_workspace_session,
+)
 
 
 class ConfigRuntimeError(RuntimeError):
@@ -52,97 +51,6 @@ class ConfigUsageError(ConfigRuntimeError):
 
 class ConfigValidationError(ConfigRuntimeError):
     """Raised when required config values are missing."""
-
-
-@dataclass(frozen=True, slots=True)
-class SecretReadiness:
-    openai_api_key_present: bool | None
-    vision_provider_secret_required: bool
-    vision_provider_api_key_present: bool | None
-    tavily_secret_required: bool
-    tavily_api_key_present: bool | None
-    bearer_token_present: bool | None
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "openai_api_key_present": self.openai_api_key_present,
-            "vision_provider_secret_required": self.vision_provider_secret_required,
-            "vision_provider_api_key_present": self.vision_provider_api_key_present,
-            "tavily_secret_required": self.tavily_secret_required,
-            "tavily_api_key_present": self.tavily_api_key_present,
-            "bearer_token_present": self.bearer_token_present,
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class ConfigSession:
-    cli_context: CLIContext
-    workspace_paths: WorkspacePaths
-    project_paths: ProjectPaths | None
-    template: EnvTemplate | None
-    existing_env: ParsedEnvFile | None
-    project_config: ProjectConfig
-    derived_from_legacy: bool
-    configured_runtime_source: str | None
-    effective_runtime_source: str
-    runtime_source_derived_from_legacy: bool
-    remembered_deploy_state: dict[str, Any]
-    workspace_resolution_source: str
-    active_workspace_root: Path | None
-
-    def merged_env_values(self) -> dict[str, str]:
-        if self.template is None or self.existing_env is None:
-            return {}
-        env_values = self.template.defaults()
-        env_values.update(self.existing_env.known_values)
-        return dict(env_values)
-
-    def secret_readiness(self) -> SecretReadiness:
-        if self.existing_env is None:
-            return SecretReadiness(
-                openai_api_key_present=None,
-                vision_provider_secret_required=self.project_config.providers.vision.enabled,
-                vision_provider_api_key_present=None,
-                tavily_secret_required=self.project_config.providers.tooling.enabled,
-                tavily_api_key_present=None,
-                bearer_token_present=None,
-            )
-        openai_present = bool((self.existing_env.known_values.get("OPENAI_API_KEY", "")).strip())
-        vision_required = self.project_config.providers.vision.enabled
-        vision_present: bool | None = None
-        if vision_required:
-            vision_present = bool(
-                (
-                    self.existing_env.known_values.get("VISION_PROVIDER_API_KEY", "")
-                    or self.existing_env.legacy_alias_values.get("MISTRAL_API_KEY", "")
-                ).strip()
-            )
-
-        tavily_required = self.project_config.providers.tooling.enabled
-        tavily_present: bool | None = None
-        if tavily_required:
-            tavily_present = bool((self.existing_env.known_values.get("TAVILY_API_KEY", "")).strip())
-
-        return SecretReadiness(
-            openai_api_key_present=openai_present,
-            vision_provider_secret_required=vision_required,
-            vision_provider_api_key_present=vision_present,
-            tavily_secret_required=tavily_required,
-            tavily_api_key_present=tavily_present,
-            bearer_token_present=bool((self.existing_env.known_values.get("BACKEND_BEARER_TOKEN", "")).strip()),
-        )
-
-    @property
-    def workspace_root(self) -> Path:
-        return self.workspace_paths.workspace_root
-
-    @property
-    def env_path(self) -> Path | None:
-        if self.project_paths is not None:
-            return self.project_paths.env_file
-        if self.effective_runtime_source == RUNTIME_SOURCE_PUBLISHED:
-            return self.workspace_paths.workspace_env_file
-        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,61 +126,7 @@ class ConfigWriteOutcome:
 
 
 def load_config_session(cli_context: CLIContext) -> ConfigSession:
-    workspace_paths = cli_context.resolve_workspace_paths()
-    project_paths = workspace_paths.source_project_paths
-    template = (
-        load_env_template(project_paths.env_example_file)
-        if project_paths is not None
-        else load_published_env_template()
-    )
-    existing_env = (
-        None
-        if template is None
-        else parse_env_file(
-            project_paths.env_file if project_paths is not None else workspace_paths.workspace_env_file,
-            template=template,
-        )
-    )
-    remembered_deploy_state = read_json_state(workspace_paths.gcp_cloud_run_state_file)
-    loaded_project_config = load_project_config_record(workspace_paths.project_config_file)
-    project_config = None if loaded_project_config is None else loaded_project_config.config
-    derived_from_legacy = project_config is None
-    if project_config is None:
-        env_values = {} if template is None or existing_env is None else template.defaults()
-        if existing_env is not None:
-            env_values.update(existing_env.known_values)
-        project_config = derive_project_config(
-            env_values=env_values,
-            deploy_state=remembered_deploy_state,
-            default_runtime_source=(
-                RUNTIME_SOURCE_SOURCE
-                if project_paths is not None
-                else RUNTIME_SOURCE_PUBLISHED
-            ),
-        )
-        configured_runtime_source = None
-        runtime_source_derived_from_legacy = True
-    else:
-        configured_runtime_source = project_config.runtime_source
-        runtime_source_derived_from_legacy = not loaded_project_config.runtime_source_explicit
-    effective_runtime_source = configured_runtime_source or (
-        RUNTIME_SOURCE_SOURCE if project_paths is not None else RUNTIME_SOURCE_PUBLISHED
-    )
-    return ConfigSession(
-        cli_context=cli_context,
-        workspace_paths=workspace_paths,
-        project_paths=project_paths,
-        template=template,
-        existing_env=existing_env,
-        project_config=project_config,
-        derived_from_legacy=derived_from_legacy,
-        configured_runtime_source=configured_runtime_source,
-        effective_runtime_source=effective_runtime_source,
-        runtime_source_derived_from_legacy=runtime_source_derived_from_legacy,
-        remembered_deploy_state=remembered_deploy_state,
-        workspace_resolution_source=cli_context.workspace_resolution_source or "cwd",
-        active_workspace_root=cli_context.active_workspace_root,
-    )
+    return load_workspace_session(cli_context)
 
 
 def ensure_source_runtime_session(
@@ -281,35 +135,11 @@ def ensure_source_runtime_session(
     command_name: str,
     requested_runtime_source: str | None = None,
 ) -> ConfigSession:
-    if requested_runtime_source == RUNTIME_SOURCE_PUBLISHED:
-        raise ConfigUsageError(
-            f"{command_name} is not supported when runtime_source=published yet. "
-            "Use `portworld config edit cloud --runtime-source published` to record published mode, "
-            "and switch back with `portworld config edit cloud --runtime-source source` when you need source-backed commands."
-        )
-
-    effective_runtime_source = requested_runtime_source or session.effective_runtime_source
-    if effective_runtime_source == RUNTIME_SOURCE_PUBLISHED:
-        raise ConfigUsageError(
-            f"{command_name} is not supported when runtime_source=published yet. "
-            "Switch back with `portworld config edit cloud --runtime-source source`."
-        )
-
-    if session.project_paths is None or session.template is None or session.existing_env is None:
-        raise ProjectRootResolutionError(
-            f"{command_name} requires a PortWorld source checkout with backend/Dockerfile, "
-            "backend/.env.example, and docker-compose.yml."
-        )
-
-    if session.project_config.runtime_source == RUNTIME_SOURCE_SOURCE:
-        return session
-
-    return replace(
+    return require_source_workspace_session(
         session,
-        project_config=replace(session.project_config, runtime_source=RUNTIME_SOURCE_SOURCE),
-        configured_runtime_source=RUNTIME_SOURCE_SOURCE,
-        effective_runtime_source=RUNTIME_SOURCE_SOURCE,
-        runtime_source_derived_from_legacy=False,
+        command_name=command_name,
+        requested_runtime_source=requested_runtime_source,
+        usage_error_type=ConfigUsageError,
     )
 
 

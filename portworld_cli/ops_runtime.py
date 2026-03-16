@@ -20,11 +20,12 @@ from backend.core.storage import now_ms
 
 
 def _build_settings(cli_context: CLIContext) -> Settings:
-    ensure_source_runtime_session(
+    source_session = ensure_source_runtime_session(
         load_config_session(cli_context),
         command_name="portworld ops",
     )
-    paths = cli_context.resolve_project_paths()
+    assert source_session.project_paths is not None
+    paths = source_session.project_paths
     load_environment_files(paths.env_file)
     return Settings.from_env()
 
