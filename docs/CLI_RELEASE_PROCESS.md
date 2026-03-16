@@ -6,7 +6,7 @@ This documents the tagged release flow for the public `portworld` CLI.
 
 - The packaged CLI version is sourced from `backend.__version__`.
 - Git tags should use the format `vX.Y.Z`.
-- The public installer resolves `latest` from GitHub Releases.
+- The public installer resolves `latest` from GitHub Releases and installs the matching PyPI package version.
 
 ## Required External Setup
 
@@ -40,13 +40,13 @@ This documents the tagged release flow for the public `portworld` CLI.
    - `validate`: assert `vX.Y.Z` matches `backend.__version__` and capture the package name from `pyproject.toml`
    - `build`: build sdist and wheel once, then upload them as the shared workflow artifact
    - `publish_testpypi`: publish the built artifacts to TestPyPI through trusted publishing
-   - `smoke_testpypi`: install the exact version from TestPyPI in a clean job and run CLI smoke commands
+   - `smoke_testpypi`: install the exact version from TestPyPI with `uv tool install` in a clean job and run CLI smoke commands
    - `publish_pypi`: publish the same downloaded artifacts to PyPI through trusted publishing
    - `github_release`: attach the same artifacts to the GitHub Release for the tag
 8. Verify the public install paths against the new release
    - installer: `curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/armapidus/PortWorld/main/install.sh | bash`
    - pinned installer: `curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/armapidus/PortWorld/main/install.sh | bash -s -- --version vX.Y.Z`
-   - manual fallback: `python3 -m pipx install --force "https://github.com/armapidus/PortWorld/archive/refs/tags/vX.Y.Z.zip"`
+   - manual fallback: `uv tool install "portworld==X.Y.Z"`
 
 ## Post-Release Smoke
 
@@ -61,3 +61,4 @@ This documents the tagged release flow for the public `portworld` CLI.
 - `cli-smoke` continues to run on branch pushes and pull requests only; tag pushes are owned by `cli-release`.
 - `publish_pypi` depends on a successful TestPyPI publish and TestPyPI smoke pass.
 - The release workflow never rebuilds after validation; PyPI and GitHub Release both reuse the `build` job artifacts.
+- The public bootstrap installs `uv` automatically and downloads Python 3.11+ when needed.

@@ -29,10 +29,13 @@ Public install path:
 curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/armapidus/PortWorld/main/install.sh | bash
 ```
 
-Manual install fallback for a pinned release tag:
+The bootstrap installs `uv` automatically and downloads Python 3.11+ when the machine does not
+already provide a suitable interpreter.
+
+Manual install fallback for a pinned release version:
 
 ```bash
-python3 -m pipx install --force "https://github.com/armapidus/PortWorld/archive/refs/tags/<tag>.zip"
+uv tool install "portworld==<version>"
 portworld init
 ```
 
@@ -103,10 +106,10 @@ You can pin the installer to a specific tagged release:
 curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/armapidus/PortWorld/main/install.sh | bash -s -- --version <tag>
 ```
 
-For CLI updates without rerunning the installer, the manual fallback is:
+For CLI updates without rerunning the installer, use:
 
 ```bash
-python3 -m pipx install --force "https://github.com/armapidus/PortWorld/archive/refs/tags/<tag>.zip"
+uv tool upgrade portworld
 ```
 
 Public installer flags:
