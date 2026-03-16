@@ -3,16 +3,15 @@ from __future__ import annotations
 import click
 
 from portworld_cli.providers.types import ProviderEditOptions
-from portworld_cli.services.config import (
-    CloudEditOptions,
-    SecurityEditOptions,
-    run_config_show,
+from portworld_cli.context import CLIContext
+from portworld_cli.output import exit_with_result
+from portworld_cli.services.config.edit_service import (
     run_edit_cloud,
     run_edit_providers,
     run_edit_security,
 )
-from portworld_cli.context import CLIContext
-from portworld_cli.output import exit_with_result
+from portworld_cli.services.config.show_service import run_config_show
+from portworld_cli.services.config.types import CloudEditOptions, SecurityEditOptions
 
 
 @click.group("config")

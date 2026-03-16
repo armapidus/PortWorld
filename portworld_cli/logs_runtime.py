@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from portworld_cli.context import CLIContext
 from portworld_cli.gcp import GCPAdapters, GCPError
 from portworld_cli.output import CommandResult
-from portworld_cli.services.common import ErrorMappingPolicy, map_command_exception
+from portworld_cli.services.common.error_mapping import ErrorMappingPolicy, map_command_exception
 from portworld_cli.workspace.session import load_inspection_session, resolve_gcp_inspection_target
 
 
@@ -130,6 +130,8 @@ def _format_log_line(
             rendered_message,
         ]
     )
+
+
 def _gcp_failure_result(error: GCPError) -> CommandResult:
     payload: dict[str, object] = {
         "status": "error",
