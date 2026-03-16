@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import click
 
-from portworld_cli.config_runtime import (
+from portworld_cli.services.config import (
     CloudEditOptions,
     ProviderEditOptions,
     SecurityEditOptions,
