@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from portworld_cli.envfile import EnvTemplate, ParsedEnvFile, load_env_template, parse_env_file
-from portworld_cli.workspace.paths import ProjectPaths, WorkspacePaths
+from portworld_cli.workspace.discovery.paths import ProjectPaths, WorkspacePaths
 from portworld_cli.workspace.project_config import (
     ProjectConfig,
     RUNTIME_SOURCE_PUBLISHED,
@@ -12,8 +12,8 @@ from portworld_cli.workspace.project_config import (
     derive_project_config,
     load_project_config_record,
 )
-from portworld_cli.published_workspace import load_published_env_template
-from portworld_cli.workspace.state_store import read_json_state
+from portworld_cli.workspace.published import load_published_env_template
+from portworld_cli.workspace.state.state_store import read_json_state
 
 
 @dataclass(frozen=True, slots=True)

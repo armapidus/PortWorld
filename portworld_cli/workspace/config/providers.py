@@ -7,9 +7,8 @@ from portworld_cli.workspace.project_config import (
     ToolingConfig,
     VisionProviderConfig,
 )
+from portworld_cli.providers.types import ProviderEditOptions, ProviderSectionResult
 from portworld_cli.workspace.session import WorkspaceSession as ConfigSession
-
-from .types import ProviderEditOptions, ProviderSectionResult
 
 
 def collect_provider_section(

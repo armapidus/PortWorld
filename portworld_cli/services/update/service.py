@@ -27,7 +27,7 @@ from portworld_cli.release.lookup import (
 )
 from portworld_cli.workspace.project_config import GCP_CLOUD_RUN_TARGET
 from portworld_cli.services.common import ErrorMappingPolicy, map_command_exception
-from portworld_cli.workspace.paths import ProjectPaths, ProjectRootResolutionError, resolve_project_paths
+from portworld_cli.workspace.discovery.paths import ProjectPaths, ProjectRootResolutionError, resolve_project_paths
 from portworld_cli.workspace.session import load_inspection_session, load_workspace_session
 
 INSTALLER_COMMAND = f"curl -fsSL --proto '=https' --tlsv1.2 {INSTALLER_SCRIPT_URL} | bash"

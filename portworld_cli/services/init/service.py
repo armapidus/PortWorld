@@ -7,15 +7,15 @@ import click
 from portworld_cli.context import CLIContext
 from portworld_cli.envfile import EnvFileParseError
 from portworld_cli.output import CommandResult, DiagnosticCheck
-from portworld_cli.workspace.machine_state import load_machine_state, remember_active_workspace
-from portworld_cli.workspace.paths import ProjectRootResolutionError, WorkspacePaths
+from portworld_cli.workspace.discovery.paths import ProjectRootResolutionError, WorkspacePaths
+from portworld_cli.workspace.state.machine_state import load_machine_state, remember_active_workspace
 from portworld_cli.workspace.project_config import (
     ProjectConfigError,
     RUNTIME_SOURCE_PUBLISHED,
     RUNTIME_SOURCE_SOURCE,
     build_env_overrides_from_project_config,
 )
-from portworld_cli.published_workspace import (
+from portworld_cli.workspace.published import (
     DEFAULT_PUBLISHED_HOST_PORT,
     PublishedWorkspaceTarget,
     load_published_env_template,
@@ -25,7 +25,7 @@ from portworld_cli.published_workspace import (
     resolve_published_workspace_target,
     write_published_workspace_artifacts,
 )
-from portworld_cli.providers.config import apply_provider_section, collect_provider_section
+from portworld_cli.workspace.config.providers import apply_provider_section, collect_provider_section
 from portworld_cli.providers.types import ProviderEditOptions
 from portworld_cli.services.config.errors import ConfigRuntimeError, ConfigUsageError
 from portworld_cli.services.config.edit_service import confirm_apply
@@ -44,7 +44,7 @@ from portworld_cli.services.config.sections import (
     collect_security_section,
 )
 from portworld_cli.services.config.types import CloudEditOptions, SecurityEditOptions
-from portworld_cli.workspace.state_store import CLIStateDecodeError, CLIStateTypeError
+from portworld_cli.workspace.state.state_store import CLIStateDecodeError, CLIStateTypeError
 from portworld_cli.workspace.session import WorkspaceSession as ConfigSession
 from portworld_cli.workspace.session import (
     build_workspace_session,

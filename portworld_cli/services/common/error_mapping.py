@@ -8,8 +8,8 @@ from portworld_cli.envfile import EnvFileParseError
 from portworld_cli.output import CommandResult, DiagnosticCheck
 from portworld_cli.workspace.project_config import ProjectConfigError
 from portworld_cli.services.config.errors import ConfigRuntimeError
-from portworld_cli.workspace.paths import ProjectRootResolutionError
-from portworld_cli.workspace.state_store import CLIStateDecodeError, CLIStateTypeError
+from portworld_cli.workspace.discovery.paths import ProjectRootResolutionError
+from portworld_cli.workspace.state.state_store import CLIStateDecodeError, CLIStateTypeError
 
 DEFAULT_PROJECT_ROOT_ACTION = (
     "Run from a PortWorld repo checkout, a published workspace, or pass --project-root."

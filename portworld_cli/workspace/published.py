@@ -21,7 +21,7 @@ from portworld_cli.envfile import (
 )
 from portworld_cli.release.identity import REPO_OWNER
 from portworld_cli.release.lookup import extract_latest_release_tag, fetch_latest_release_payload
-from portworld_cli.workspace.paths import ProjectPaths, WorkspacePaths
+from portworld_cli.workspace.discovery.paths import ProjectPaths, WorkspacePaths
 from portworld_cli.workspace.project_config import ProjectConfig, write_project_config
 
 

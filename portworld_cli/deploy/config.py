@@ -31,7 +31,7 @@ from portworld_cli.workspace.project_config import (
     RUNTIME_SOURCE_SOURCE,
     ProjectConfig,
 )
-from portworld_cli.workspace.paths import ProjectRootResolutionError
+from portworld_cli.workspace.discovery.paths import ProjectRootResolutionError
 from portworld_cli.workspace.session import WorkspaceSession as ConfigSession
 from portworld_cli.workspace.session import load_workspace_session
 
