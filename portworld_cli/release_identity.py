@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-REPO_OWNER = "armapidus"
+REPO_OWNER = "portworld"
 REPO_NAME = "PortWorld"
 GITHUB_REPO_URL = f"https://github.com/{REPO_OWNER}/{REPO_NAME}"
 INSTALLER_SCRIPT_URL = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/install.sh"
