@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from portworld_cli.deploy_artifacts import (
+    IMAGE_NAME,
+    IMAGE_SOURCE_MODE_PUBLISHED_RELEASE,
+    derive_published_artifact_repository,
+)
 from portworld_cli.gcp import (
     GCPAdapters,
     REQUIRED_GCP_SERVICES,
@@ -14,6 +19,7 @@ from portworld_cli.paths import ProjectPaths
 from portworld_cli.project_config import (
     DEFAULT_GCP_ARTIFACT_REPOSITORY,
     DEFAULT_GCP_REGION,
+    RUNTIME_SOURCE_PUBLISHED,
     ProjectConfig,
 )
 from backend.core.settings import Settings, load_environment_files
@@ -23,7 +29,6 @@ from backend.vision.factory import VisionAnalyzerFactory
 
 
 DEFAULT_ARTIFACT_REPOSITORY = DEFAULT_GCP_ARTIFACT_REPOSITORY
-DEFAULT_IMAGE_NAME = "portworld-backend"
 DOCTOR_IMAGE_TAG = "doctor-check"
 SUGGESTED_DEFAULT_REGION = DEFAULT_GCP_REGION
 
@@ -324,23 +329,37 @@ def evaluate_gcp_cloud_run_readiness(
         )
 
     if project_id is not None and region is not None:
+        runtime_source = (
+            None if project_config is None else project_config.runtime_source
+        )
         artifact_repository = (
             DEFAULT_ARTIFACT_REPOSITORY
             if project_config is None
             else project_config.deploy.gcp_cloud_run.artifact_repository
         )
+        image_tag = DOCTOR_IMAGE_TAG
+        image_source_mode = "source_build"
+        if runtime_source == RUNTIME_SOURCE_PUBLISHED:
+            artifact_repository = derive_published_artifact_repository(artifact_repository)
+            image_tag = (
+                project_config.deploy.published_runtime.release_tag
+                or DOCTOR_IMAGE_TAG
+            )
+            image_source_mode = IMAGE_SOURCE_MODE_PUBLISHED_RELEASE
         image_uri = build_image_uri(
             project_id=project_id,
             region=region,
             repository=artifact_repository,
-            image_name=DEFAULT_IMAGE_NAME,
-            tag=DOCTOR_IMAGE_TAG,
+            image_name=IMAGE_NAME,
+            tag=image_tag,
         )
         checks.append(
             DiagnosticCheck(
                 id="deployable_image_path",
                 status="pass",
-                message=f"Deployable image path can be derived: {image_uri}",
+                message=(
+                    f"Deployable image path can be derived for {image_source_mode}: {image_uri}"
+                ),
             )
         )
     else:

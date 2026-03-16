@@ -16,12 +16,19 @@ import httpx
 
 from portworld_cli.config_runtime import (
     ConfigRuntimeError,
-    ensure_source_runtime_session,
+    ConfigSession,
     load_config_session,
 )
 from portworld_cli.context import CLIContext
-from portworld_cli.deploy_state import DeployState, read_deploy_state, write_deploy_state
-from portworld_cli.envfile import EnvFileParseError, load_env_template, parse_env_file
+from portworld_cli.deploy_artifacts import (
+    GHCR_REMOTE_DOCKER_REPO,
+    IMAGE_NAME,
+    IMAGE_SOURCE_MODE_PUBLISHED_RELEASE,
+    IMAGE_SOURCE_MODE_SOURCE_BUILD,
+    derive_published_artifact_repository,
+)
+from portworld_cli.deploy_state import DeployState, write_deploy_state
+from portworld_cli.envfile import EnvFileParseError
 from portworld_cli.gcp import (
     GCPAdapters,
     REQUIRED_GCP_SERVICES,
@@ -44,9 +51,10 @@ from portworld_cli.project_config import (
     DEFAULT_GCP_REGION,
     DEFAULT_GCP_SERVICE_NAME,
     DEFAULT_GCP_SQL_INSTANCE_NAME,
+    RUNTIME_SOURCE_PUBLISHED,
+    RUNTIME_SOURCE_SOURCE,
     ProjectConfig,
     ProjectConfigError,
-    load_project_config,
 )
 from portworld_cli.state import CLIStateDecodeError, CLIStateTypeError
 from backend.core.settings import Settings
@@ -70,8 +78,9 @@ DEFAULT_SQL_CPU_COUNT = 1
 DEFAULT_SQL_MEMORY = "3840MiB"
 DEFAULT_SQL_USER_NAME = "portworld_app"
 DEFAULT_BUCKET_SUFFIX = "portworld-artifacts"
-IMAGE_NAME = "portworld-backend"
 INGRESS_SETTING = "all"
+PUBLISHED_REMOTE_REPOSITORY_DESCRIPTION = "PortWorld published backend image mirror"
+PUBLISHED_REMOTE_REPOSITORY_CONFIG_DESCRIPTION = "Remote Docker repository proxying ghcr.io"
 
 SENSITIVE_ENV_KEYS: tuple[str, ...] = (
     "OPENAI_API_KEY",
@@ -119,6 +128,8 @@ class DeployGCPCloudRunOptions:
 
 @dataclass(frozen=True, slots=True)
 class ResolvedDeployConfig:
+    runtime_source: str
+    image_source_mode: str
     project_id: str
     region: str
     service_name: str
@@ -129,6 +140,9 @@ class ResolvedDeployConfig:
     cors_origins: str
     allowed_hosts: str
     image_tag: str
+    deploy_image_uri: str
+    published_release_tag: str | None
+    published_image_ref: str | None
     min_instances: int
     max_instances: int
     concurrency: int
@@ -145,33 +159,23 @@ def run_deploy_gcp_cloud_run(
     checks: list[DiagnosticCheck] = []
 
     try:
-        ensure_source_runtime_session(
-            load_config_session(cli_context),
-            command_name=COMMAND_NAME,
-        )
-        project_paths = cli_context.resolve_project_paths()
-        if not project_paths.env_file.is_file():
-            raise DeployStageError(
-                stage="repo_config_discovery",
-                message="backend/.env is missing.",
-                action="Run `portworld init` first.",
-            )
-
-        template = load_env_template(project_paths.env_example_file)
-        parsed_env = parse_env_file(project_paths.env_file, template=template)
-        env_values = template.defaults()
-        env_values.update(parsed_env.known_values)
-        project_config = load_project_config(project_paths.project_config_file)
-        remembered_state = read_deploy_state(project_paths.gcp_cloud_run_state_file)
+        session = _load_deploy_session(cli_context)
+        env_values = OrderedDict(session.merged_env_values().items())
+        project_config = session.project_config
+        remembered_state = DeployState.from_payload(session.remembered_deploy_state)
         _record_stage(
             stage_records,
             stage="repo_config_discovery",
-            message="Resolved repo root and loaded CLI config inputs.",
+            message="Resolved workspace and loaded CLI config inputs.",
             details={
-                "project_root": str(project_paths.project_root),
-                "env_file": str(project_paths.env_file),
-                "project_config_file": str(project_paths.project_config_file),
-                "state_file": str(project_paths.gcp_cloud_run_state_file),
+                "workspace_root": str(session.workspace_root),
+                "project_root": (
+                    None if session.project_paths is None else str(session.project_paths.project_root)
+                ),
+                "env_file": None if session.env_path is None else str(session.env_path),
+                "project_config_file": str(session.workspace_paths.project_config_file),
+                "state_file": str(session.workspace_paths.gcp_cloud_run_state_file),
+                "runtime_source": session.effective_runtime_source,
             },
         )
 
@@ -191,7 +195,10 @@ def run_deploy_gcp_cloud_run(
             project_config=project_config,
             remembered_state=remembered_state,
             options=options,
-            project_root=project_paths.project_root,
+            runtime_source=session.effective_runtime_source,
+            project_root=(
+                None if session.project_paths is None else session.project_paths.project_root
+            ),
         )
         resources.update(
             {
@@ -217,7 +224,12 @@ def run_deploy_gcp_cloud_run(
                 "bucket_name": config.bucket_name,
                 "cors_origins": config.cors_origins,
                 "allowed_hosts": config.allowed_hosts,
+                "runtime_source": config.runtime_source,
+                "image_source_mode": config.image_source_mode,
                 "image_tag": config.image_tag,
+                "deploy_image_uri": config.deploy_image_uri,
+                "published_release_tag": config.published_release_tag,
+                "published_image_ref": config.published_image_ref,
             },
         )
 
@@ -249,34 +261,44 @@ def run_deploy_gcp_cloud_run(
             stage_records,
             stage="artifact_registry_setup",
             message="Ensured Artifact Registry repository exists.",
-            details={"repository": repository_ref.repository},
-        )
-
-        image_uri = build_image_uri(
-            project_id=config.project_id,
-            region=config.region,
-            repository=config.artifact_repository,
-            image_name=IMAGE_NAME,
-            tag=config.image_tag,
-        )
-        build_submission = _submit_cloud_build(
-            adapters=adapters,
-            project_root=project_paths.project_root,
-            dockerfile_path=project_paths.dockerfile,
-            project_id=config.project_id,
-            image_uri=image_uri,
-        )
-        resources["image"] = image_uri
-        _record_stage(
-            stage_records,
-            stage="cloud_build",
-            message="Built and published the backend image.",
             details={
-                "image": image_uri,
-                "build_id": build_submission.build_id,
-                "log_url": build_submission.log_url,
+                "repository": repository_ref.repository,
+                "mode": repository_ref.mode,
             },
         )
+
+        image_uri = config.deploy_image_uri
+        resources["image"] = image_uri
+        if config.image_source_mode == IMAGE_SOURCE_MODE_SOURCE_BUILD:
+            assert session.project_paths is not None
+            build_submission = _submit_cloud_build(
+                adapters=adapters,
+                project_root=session.project_paths.project_root,
+                dockerfile_path=session.project_paths.dockerfile,
+                project_id=config.project_id,
+                image_uri=image_uri,
+            )
+            _record_stage(
+                stage_records,
+                stage="cloud_build",
+                message="Built and published the backend image.",
+                details={
+                    "image": image_uri,
+                    "build_id": build_submission.build_id,
+                    "log_url": build_submission.log_url,
+                },
+            )
+        else:
+            _record_stage(
+                stage_records,
+                stage="published_image_resolution",
+                message="Resolved the pinned published backend image for managed deploy.",
+                details={
+                    "image": image_uri,
+                    "published_release_tag": config.published_release_tag,
+                    "published_image_ref": config.published_image_ref,
+                },
+            )
 
         non_db_secret_names, openai_secret_name, vision_secret_name, tavily_secret_name, bearer_secret_name, bearer_token_for_validation = _ensure_core_secrets(
             adapters=adapters,
@@ -397,16 +419,20 @@ def run_deploy_gcp_cloud_run(
         )
 
         write_deploy_state(
-            project_paths.gcp_cloud_run_state_file,
+            session.workspace_paths.gcp_cloud_run_state_file,
             DeployState(
                 project_id=config.project_id,
                 region=config.region,
                 service_name=config.service_name,
+                runtime_source=config.runtime_source,
+                image_source_mode=config.image_source_mode,
                 artifact_repository=config.artifact_repository,
                 cloud_sql_instance=config.sql_instance_name,
                 database_name=config.database_name,
                 bucket_name=bucket_name,
                 image=image_uri,
+                published_release_tag=config.published_release_tag,
+                published_image_ref=config.published_image_ref,
                 service_url=service_ref.url,
                 service_account_email=service_account_email,
                 last_deployed_at_ms=_now_ms(),
@@ -439,6 +465,10 @@ def run_deploy_gcp_cloud_run(
                 "service_name": config.service_name,
                 "service_url": service_ref.url,
                 "image": image_uri,
+                "runtime_source": config.runtime_source,
+                "image_source_mode": config.image_source_mode,
+                "published_release_tag": config.published_release_tag,
+                "published_image_ref": config.published_image_ref,
                 "resources": {
                     "artifact_registry_repository": config.artifact_repository,
                     "cloud_sql_instance": config.sql_instance_name,
@@ -512,6 +542,27 @@ def run_deploy_gcp_cloud_run(
         )
 
 
+def _load_deploy_session(cli_context: CLIContext) -> ConfigSession:
+    session = load_config_session(cli_context)
+    if session.env_path is None or not session.env_path.is_file():
+        if session.effective_runtime_source == RUNTIME_SOURCE_PUBLISHED:
+            raise DeployStageError(
+                stage="repo_config_discovery",
+                message="Published workspace .env is missing.",
+                action="Run `portworld init --runtime-source published` first.",
+            )
+        raise DeployStageError(
+            stage="repo_config_discovery",
+            message="backend/.env is missing.",
+            action="Run `portworld init` first.",
+        )
+    if session.effective_runtime_source == RUNTIME_SOURCE_SOURCE and session.project_paths is None:
+        raise ProjectRootResolutionError(
+            "Run from a PortWorld repo checkout or pass --project-root."
+        )
+    return session
+
+
 def _resolve_deploy_config(
     cli_context: CLIContext,
     *,
@@ -520,7 +571,8 @@ def _resolve_deploy_config(
     project_config: ProjectConfig | None,
     remembered_state: DeployState,
     options: DeployGCPCloudRunOptions,
-    project_root: Path,
+    runtime_source: str,
+    project_root: Path | None,
 ) -> ResolvedDeployConfig:
     gcp_defaults = None if project_config is None else project_config.deploy.gcp_cloud_run
     configured_project = adapters.auth.get_configured_project()
@@ -630,11 +682,35 @@ def _resolve_deploy_config(
     if allowed_hosts.strip() == "*":
         raise DeployUsageError("BACKEND_ALLOWED_HOSTS cannot be '*' for production deploy.")
 
-    image_tag = _resolve_text_value(
-        explicit=options.tag,
-        remembered=None,
-        default=_default_image_tag(project_root=project_root),
-    )
+    published_release_tag = None
+    published_image_ref = None
+    image_source_mode = IMAGE_SOURCE_MODE_SOURCE_BUILD
+    resolved_artifact_repository = artifact_repository
+    if runtime_source == RUNTIME_SOURCE_PUBLISHED:
+        if options.tag is not None:
+            raise DeployUsageError(
+                "--tag is only supported in runtime_source=source. "
+                "Published-mode deploys always use the workspace's pinned release tag."
+            )
+        published_runtime = None if project_config is None else project_config.deploy.published_runtime
+        published_release_tag = None if published_runtime is None else published_runtime.release_tag
+        published_image_ref = None if published_runtime is None else published_runtime.image_ref
+        if not published_release_tag or not published_image_ref:
+            raise DeployUsageError(
+                "Published-mode deploy requires a pinned release tag and image ref. "
+                "Run `portworld init --runtime-source published --release-tag <latest|vX.Y.Z>` first."
+            )
+        image_tag = published_release_tag
+        image_source_mode = IMAGE_SOURCE_MODE_PUBLISHED_RELEASE
+        resolved_artifact_repository = derive_published_artifact_repository(artifact_repository)
+    else:
+        if project_root is None:
+            raise DeployUsageError("Source-mode deploy requires a PortWorld repo checkout.")
+        image_tag = _resolve_text_value(
+            explicit=options.tag,
+            remembered=None,
+            default=_default_image_tag(project_root=project_root),
+        )
     min_instances = (
         options.min_instances
         if options.min_instances is not None
@@ -683,16 +759,27 @@ def _resolve_deploy_config(
         raise DeployUsageError("--concurrency must be >= 1.")
 
     return ResolvedDeployConfig(
+        runtime_source=runtime_source,
+        image_source_mode=image_source_mode,
         project_id=project_id,
         region=region,
         service_name=service_name,
-        artifact_repository=artifact_repository,
+        artifact_repository=resolved_artifact_repository,
         sql_instance_name=sql_instance_name,
         database_name=database_name,
         bucket_name=bucket_name,
         cors_origins=cors_origins,
         allowed_hosts=allowed_hosts,
         image_tag=image_tag,
+        deploy_image_uri=build_image_uri(
+            project_id=project_id,
+            region=region,
+            repository=resolved_artifact_repository,
+            image_name=IMAGE_NAME,
+            tag=image_tag,
+        ),
+        published_release_tag=published_release_tag,
+        published_image_ref=published_image_ref,
         min_instances=min_instances,
         max_instances=max_instances,
         concurrency=concurrency,
@@ -743,6 +830,9 @@ def _confirm_mutations(cli_context: CLIContext, *, config: ResolvedDeployConfig)
             f"project: {config.project_id}",
             f"region: {config.region}",
             f"service: {config.service_name}",
+            f"runtime_source: {config.runtime_source}",
+            f"image_source_mode: {config.image_source_mode}",
+            f"published_release_tag: {config.published_release_tag}" if config.published_release_tag else "",
             f"artifact_repo: {config.artifact_repository}",
             f"sql_instance: {config.sql_instance_name}",
             f"bucket: {config.bucket_name}",
@@ -814,12 +904,22 @@ def _ensure_runtime_service_account(*, adapters: GCPAdapters, config: ResolvedDe
 
 
 def _ensure_artifact_repository(*, adapters: GCPAdapters, config: ResolvedDeployConfig):
-    result = adapters.artifact_registry.create_repository(
-        project_id=config.project_id,
-        region=config.region,
-        repository=config.artifact_repository,
-        description="PortWorld backend images",
-    )
+    if config.image_source_mode == IMAGE_SOURCE_MODE_PUBLISHED_RELEASE:
+        result = adapters.artifact_registry.create_remote_repository(
+            project_id=config.project_id,
+            region=config.region,
+            repository=config.artifact_repository,
+            description=PUBLISHED_REMOTE_REPOSITORY_DESCRIPTION,
+            remote_description=PUBLISHED_REMOTE_REPOSITORY_CONFIG_DESCRIPTION,
+            remote_docker_repo=GHCR_REMOTE_DOCKER_REPO,
+        )
+    else:
+        result = adapters.artifact_registry.create_repository(
+            project_id=config.project_id,
+            region=config.region,
+            repository=config.artifact_repository,
+            description="PortWorld backend images",
+        )
     if not result.ok:
         raise DeployStageError(
             stage="artifact_registry_setup",
@@ -1250,6 +1350,10 @@ def _build_success_message(
             ("region", config.region),
             ("service_name", config.service_name),
             ("service_url", service_url),
+            ("runtime_source", config.runtime_source),
+            ("image_source_mode", config.image_source_mode),
+            ("published_release_tag", config.published_release_tag),
+            ("published_image_ref", config.published_image_ref),
             ("image", image_uri),
             ("artifact_repository", config.artifact_repository),
             ("cloud_sql_instance", config.sql_instance_name),

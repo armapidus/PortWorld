@@ -12,11 +12,15 @@ class DeployState:
     project_id: str | None
     region: str | None
     service_name: str | None
+    runtime_source: str | None
+    image_source_mode: str | None
     artifact_repository: str | None
     cloud_sql_instance: str | None
     database_name: str | None
     bucket_name: str | None
     image: str | None
+    published_release_tag: str | None
+    published_image_ref: str | None
     service_url: str | None
     service_account_email: str | None
     last_deployed_at_ms: int | None
@@ -35,11 +39,15 @@ class DeployState:
             project_id=_read_str("project_id"),
             region=_read_str("region"),
             service_name=_read_str("service_name"),
+            runtime_source=_read_str("runtime_source"),
+            image_source_mode=_read_str("image_source_mode"),
             artifact_repository=_read_str("artifact_repository"),
             cloud_sql_instance=_read_str("cloud_sql_instance"),
             database_name=_read_str("database_name"),
             bucket_name=_read_str("bucket_name"),
             image=_read_str("image"),
+            published_release_tag=_read_str("published_release_tag"),
+            published_image_ref=_read_str("published_image_ref"),
             service_url=_read_str("service_url"),
             service_account_email=_read_str("service_account_email"),
             last_deployed_at_ms=(
@@ -56,11 +64,15 @@ class DeployState:
             ("project_id", self.project_id),
             ("region", self.region),
             ("service_name", self.service_name),
+            ("runtime_source", self.runtime_source),
+            ("image_source_mode", self.image_source_mode),
             ("artifact_repository", self.artifact_repository),
             ("cloud_sql_instance", self.cloud_sql_instance),
             ("database_name", self.database_name),
             ("bucket_name", self.bucket_name),
             ("image", self.image),
+            ("published_release_tag", self.published_release_tag),
+            ("published_image_ref", self.published_image_ref),
             ("service_url", self.service_url),
             ("service_account_email", self.service_account_email),
             ("last_deployed_at_ms", self.last_deployed_at_ms),

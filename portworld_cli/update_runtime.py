@@ -13,7 +13,6 @@ from urllib.request import Request, urlopen
 from backend import __version__
 from portworld_cli.config_runtime import (
     ConfigRuntimeError,
-    ensure_source_runtime_session,
     load_config_session,
 )
 from portworld_cli.context import CLIContext
@@ -113,10 +112,7 @@ def run_update_deploy(
 ) -> CommandResult:
     try:
         session = load_inspection_session(cli_context)
-        ensure_source_runtime_session(
-            load_config_session(cli_context),
-            command_name=UPDATE_DEPLOY_COMMAND_NAME,
-        )
+        load_config_session(cli_context)
     except ProjectRootResolutionError as exc:
         return _failure_result(UPDATE_DEPLOY_COMMAND_NAME, exc, exit_code=1)
     except (
