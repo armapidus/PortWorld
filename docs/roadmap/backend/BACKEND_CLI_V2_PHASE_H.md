@@ -164,13 +164,32 @@ These stages are intentionally deferred. They extend the Phase H packaging/relea
   - Release assets now include a `backend-image-manifest.json` file that records the canonical GHCR reference and pushed digest.
   - H+1 intentionally publishes the runtime artifact only; deploy/runtime mode switching remains deferred to H+2+.
 
-### Stage H+2. Introduce CLI runtime modes
+### Stage H+2. Introduce CLI runtime modes - done
 
 - Add explicit runtime source mode in CLI config:
-  - `source` (current behavior, repo-backed)
-  - `published` (zero-clone behavior, image-backed)
+  - `source` (repo-backed)
+  - `published` (workspace-backed, zero-clone plumbing baseline)
 - Keep current commands and flags; mode controls internal resolution only.
 - Preserve compatibility for existing repo users by defaulting to `source` when repo markers are present.
+- Implementation notes:
+  - `.portworld/project.json` is now schema version `2` and persists `runtime_source`.
+  - `runtime_source` is surfaced in `portworld config show` and `portworld status`, alongside `effective_runtime_source` and legacy-derivation metadata.
+  - `portworld init --runtime-source ...` and `portworld config edit cloud --runtime-source ...` are now the public write paths for this setting.
+  - Workspace-aware commands now accept either a source checkout or a generic workspace containing `.portworld/project.json`:
+    - `config show`
+    - `config edit cloud`
+    - `status`
+    - `logs gcp-cloud-run`
+    - `doctor --target gcp-cloud-run`
+  - Source-only commands now fail fast with explicit guidance when `runtime_source=published`:
+    - `init`
+    - `config edit providers`
+    - `config edit security`
+    - `doctor --target local`
+    - `deploy gcp-cloud-run`
+    - `update deploy`
+    - `ops ...`
+  - This stage adds the runtime-source plumbing only. It does not yet create zero-clone workspaces or switch deploys to published images; those remain H+3/H+4 work.
 
 ### Stage H+3. Zero-clone workspace bootstrap
 
