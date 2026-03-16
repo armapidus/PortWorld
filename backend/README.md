@@ -48,6 +48,20 @@ uv tool install "portworld==<version>"
 portworld init
 ```
 
+TestPyPI beta validation note:
+
+- The TestPyPI project page currently shows a bare `pip install -i https://test.pypi.org/simple/ portworld` command.
+- That command can fail for `portworld`, because TestPyPI does not necessarily host every transitive dependency.
+- For TestPyPI validation, use one of these instead:
+
+```bash
+pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "portworld==<version>"
+```
+
+```bash
+uv tool install --default-index https://test.pypi.org/simple --index https://pypi.org/simple "portworld==<version>"
+```
+
 Source-checkout contributor path:
 
 ```bash
