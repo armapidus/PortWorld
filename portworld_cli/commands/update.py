@@ -5,7 +5,7 @@ import click
 from portworld_cli.context import CLIContext
 from portworld_cli.deploy_runtime import DeployGCPCloudRunOptions
 from portworld_cli.output import exit_with_result
-from portworld_cli.update_runtime import run_update_cli, run_update_deploy
+from portworld_cli.services.update import run_update_cli, run_update_deploy
 
 
 @click.group("update")

@@ -5,13 +5,13 @@ from pathlib import Path
 import click
 
 from portworld_cli.context import CLIContext
-from portworld_cli.ops_runtime import (
+from portworld_cli.output import exit_with_result
+from portworld_cli.services.ops import (
     run_bootstrap_storage,
     run_check_config,
     run_export_memory,
     run_migrate_storage_layout,
 )
-from portworld_cli.output import exit_with_result
 
 
 @click.group("ops")

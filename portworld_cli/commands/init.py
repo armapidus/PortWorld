@@ -3,8 +3,8 @@ from __future__ import annotations
 import click
 
 from portworld_cli.context import CLIContext
-from portworld_cli.init_runtime import InitOptions, run_init
 from portworld_cli.output import exit_with_result
+from portworld_cli.services.init import InitOptions, run_init
 
 
 @click.command("init")

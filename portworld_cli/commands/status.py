@@ -4,7 +4,7 @@ import click
 
 from portworld_cli.context import CLIContext
 from portworld_cli.output import exit_with_result
-from portworld_cli.status_runtime import run_status
+from portworld_cli.services.status import run_status
 
 
 @click.command("status")
