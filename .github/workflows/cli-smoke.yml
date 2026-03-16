@@ -5,6 +5,35 @@ on:
   pull_request:
 
 jobs:
+  tag-version-check:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate tag matches backend version
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os
+          from backend import __version__
+
+          tag = os.environ["GITHUB_REF_NAME"].strip()
+          expected = f"v{__version__}"
+          if tag != expected:
+              raise SystemExit(
+                  f"Tag/version mismatch: git tag is {tag}, backend.__version__ expects {expected}"
+              )
+          print(f"Tag/version check passed: {tag}")
+          PY
+
   cli-smoke:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -45,3 +74,9 @@ jobs:
           PORTWORLD_NON_INTERACTIVE=1 \
           bash install.sh --no-init --non-interactive
           portworld --help
+
+      - name: Package build smoke
+        run: |
+          python -m pip install --user build twine
+          python -m build
+          python -m twine check dist/*
