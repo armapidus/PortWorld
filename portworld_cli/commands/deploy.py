@@ -3,10 +3,10 @@ from __future__ import annotations
 import click
 
 from portworld_cli.context import CLIContext
-from portworld_cli.deploy_runtime import (
+from portworld_cli.deploy.config import (
     DeployGCPCloudRunOptions,
-    run_deploy_gcp_cloud_run,
 )
+from portworld_cli.deploy.service import run_deploy_gcp_cloud_run
 from portworld_cli.output import exit_with_result
 
 

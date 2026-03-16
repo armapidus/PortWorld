@@ -3,7 +3,7 @@ from __future__ import annotations
 import click
 
 from portworld_cli.context import CLIContext
-from portworld_cli.deploy_runtime import DeployGCPCloudRunOptions
+from portworld_cli.deploy.config import DeployGCPCloudRunOptions
 from portworld_cli.output import exit_with_result
 from portworld_cli.services.update import run_update_cli, run_update_deploy
 
