@@ -7,10 +7,12 @@
   Locked choices:
 
 - Installer URL now: raw GitHub script URL (until custom domain exists)
-- Bootstrap behavior: conservative (auto-install pipx, but do not auto-install Python/system tools)
+- Bootstrap behavior: `uv`-managed
 - Release trigger: tag-driven (vX.Y.Z)
 - Prerelease lane: TestPyPI before PyPI
 - Package naming policy: prefer portworld; fallback to portworld-cli if unavailable
+- Public installer package source: PyPI
+- Standard public tool manager: `uv` (`pipx` remains legacy/source-checkout only)
 
 ## Implementation Changes
 
@@ -33,7 +35,7 @@
 - Keep dynamic version from backend.__version__ and enforce tag/version consistency in CI.
 - Ensure python -m build creates valid sdist and wheel for the selected package name.
 
-### 3. GitHub Actions release pipeline
+### 3. GitHub Actions release pipeline - done
 
 - Add/extend workflows:
       1. cli-smoke on PR/push (already present, keep and tighten)
@@ -46,39 +48,51 @@
       5. Publish same artifacts to PyPI (OIDC trusted publishing)
       6. Attach artifacts to GitHub Release
 - No publish on main pushes.
+- Implementation notes:
+  - `cli-smoke` ignores `v*` tags so tag releases have a single owner.
+  - TestPyPI smoke now uses `uv tool install` instead of `pipx install`.
+  - GitHub Release and PyPI both reuse the same built distributions artifact.
 
-### 4. Installer bootstrap behavior (install.sh)
+### 4. Installer bootstrap behavior (install.sh) - done
 
 - Replace hardcoded custom-domain URL with raw GitHub URL in help/output examples.
 - Keep current flags and add strict behavior guarantees:
   - --version <tag|latest>
   - --no-init
   - --non-interactive
-- Conservative bootstrap rules:
-  - If Python missing: fail with exact platform-specific install commands (macOS/Linux), no automatic Python install.
-  - If Python < 3.11: fail with upgrade instructions.
-  - If pipx missing: auto-install via python3 -m pip --user pipx.
+- Managed bootstrap rules:
+  - If `uv` is missing: install it from the official Astral bootstrap script.
+  - If Python is missing or < 3.11: install managed Python 3.11 with `uv`.
+  - If system Python is already >= 3.11: reuse it instead of forcing a managed download.
 - Install source selection:
-  - latest -> latest GitHub release tag
-  - pinned tag -> exact tag
+  - latest -> latest GitHub release tag -> matching PyPI package version
+  - pinned tag -> exact matching PyPI package version
   - manual override env vars kept for CI/testing only
 - Preserve terminal-only flow:
   - interactive TTY: install then run portworld init (unless disabled)
   - non-interactive/no TTY: install and print deterministic next steps
+- Implementation notes:
+  - The shell installer no longer requires `python3` as a starting prerequisite; `bash` and `curl` are enough.
+  - Internal smoke/test overrides now install through `uv tool install`, using editable mode for local directory overrides.
+  - The installer still keeps `--version`, `--no-init`, and `--non-interactive` unchanged.
 
-### 5. portworld update cli behavior
+### 5. portworld update cli behavior - done
 
 - Make update cli release-channel aware by install mode:
   - source checkout -> pipx install . --force
-  - PyPI install -> pipx upgrade <package-name>
-  - unknown/archive -> installer command + pinned fallback
+  - uv-managed public install -> uv tool upgrade <package-name>
+  - legacy pipx install -> installer command + pipx upgrade fallback
+  - unknown -> installer command + uv install fallback
 - Keep release lookup fields in JSON output:
   - target_version
   - release_lookup_status
   - update_available
 - Ensure commands no longer reference placeholder installer domains.
+- Implementation notes:
+  - `uv` runtime detection is based on the active interpreter path, so the CLI can distinguish `uv`-managed installs from `pipx` legacy installs.
+  - This pulls part of the old “later” PyPI-first install/update story forward so the installer and `update cli` remain coherent.
 
-### 6. CLI-facing docs (not root README)
+### 6. CLI-facing docs (not root README) - done
 
 - Update:
   - backend/README.md
@@ -86,10 +100,13 @@
   - docs/CLI_RELEASE_PROCESS.md
 - Document:
   - official install command using raw GitHub script URL
-  - PyPI install/upgrade commands
+  - `uv`-managed install/upgrade commands
   - tag-driven release policy
-  - troubleshooting for Python/pipx prerequisites
+  - troubleshooting for `uv` / Python bootstrap behavior
 - Keep root README.md out of scope for this phase.
+- Implementation notes:
+  - Public docs now treat `uv` as the standard install/update path.
+  - `pipx` remains documented only as a source-checkout developer path, not the primary public path.
 
 ## Test Plan and Acceptance
 
@@ -105,9 +122,9 @@
 
 ### Manual acceptance
 
-- curl ... | bash works from a clean macOS/Linux shell with Python 3.11+
-- installer failure messages are actionable when Python is missing/too old
-- pipx install <package-name> and pipx upgrade <package-name> are the canonical public paths
+- curl ... | bash works from a clean macOS/Linux shell with bash + curl only
+- installer bootstraps `uv` and managed Python when needed
+- uv tool install <package-name> and uv tool upgrade <package-name> are the canonical public paths
 - portworld update cli recommendations match actual release channel and package name
 - no remaining public docs/reference strings point to placeholder installer domains
 
@@ -117,6 +134,15 @@
 - You will configure GitHub OIDC trusted publishing in both PyPI and TestPyPI.
 - If portworld is unavailable, the active published name switches to portworld-cli and docs/installer/update messaging follow that configured name.
 - Website docs can be updated after this phase; Phase H ensures terminal/install/release mechanics are correct first.
+
+## Implementation Notes
+
+- Step 4 intentionally pulled part of the old “installer default to PyPI” direction forward. Once `uv` became the bootstrap/runtime manager, keeping `pipx` as the public update path would have created an inconsistent install story.
+- The public standard is now:
+  - installer -> `uv` bootstrap
+  - Python runtime -> system Python if >= 3.11, otherwise managed Python from `uv`
+  - CLI install/update -> PyPI package via `uv tool install` / `uv tool upgrade`
+- Source-checkout contributor installs remain `pipx install . --force` for now. That is a developer workflow, not the public operator path.
 
 ## Later Stages (Post-Phase H): Zero-Clone Operator Model
 
