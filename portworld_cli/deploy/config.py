@@ -7,10 +7,6 @@ import re
 
 import click
 
-from portworld_cli.config_runtime import (
-    ConfigSession,
-    load_config_session,
-)
 from portworld_cli.context import CLIContext
 from portworld_cli.deploy_artifacts import (
     IMAGE_NAME,
@@ -36,6 +32,8 @@ from portworld_cli.project_config import (
     RUNTIME_SOURCE_SOURCE,
     ProjectConfig,
 )
+from portworld_cli.workspace.session import WorkspaceSession as ConfigSession
+from portworld_cli.workspace.session import load_workspace_session
 
 from portworld_cli.deploy.published import resolve_published_image_selection
 from portworld_cli.deploy.source import resolve_source_image_tag
@@ -111,7 +109,7 @@ class ResolvedDeployConfig:
 
 
 def load_deploy_session(cli_context: CLIContext) -> ConfigSession:
-    session = load_config_session(cli_context)
+    session = load_workspace_session(cli_context)
     if session.env_path is None or not session.env_path.is_file():
         if session.effective_runtime_source == RUNTIME_SOURCE_PUBLISHED:
             raise DeployStageError(

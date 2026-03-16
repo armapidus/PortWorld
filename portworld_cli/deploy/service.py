@@ -12,7 +12,6 @@ from typing import Any, Iterator
 import click
 import httpx
 
-from portworld_cli.config_runtime import ConfigRuntimeError
 from portworld_cli.context import CLIContext
 from portworld_cli.deploy.config import (
     DeployGCPCloudRunOptions,
@@ -49,6 +48,7 @@ from portworld_cli.paths import ProjectRootResolutionError
 from portworld_cli.project_config import (
     ProjectConfigError,
 )
+from portworld_cli.services.config.errors import ConfigRuntimeError
 from portworld_cli.state import CLIStateDecodeError, CLIStateTypeError
 
 DEFAULT_TIMEOUT = "3600s"
