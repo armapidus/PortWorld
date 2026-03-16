@@ -7,7 +7,7 @@ import click
 
 from portworld_cli.context import CLIContext
 from portworld_cli.output import CommandResult
-from portworld_cli.project_config import ProjectConfig
+from portworld_cli.workspace.project_config import ProjectConfig
 from portworld_cli.workspace.session import WorkspaceSession as ConfigSession
 from portworld_cli.workspace.session import load_workspace_session, require_source_workspace_session
 from portworld_cli.services.common import ErrorMappingPolicy, map_command_exception

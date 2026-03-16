@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from portworld_cli.envfile import EnvWriteResult
-from portworld_cli.project_config import GCPCloudRunConfig, ProjectConfig
+from portworld_cli.workspace.project_config import GCPCloudRunConfig, ProjectConfig
 from portworld_cli.workspace.session import SecretReadiness
 
 

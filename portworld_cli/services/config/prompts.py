@@ -5,7 +5,7 @@ import secrets
 import click
 
 from portworld_cli.context import CLIContext
-from portworld_cli.project_config import DEFAULT_BACKEND_PROFILE
+from portworld_cli.workspace.project_config import DEFAULT_BACKEND_PROFILE
 from portworld_cli.services.config.errors import ConfigUsageError, ConfigValidationError
 from portworld_cli.services.config.types import ProviderEditOptions, SecurityEditOptions
 

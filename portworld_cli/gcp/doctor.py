@@ -16,7 +16,7 @@ from portworld_cli.gcp import (
 )
 from portworld_cli.output import DiagnosticCheck
 from portworld_cli.paths import ProjectPaths
-from portworld_cli.project_config import (
+from portworld_cli.workspace.project_config import (
     DEFAULT_GCP_ARTIFACT_REPOSITORY,
     DEFAULT_GCP_REGION,
     RUNTIME_SOURCE_PUBLISHED,

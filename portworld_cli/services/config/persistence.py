@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from portworld_cli.envfile import EnvWriteResult, parse_env_file, write_canonical_env
-from portworld_cli.project_config import (
+from portworld_cli.workspace.project_config import (
     ProjectConfig,
     build_env_overrides_from_project_config,
     write_project_config,

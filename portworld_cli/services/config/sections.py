@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import click
 
-from portworld_cli.project_config import (
+from portworld_cli.workspace.project_config import (
     CLOUD_PROVIDER_GCP,
     GCP_CLOUD_RUN_TARGET,
     PROJECT_MODE_LOCAL,

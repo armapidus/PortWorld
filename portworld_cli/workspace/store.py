@@ -5,7 +5,7 @@ from typing import Any
 
 from portworld_cli.envfile import EnvTemplate, ParsedEnvFile, load_env_template, parse_env_file
 from portworld_cli.paths import ProjectPaths, WorkspacePaths
-from portworld_cli.project_config import (
+from portworld_cli.workspace.project_config import (
     ProjectConfig,
     RUNTIME_SOURCE_PUBLISHED,
     RUNTIME_SOURCE_SOURCE,
@@ -13,7 +13,7 @@ from portworld_cli.project_config import (
     load_project_config_record,
 )
 from portworld_cli.published_workspace import load_published_env_template
-from portworld_cli.state import read_json_state
+from portworld_cli.workspace.state_store import read_json_state
 
 
 @dataclass(frozen=True, slots=True)

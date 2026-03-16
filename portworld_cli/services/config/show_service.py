@@ -4,9 +4,9 @@ from portworld_cli.context import CLIContext
 from portworld_cli.envfile import EnvFileParseError
 from portworld_cli.output import CommandResult
 from portworld_cli.paths import ProjectRootResolutionError
-from portworld_cli.project_config import ProjectConfigError, RUNTIME_SOURCE_PUBLISHED
+from portworld_cli.workspace.project_config import ProjectConfigError, RUNTIME_SOURCE_PUBLISHED
 from portworld_cli.services.common import ErrorMappingPolicy, map_command_exception
-from portworld_cli.state import CLIStateDecodeError, CLIStateTypeError
+from portworld_cli.workspace.state_store import CLIStateDecodeError, CLIStateTypeError
 from portworld_cli.workspace.session import load_workspace_session
 
 from portworld_cli.services.config.messages import build_config_show_message

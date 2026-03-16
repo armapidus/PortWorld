@@ -16,7 +16,7 @@ from portworld_cli.deploy.config import DeployGCPCloudRunOptions
 from portworld_cli.deploy.service import run_deploy_gcp_cloud_run
 from portworld_cli.output import CommandResult, format_key_value_lines
 from portworld_cli.paths import ProjectPaths, ProjectRootResolutionError, resolve_project_paths
-from portworld_cli.project_config import GCP_CLOUD_RUN_TARGET
+from portworld_cli.workspace.project_config import GCP_CLOUD_RUN_TARGET
 from portworld_cli.release_identity import (
     INSTALLER_SCRIPT_URL,
     LATEST_RELEASE_API_URL,

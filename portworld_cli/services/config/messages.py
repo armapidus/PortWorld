@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from portworld_cli.output import format_key_value_lines
-from portworld_cli.project_config import ProjectConfig, RUNTIME_SOURCE_PUBLISHED
+from portworld_cli.workspace.project_config import ProjectConfig, RUNTIME_SOURCE_PUBLISHED
 from portworld_cli.services.config.prompts import (
     normalize_backend_profile,
     presence_label,

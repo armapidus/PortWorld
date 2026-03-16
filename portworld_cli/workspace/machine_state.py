@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from portworld_cli.state import read_json_state, write_json_state
+from portworld_cli.workspace.state_store import read_json_state, write_json_state
 
 
 MACHINE_STATE_SCHEMA_VERSION = 1

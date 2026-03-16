@@ -14,7 +14,7 @@ from portworld_cli.workspace.session import (
     resolve_gcp_inspection_target,
 )
 from portworld_cli.output import format_key_value_lines
-from portworld_cli.project_config import GCP_CLOUD_RUN_TARGET
+from portworld_cli.workspace.project_config import GCP_CLOUD_RUN_TARGET
 
 
 LIVE_PROBE_TIMEOUT_SECONDS = 3.0

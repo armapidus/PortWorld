@@ -22,7 +22,7 @@ from portworld_cli.envfile import (
     write_canonical_env,
 )
 from portworld_cli.paths import ProjectPaths, WorkspacePaths
-from portworld_cli.project_config import ProjectConfig, write_project_config
+from portworld_cli.workspace.project_config import ProjectConfig, write_project_config
 from portworld_cli.release_identity import LATEST_RELEASE_API_URL, REPO_OWNER
 
 
