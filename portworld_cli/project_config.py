@@ -6,6 +6,11 @@ import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
+from portworld_cli.deploy_artifacts import (
+    IMAGE_SOURCE_MODE_PUBLISHED_RELEASE,
+    PUBLISHED_ARTIFACT_REPOSITORY_SUFFIX,
+)
+
 
 SCHEMA_VERSION = 3
 PROJECT_MODE_LOCAL = "local"
@@ -423,8 +428,16 @@ def derive_project_config(
     remembered_project_id = _coerce_optional_text(remembered_state.get("project_id"))
     remembered_region = _coerce_optional_text(remembered_state.get("region"))
     remembered_service_name = _coerce_optional_text(remembered_state.get("service_name"))
-    remembered_artifact_repository = _coerce_optional_text(
-        remembered_state.get("artifact_repository")
+    remembered_artifact_repository = _resolve_remembered_artifact_repository(
+        artifact_repository_base=_coerce_optional_text(
+            remembered_state.get("artifact_repository_base")
+        ),
+        artifact_repository=_coerce_optional_text(
+            remembered_state.get("artifact_repository")
+        ),
+        image_source_mode=_coerce_optional_text(
+            remembered_state.get("image_source_mode")
+        ),
     )
     remembered_sql_instance = _coerce_optional_text(
         remembered_state.get("cloud_sql_instance")
@@ -667,3 +680,23 @@ def _parse_csv_values(
 
 def _bool_env_value(value: bool) -> str:
     return "true" if value else "false"
+
+
+def _resolve_remembered_artifact_repository(
+    *,
+    artifact_repository_base: str | None,
+    artifact_repository: str | None,
+    image_source_mode: str | None,
+) -> str | None:
+    if artifact_repository_base:
+        return artifact_repository_base
+    if artifact_repository is None:
+        return None
+    if (
+        image_source_mode == IMAGE_SOURCE_MODE_PUBLISHED_RELEASE
+        and artifact_repository.endswith(PUBLISHED_ARTIFACT_REPOSITORY_SUFFIX)
+    ):
+        stripped = artifact_repository[: -len(PUBLISHED_ARTIFACT_REPOSITORY_SUFFIX)].strip()
+        if stripped:
+            return stripped
+    return artifact_repository

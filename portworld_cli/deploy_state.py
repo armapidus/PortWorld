@@ -15,6 +15,7 @@ class DeployState:
     runtime_source: str | None
     image_source_mode: str | None
     artifact_repository: str | None
+    artifact_repository_base: str | None
     cloud_sql_instance: str | None
     database_name: str | None
     bucket_name: str | None
@@ -42,6 +43,7 @@ class DeployState:
             runtime_source=_read_str("runtime_source"),
             image_source_mode=_read_str("image_source_mode"),
             artifact_repository=_read_str("artifact_repository"),
+            artifact_repository_base=_read_str("artifact_repository_base"),
             cloud_sql_instance=_read_str("cloud_sql_instance"),
             database_name=_read_str("database_name"),
             bucket_name=_read_str("bucket_name"),
@@ -67,6 +69,7 @@ class DeployState:
             ("runtime_source", self.runtime_source),
             ("image_source_mode", self.image_source_mode),
             ("artifact_repository", self.artifact_repository),
+            ("artifact_repository_base", self.artifact_repository_base),
             ("cloud_sql_instance", self.cloud_sql_instance),
             ("database_name", self.database_name),
             ("bucket_name", self.bucket_name),
