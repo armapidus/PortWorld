@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
 from importlib import resources
 from pathlib import Path
 import re
@@ -11,7 +10,6 @@ import tempfile
 import time
 from typing import Any
 from urllib.error import URLError
-from urllib.request import Request, urlopen
 
 from backend import __version__
 from portworld_cli.envfile import (
@@ -22,8 +20,9 @@ from portworld_cli.envfile import (
     write_canonical_env,
 )
 from portworld_cli.paths import ProjectPaths, WorkspacePaths
+from portworld_cli.release.identity import REPO_OWNER
+from portworld_cli.release.lookup import extract_latest_release_tag, fetch_latest_release_payload
 from portworld_cli.workspace.project_config import ProjectConfig, write_project_config
-from portworld_cli.release_identity import LATEST_RELEASE_API_URL, REPO_OWNER
 
 
 DEFAULT_STACK_NAME = "default"
@@ -252,27 +251,19 @@ def coerce_backend_cli_payload(
 
 
 def _lookup_latest_release_tag() -> str:
-    request = Request(
-        LATEST_RELEASE_API_URL,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "portworld-cli",
-        },
-    )
     try:
-        with urlopen(request, timeout=10.0) as response:
-            payload = json.load(response)
+        payload = fetch_latest_release_payload()
     except (URLError, TimeoutError) as exc:
         raise PublishedWorkspaceError(
             "Failed to resolve the latest PortWorld release tag from GitHub."
         ) from exc
 
-    if not isinstance(payload, dict):
+    tag_name = extract_latest_release_tag(payload)
+    if tag_name is None and not isinstance(payload, dict):
         raise PublishedWorkspaceError("GitHub release lookup returned an unexpected response.")
-    tag_name = payload.get("tag_name")
-    if not isinstance(tag_name, str) or not tag_name.strip():
+    if tag_name is None:
         raise PublishedWorkspaceError("GitHub release lookup did not include a usable tag_name.")
-    return tag_name.strip()
+    return tag_name
 
 
 def _write_text_file(path: Path, content: str, *, force: bool) -> Path | None:

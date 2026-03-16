@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import json
-import re
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 import shutil
 import subprocess
 from urllib.error import URLError
-from urllib.request import Request, urlopen
 
 from backend import __version__
 from portworld_cli.context import CLIContext
@@ -16,13 +13,20 @@ from portworld_cli.deploy.config import DeployGCPCloudRunOptions
 from portworld_cli.deploy.service import run_deploy_gcp_cloud_run
 from portworld_cli.output import CommandResult, format_key_value_lines
 from portworld_cli.paths import ProjectPaths, ProjectRootResolutionError, resolve_project_paths
-from portworld_cli.workspace.project_config import GCP_CLOUD_RUN_TARGET
-from portworld_cli.release_identity import (
+from portworld_cli.release.identity import (
     INSTALLER_SCRIPT_URL,
     LATEST_RELEASE_API_URL,
     active_pypi_package_name,
     package_name_candidates,
 )
+from portworld_cli.release.lookup import (
+    ReleaseLookupResult,
+    compare_numeric_versions,
+    extract_latest_release_tag,
+    fetch_latest_release_payload,
+    normalize_numeric_package_version,
+)
+from portworld_cli.workspace.project_config import GCP_CLOUD_RUN_TARGET
 from portworld_cli.services.common import ErrorMappingPolicy, map_command_exception
 from portworld_cli.workspace.session import load_inspection_session, load_workspace_session
 
@@ -44,13 +48,6 @@ SELF_HOST_DOCS_HINT = "See backend/README.md and docs/BACKEND_SELF_HOSTING.md."
 
 class UpdateUsageError(RuntimeError):
     pass
-
-
-@dataclass(frozen=True, slots=True)
-class ReleaseLookupResult:
-    status: str
-    target_version: str | None
-    update_available: bool | None
 
 
 def run_update_cli(cli_context: CLIContext) -> CommandResult:
@@ -176,7 +173,7 @@ def _detect_cli_update_mode(
 
     package_name = active_pypi_package_name()
     release_lookup = _lookup_latest_release()
-    normalized_target_version = _normalize_package_version(release_lookup.target_version)
+    normalized_target_version = normalize_numeric_package_version(release_lookup.target_version)
 
     if _detect_uv_tool_runtime():
         recommended_commands = [
@@ -310,54 +307,15 @@ def _payload_has_supported_pypi_package(payload: object) -> bool:
 
 
 def _lookup_latest_release() -> ReleaseLookupResult:
-    request = Request(
-        LATEST_RELEASE_API_URL,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "portworld-cli",
-        },
-    )
     try:
-        with urlopen(request, timeout=10.0) as response:
-            payload = json.load(response)
+        payload = fetch_latest_release_payload(api_url=LATEST_RELEASE_API_URL)
     except (OSError, URLError, TimeoutError, json.JSONDecodeError):
         return ReleaseLookupResult(status="error", target_version=None, update_available=None)
-    if not isinstance(payload, dict):
+    target_version = extract_latest_release_tag(payload)
+    if target_version is None:
         return ReleaseLookupResult(status="error", target_version=None, update_available=None)
-    target_version = payload.get("tag_name")
-    if not isinstance(target_version, str) or not target_version.strip():
-        return ReleaseLookupResult(status="error", target_version=None, update_available=None)
-    normalized_target = target_version.strip()
     return ReleaseLookupResult(
         status="ok",
-        target_version=normalized_target,
-        update_available=_compare_versions(__version__, normalized_target),
+        target_version=target_version,
+        update_available=compare_numeric_versions(__version__, target_version),
     )
-
-
-def _compare_versions(current_version: str, target_version: str) -> bool | None:
-    current_parts = _parse_version_parts(current_version)
-    target_parts = _parse_version_parts(target_version)
-    if current_parts is None or target_parts is None:
-        return None
-    return target_parts > current_parts
-
-
-def _parse_version_parts(value: str) -> tuple[int, ...] | None:
-    normalized = value.strip()
-    if normalized.startswith("v"):
-        normalized = normalized[1:]
-    if not re.fullmatch(r"\d+(?:\.\d+)*", normalized):
-        return None
-    return tuple(int(part) for part in normalized.split("."))
-
-
-def _normalize_package_version(value: str | None) -> str | None:
-    if not isinstance(value, str):
-        return None
-    normalized = value.strip()
-    if normalized.startswith("v"):
-        normalized = normalized[1:]
-    if not re.fullmatch(r"\d+(?:\.\d+)*", normalized):
-        return None
-    return normalized
