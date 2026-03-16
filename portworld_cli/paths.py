@@ -16,6 +16,46 @@ class ProjectRootResolutionError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class WorkspacePaths:
+    workspace_root: Path
+    cli_dir: Path
+    project_config_file: Path
+    cli_state_dir: Path
+    gcp_cloud_run_state_file: Path
+    source_project_paths: ProjectPaths | None
+
+    @classmethod
+    def from_root(cls, workspace_root: Path) -> "WorkspacePaths":
+        root = workspace_root.resolve()
+        source_project_paths: ProjectPaths | None = None
+        candidate = ProjectPaths.from_root(root)
+        if not candidate.missing_required_markers():
+            source_project_paths = candidate
+        return cls(
+            workspace_root=root,
+            cli_dir=root / ".portworld",
+            project_config_file=root / ".portworld" / "project.json",
+            cli_state_dir=root / ".portworld" / "state",
+            gcp_cloud_run_state_file=root / ".portworld" / "state" / "gcp-cloud-run.json",
+            source_project_paths=source_project_paths,
+        )
+
+    def has_workspace_config(self) -> bool:
+        return self.project_config_file.is_file()
+
+    def has_source_checkout(self) -> bool:
+        return self.source_project_paths is not None
+
+    def require_source_project_paths(self) -> ProjectPaths:
+        if self.source_project_paths is None:
+            raise ProjectRootResolutionError(
+                "This command requires a PortWorld source checkout with "
+                "backend/Dockerfile, backend/.env.example, and docker-compose.yml."
+            )
+        return self.source_project_paths
+
+
+@dataclass(frozen=True, slots=True)
 class ProjectPaths:
     project_root: Path
     backend_dir: Path
@@ -95,4 +135,32 @@ def resolve_project_paths(*, explicit_root: Path | None = None, start: Path | No
     raise ProjectRootResolutionError(
         "Could not find the PortWorld project root from the current directory. "
         f"Expected to find: {markers}. Use --project-root to point at the repo root."
+    )
+
+
+def resolve_workspace_paths(
+    *,
+    explicit_root: Path | None = None,
+    start: Path | None = None,
+) -> WorkspacePaths:
+    if explicit_root is not None:
+        workspace = WorkspacePaths.from_root(explicit_root)
+        if workspace.has_source_checkout() or workspace.has_workspace_config():
+            return workspace
+        raise ProjectRootResolutionError(
+            f"{workspace.workspace_root} is not a valid PortWorld workspace. "
+            "Expected either a source checkout or .portworld/project.json."
+        )
+
+    current = (start or Path.cwd()).resolve()
+    candidates = (current,) + tuple(current.parents)
+    for candidate in candidates:
+        workspace = WorkspacePaths.from_root(candidate)
+        if workspace.has_source_checkout() or workspace.has_workspace_config():
+            return workspace
+
+    raise ProjectRootResolutionError(
+        "Could not find a PortWorld workspace from the current directory. "
+        "Expected either a source checkout or .portworld/project.json. "
+        "Use --project-root to point at the workspace root."
     )

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 import shutil
 import subprocess
 
@@ -10,11 +9,16 @@ from backend.bootstrap.runtime import (
     build_backend_storage,
     collect_doctor_runtime_details,
 )
+from portworld_cli.config_runtime import (
+    ConfigRuntimeError,
+    ensure_source_runtime_session,
+    load_config_session,
+)
 from portworld_cli.context import CLIContext
 from portworld_cli.gcp.doctor import evaluate_gcp_cloud_run_readiness
 from portworld_cli.output import CommandResult, DiagnosticCheck, format_key_value_lines
 from portworld_cli.paths import ProjectPaths, ProjectRootResolutionError
-from portworld_cli.project_config import ProjectConfigError, load_project_config
+from portworld_cli.project_config import ProjectConfigError
 from backend.core.settings import Settings, load_environment_files
 from backend.realtime.factory import RealtimeProviderFactory
 from backend.tools.runtime import RealtimeToolingRuntime
@@ -52,7 +56,13 @@ def _run_local_doctor(cli_context: CLIContext, *, full: bool) -> CommandResult:
     details: DoctorRuntimeDetails | None = None
 
     try:
-        paths = cli_context.resolve_project_paths()
+        config_session = load_config_session(cli_context)
+        config_session = ensure_source_runtime_session(
+            config_session,
+            command_name="portworld doctor --target local",
+        )
+        paths = config_session.project_paths
+        assert paths is not None
         project_root = str(paths.project_root)
         checks.append(
             DiagnosticCheck(
@@ -85,6 +95,26 @@ def _run_local_doctor(cli_context: CLIContext, *, full: bool) -> CommandResult:
                 ),
             ),
             exit_code=1,
+        )
+    except (
+        CLIStateDecodeError,
+        CLIStateTypeError,
+        EnvFileParseError,
+        ProjectConfigError,
+        ConfigRuntimeError,
+    ) as exc:
+        return CommandResult(
+            ok=False,
+            command=COMMAND_NAME,
+            message=str(exc),
+            data={
+                "target": "local",
+                "project_root": None,
+                "full": full,
+                "status": "error",
+                "error_type": type(exc).__name__,
+            },
+            exit_code=2,
         )
 
     env_exists = paths.env_file.is_file()
@@ -341,22 +371,7 @@ def _run_gcp_cloud_run_doctor(
     options: DoctorOptions,
 ) -> CommandResult:
     try:
-        paths = cli_context.resolve_project_paths()
-        project_config = load_project_config(paths.project_config_file)
-    except ProjectConfigError as exc:
-        return CommandResult(
-            ok=False,
-            command=COMMAND_NAME,
-            message=str(exc),
-            data={
-                "target": options.target,
-                "project_root": str(paths.project_root),
-                "full": options.full,
-                "status": "error",
-                "error_type": type(exc).__name__,
-            },
-            exit_code=2,
-        )
+        session = load_config_session(cli_context)
     except ProjectRootResolutionError as exc:
         return CommandResult(
             ok=False,
@@ -384,22 +399,45 @@ def _run_gcp_cloud_run_doctor(
             ),
             exit_code=1,
         )
+    except (
+        CLIStateDecodeError,
+        CLIStateTypeError,
+        EnvFileParseError,
+        ProjectConfigError,
+        ConfigRuntimeError,
+    ) as exc:
+        return CommandResult(
+            ok=False,
+            command=COMMAND_NAME,
+            message=str(exc),
+            data={
+                "target": options.target,
+                "workspace_root": None,
+                "project_root": None,
+                "full": options.full,
+                "status": "error",
+                "error_type": type(exc).__name__,
+            },
+            exit_code=2,
+        )
 
     evaluation = evaluate_gcp_cloud_run_readiness(
-        paths,
+        source_project_paths=session.project_paths,
         full=options.full,
         explicit_project=options.project,
         explicit_region=options.region,
-        project_config=project_config,
+        project_config=session.project_config,
     )
-    checks = (
-        DiagnosticCheck(
-            id="project_root_detected",
-            status="pass",
-            message=f"PortWorld repo detected at {paths.project_root}",
+    root_check = DiagnosticCheck(
+        id="workspace_root_detected",
+        status="pass",
+        message=(
+            f"PortWorld source workspace detected at {session.workspace_root}"
+            if session.project_paths is not None
+            else f"PortWorld published workspace detected at {session.workspace_root}"
         ),
-        *evaluation.checks,
     )
+    checks = (root_check, *evaluation.checks)
     details = evaluation.details
     return CommandResult(
         ok=evaluation.ok,
@@ -407,13 +445,22 @@ def _run_gcp_cloud_run_doctor(
         message=format_key_value_lines(
             ("target", options.target),
             ("full", options.full),
-            ("project_root", paths.project_root),
+            ("workspace_root", session.workspace_root),
+            (
+                "project_root",
+                None if session.project_paths is None else session.project_paths.project_root,
+            ),
             ("project", details.project_id or options.project),
             ("region", details.region or options.region),
         ),
         data={
             "target": options.target,
-            "project_root": str(paths.project_root),
+            "workspace_root": str(session.workspace_root),
+            "project_root": (
+                None
+                if session.project_paths is None
+                else str(session.project_paths.project_root)
+            ),
             "full": options.full,
             "details": details.to_dict(),
         },

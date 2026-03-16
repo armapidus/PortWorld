@@ -11,6 +11,11 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from backend import __version__
+from portworld_cli.config_runtime import (
+    ConfigRuntimeError,
+    ensure_source_runtime_session,
+    load_config_session,
+)
 from portworld_cli.context import CLIContext
 from portworld_cli.deploy_runtime import DeployGCPCloudRunOptions, run_deploy_gcp_cloud_run
 from portworld_cli.envfile import EnvFileParseError
@@ -108,6 +113,10 @@ def run_update_deploy(
 ) -> CommandResult:
     try:
         session = load_inspection_session(cli_context)
+        ensure_source_runtime_session(
+            load_config_session(cli_context),
+            command_name=UPDATE_DEPLOY_COMMAND_NAME,
+        )
     except ProjectRootResolutionError as exc:
         return _failure_result(UPDATE_DEPLOY_COMMAND_NAME, exc, exit_code=1)
     except (
@@ -115,6 +124,7 @@ def run_update_deploy(
         CLIStateTypeError,
         EnvFileParseError,
         ProjectConfigError,
+        ConfigRuntimeError,
     ) as exc:
         return _failure_result(UPDATE_DEPLOY_COMMAND_NAME, exc, exit_code=2)
 

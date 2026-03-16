@@ -102,8 +102,8 @@ class GCPDoctorEvaluation:
 
 
 def evaluate_gcp_cloud_run_readiness(
-    paths: ProjectPaths,
     *,
+    source_project_paths: ProjectPaths | None,
     full: bool,
     explicit_project: str | None,
     explicit_region: str | None,
@@ -122,20 +122,32 @@ def evaluate_gcp_cloud_run_readiness(
     secrets: GCPDoctorSecretReadiness | None = None
     production_posture: GCPDoctorProductionPosture | None = None
 
-    env_exists = paths.env_file.is_file()
-    checks.append(
-        DiagnosticCheck(
-            id="backend_env_exists",
-            status="pass" if env_exists else "fail",
-            message=(
-                f"{paths.env_file} exists"
-                if env_exists
-                else "backend/.env is missing"
-            ),
-            action=None if env_exists else "Run 'portworld init' first",
+    env_exists = source_project_paths is not None and source_project_paths.env_file.is_file()
+    if source_project_paths is None:
+        checks.append(
+            DiagnosticCheck(
+                id="backend_env_exists",
+                status="warn",
+                message=(
+                    "No source checkout detected in this workspace; skipping backend/.env "
+                    "validation for managed Cloud Run readiness."
+                ),
+                action="Switch to runtime_source=source if you need local source-backed checks.",
+            )
         )
-    )
-
+    else:
+        checks.append(
+            DiagnosticCheck(
+                id="backend_env_exists",
+                status="pass" if env_exists else "fail",
+                message=(
+                    f"{source_project_paths.env_file} exists"
+                    if env_exists
+                    else "backend/.env is missing"
+                ),
+                action=None if env_exists else "Run 'portworld init' first",
+            )
+        )
     gcloud_result = adapters.auth.probe_gcloud()
     gcloud_available = gcloud_result.ok
     checks.append(
@@ -272,14 +284,14 @@ def evaluate_gcp_cloud_run_readiness(
         )
     )
 
-    if env_exists:
+    if env_exists and source_project_paths is not None:
         try:
-            settings = _build_settings(paths)
+            settings = _build_settings(source_project_paths)
             checks.append(
                 DiagnosticCheck(
                     id="settings_loaded",
                     status="pass",
-                    message=f"Loaded backend settings from {paths.env_file}",
+                    message=f"Loaded backend settings from {source_project_paths.env_file}",
                 )
             )
         except Exception as exc:
@@ -298,6 +310,18 @@ def evaluate_gcp_cloud_run_readiness(
         production_posture = _build_production_posture(settings)
         checks.extend(_build_secret_checks(settings=settings, secrets=secrets))
         checks.extend(_build_production_posture_checks(production_posture))
+    elif source_project_paths is None:
+        checks.append(
+            DiagnosticCheck(
+                id="settings_loaded",
+                status="warn",
+                message=(
+                    "Skipping backend runtime validation because this workspace does not include "
+                    "a source checkout."
+                ),
+                action="Run the command from a source checkout when you need backend/.env validation.",
+            )
+        )
 
     if project_id is not None and region is not None:
         artifact_repository = (

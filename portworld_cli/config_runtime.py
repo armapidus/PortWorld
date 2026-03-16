@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import secrets
 from typing import Any
@@ -18,13 +18,15 @@ from portworld_cli.envfile import (
     write_canonical_env,
 )
 from portworld_cli.output import CommandResult, format_key_value_lines
-from portworld_cli.paths import ProjectPaths, ProjectRootResolutionError
+from portworld_cli.paths import ProjectPaths, ProjectRootResolutionError, WorkspacePaths
 from portworld_cli.project_config import (
     CLOUD_PROVIDER_GCP,
     DEFAULT_BACKEND_PROFILE,
     GCP_CLOUD_RUN_TARGET,
     PROJECT_MODE_LOCAL,
     PROJECT_MODE_MANAGED,
+    RUNTIME_SOURCE_PUBLISHED,
+    RUNTIME_SOURCE_SOURCE,
     GCPCloudRunConfig,
     ProjectConfig,
     ProjectConfigError,
@@ -33,7 +35,7 @@ from portworld_cli.project_config import (
     VisionProviderConfig,
     build_env_overrides_from_project_config,
     derive_project_config,
-    load_project_config,
+    load_project_config_record,
     write_project_config,
 )
 from portworld_cli.state import CLIStateDecodeError, CLIStateTypeError, read_json_state
@@ -53,12 +55,12 @@ class ConfigValidationError(ConfigRuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class SecretReadiness:
-    openai_api_key_present: bool
+    openai_api_key_present: bool | None
     vision_provider_secret_required: bool
     vision_provider_api_key_present: bool | None
     tavily_secret_required: bool
     tavily_api_key_present: bool | None
-    bearer_token_present: bool
+    bearer_token_present: bool | None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -74,19 +76,34 @@ class SecretReadiness:
 @dataclass(frozen=True, slots=True)
 class ConfigSession:
     cli_context: CLIContext
-    project_paths: ProjectPaths
-    template: EnvTemplate
-    existing_env: ParsedEnvFile
+    workspace_paths: WorkspacePaths
+    project_paths: ProjectPaths | None
+    template: EnvTemplate | None
+    existing_env: ParsedEnvFile | None
     project_config: ProjectConfig
     derived_from_legacy: bool
+    configured_runtime_source: str | None
+    effective_runtime_source: str
+    runtime_source_derived_from_legacy: bool
     remembered_deploy_state: dict[str, Any]
 
     def merged_env_values(self) -> dict[str, str]:
+        if self.template is None or self.existing_env is None:
+            return {}
         env_values = self.template.defaults()
         env_values.update(self.existing_env.known_values)
         return dict(env_values)
 
     def secret_readiness(self) -> SecretReadiness:
+        if self.existing_env is None:
+            return SecretReadiness(
+                openai_api_key_present=None,
+                vision_provider_secret_required=self.project_config.providers.vision.enabled,
+                vision_provider_api_key_present=None,
+                tavily_secret_required=self.project_config.providers.tooling.enabled,
+                tavily_api_key_present=None,
+                bearer_token_present=None,
+            )
         openai_present = bool((self.existing_env.known_values.get("OPENAI_API_KEY", "")).strip())
         vision_required = self.project_config.providers.vision.enabled
         vision_present: bool | None = None
@@ -111,6 +128,14 @@ class ConfigSession:
             tavily_api_key_present=tavily_present,
             bearer_token_present=bool((self.existing_env.known_values.get("BACKEND_BEARER_TOKEN", "")).strip()),
         )
+
+    @property
+    def workspace_root(self) -> Path:
+        return self.workspace_paths.workspace_root
+
+    @property
+    def env_path(self) -> Path | None:
+        return None if self.project_paths is None else self.project_paths.env_file
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +162,7 @@ class SecurityEditOptions:
 @dataclass(frozen=True, slots=True)
 class CloudEditOptions:
     project_mode: str | None
+    runtime_source: str | None
     project: str | None
     region: str | None
     service: str | None
@@ -171,6 +197,7 @@ class SecuritySectionResult:
 @dataclass(frozen=True, slots=True)
 class CloudSectionResult:
     project_mode: str
+    runtime_source: str
     cloud_provider: str | None
     preferred_target: str | None
     gcp_cloud_run: GCPCloudRunConfig
@@ -180,31 +207,93 @@ class CloudSectionResult:
 class ConfigWriteOutcome:
     project_config: ProjectConfig
     secret_readiness: SecretReadiness
-    env_write_result: EnvWriteResult
+    env_write_result: EnvWriteResult | None
 
 
 def load_config_session(cli_context: CLIContext) -> ConfigSession:
-    project_paths = cli_context.resolve_project_paths()
-    template = load_env_template(project_paths.env_example_file)
-    existing_env = parse_env_file(project_paths.env_file, template=template)
-    remembered_deploy_state = read_json_state(project_paths.gcp_cloud_run_state_file)
-    project_config = load_project_config(project_paths.project_config_file)
+    workspace_paths = cli_context.resolve_workspace_paths()
+    project_paths = workspace_paths.source_project_paths
+    template = None if project_paths is None else load_env_template(project_paths.env_example_file)
+    existing_env = (
+        None
+        if project_paths is None or template is None
+        else parse_env_file(project_paths.env_file, template=template)
+    )
+    remembered_deploy_state = read_json_state(workspace_paths.gcp_cloud_run_state_file)
+    loaded_project_config = load_project_config_record(workspace_paths.project_config_file)
+    project_config = None if loaded_project_config is None else loaded_project_config.config
     derived_from_legacy = project_config is None
     if project_config is None:
-        env_values = template.defaults()
-        env_values.update(existing_env.known_values)
+        env_values = {} if template is None or existing_env is None else template.defaults()
+        if existing_env is not None:
+            env_values.update(existing_env.known_values)
         project_config = derive_project_config(
             env_values=env_values,
             deploy_state=remembered_deploy_state,
+            default_runtime_source=(
+                RUNTIME_SOURCE_SOURCE
+                if project_paths is not None
+                else RUNTIME_SOURCE_PUBLISHED
+            ),
         )
+        configured_runtime_source = None
+        runtime_source_derived_from_legacy = True
+    else:
+        configured_runtime_source = project_config.runtime_source
+        runtime_source_derived_from_legacy = not loaded_project_config.runtime_source_explicit
+    effective_runtime_source = configured_runtime_source or (
+        RUNTIME_SOURCE_SOURCE if project_paths is not None else RUNTIME_SOURCE_PUBLISHED
+    )
     return ConfigSession(
         cli_context=cli_context,
+        workspace_paths=workspace_paths,
         project_paths=project_paths,
         template=template,
         existing_env=existing_env,
         project_config=project_config,
         derived_from_legacy=derived_from_legacy,
+        configured_runtime_source=configured_runtime_source,
+        effective_runtime_source=effective_runtime_source,
+        runtime_source_derived_from_legacy=runtime_source_derived_from_legacy,
         remembered_deploy_state=remembered_deploy_state,
+    )
+
+
+def ensure_source_runtime_session(
+    session: ConfigSession,
+    *,
+    command_name: str,
+    requested_runtime_source: str | None = None,
+) -> ConfigSession:
+    if requested_runtime_source == RUNTIME_SOURCE_PUBLISHED:
+        raise ConfigUsageError(
+            f"{command_name} is not supported when runtime_source=published yet. "
+            "Use `portworld config edit cloud --runtime-source published` to record published mode, "
+            "and switch back with `portworld config edit cloud --runtime-source source` when you need source-backed commands."
+        )
+
+    effective_runtime_source = requested_runtime_source or session.effective_runtime_source
+    if effective_runtime_source == RUNTIME_SOURCE_PUBLISHED:
+        raise ConfigUsageError(
+            f"{command_name} is not supported when runtime_source=published yet. "
+            "Switch back with `portworld config edit cloud --runtime-source source`."
+        )
+
+    if session.project_paths is None or session.template is None or session.existing_env is None:
+        raise ProjectRootResolutionError(
+            f"{command_name} requires a PortWorld source checkout with backend/Dockerfile, "
+            "backend/.env.example, and docker-compose.yml."
+        )
+
+    if session.project_config.runtime_source == RUNTIME_SOURCE_SOURCE:
+        return session
+
+    return replace(
+        session,
+        project_config=replace(session.project_config, runtime_source=RUNTIME_SOURCE_SOURCE),
+        configured_runtime_source=RUNTIME_SOURCE_SOURCE,
+        effective_runtime_source=RUNTIME_SOURCE_SOURCE,
+        runtime_source_derived_from_legacy=False,
     )
 
 
@@ -223,22 +312,37 @@ def run_config_show(cli_context: CLIContext) -> CommandResult:
     secret_readiness = session.secret_readiness()
     config_payload = session.project_config.to_payload()
     message = _build_config_show_message(
+        workspace_root=session.workspace_root,
         project_config=session.project_config,
         secret_readiness=secret_readiness,
-        env_path=session.project_paths.env_file,
+        project_root=(
+            None if session.project_paths is None else session.project_paths.project_root
+        ),
+        env_path=session.env_path,
         derived_from_legacy=session.derived_from_legacy,
+        configured_runtime_source=session.configured_runtime_source,
+        effective_runtime_source=session.effective_runtime_source,
+        runtime_source_derived_from_legacy=session.runtime_source_derived_from_legacy,
     )
     return CommandResult(
         ok=True,
         command="portworld config show",
         message=message,
         data={
-            "project_root": str(session.project_paths.project_root),
-            "project_config_path": str(session.project_paths.project_config_file),
-            "env_path": str(session.project_paths.env_file),
+            "workspace_root": str(session.workspace_root),
+            "project_root": (
+                None
+                if session.project_paths is None
+                else str(session.project_paths.project_root)
+            ),
+            "project_config_path": str(session.workspace_paths.project_config_file),
+            "env_path": None if session.env_path is None else str(session.env_path),
             "project_config": config_payload,
             "secret_readiness": secret_readiness.to_dict(),
             "derived_from_legacy": session.derived_from_legacy,
+            "configured_runtime_source": session.configured_runtime_source,
+            "effective_runtime_source": session.effective_runtime_source,
+            "runtime_source_derived_from_legacy": session.runtime_source_derived_from_legacy,
         },
         exit_code=0,
     )
@@ -393,12 +497,20 @@ def collect_cloud_section(
     prompt_defaults_when_local: bool,
 ) -> CloudSectionResult:
     current_mode = session.project_config.project_mode
+    current_runtime_source = session.effective_runtime_source
     project_mode = _resolve_choice_value(
         session.cli_context,
         prompt="Project mode",
         current_value=current_mode,
         explicit_value=options.project_mode,
         choices=(PROJECT_MODE_LOCAL, PROJECT_MODE_MANAGED),
+    )
+    runtime_source = _resolve_choice_value(
+        session.cli_context,
+        prompt="Runtime source",
+        current_value=current_runtime_source,
+        explicit_value=options.runtime_source,
+        choices=(RUNTIME_SOURCE_SOURCE, RUNTIME_SOURCE_PUBLISHED),
     )
 
     current_gcp = session.project_config.deploy.gcp_cloud_run
@@ -531,6 +643,7 @@ def collect_cloud_section(
 
     return CloudSectionResult(
         project_mode=project_mode,
+        runtime_source=runtime_source,
         cloud_provider=cloud_provider,
         preferred_target=preferred_target,
         gcp_cloud_run=gcp_cloud_run,
@@ -544,6 +657,7 @@ def apply_provider_section(
     updated_project_config = ProjectConfig(
         schema_version=project_config.schema_version,
         project_mode=project_config.project_mode,
+        runtime_source=project_config.runtime_source,
         cloud_provider=project_config.cloud_provider,
         providers=type(project_config.providers)(
             realtime=project_config.providers.realtime,
@@ -574,6 +688,7 @@ def apply_security_section(
     updated_project_config = ProjectConfig(
         schema_version=project_config.schema_version,
         project_mode=project_config.project_mode,
+        runtime_source=project_config.runtime_source,
         cloud_provider=project_config.cloud_provider,
         providers=project_config.providers,
         security=SecurityConfig(
@@ -593,6 +708,7 @@ def apply_cloud_section(
     updated_project_config = ProjectConfig(
         schema_version=project_config.schema_version,
         project_mode=result.project_mode,
+        runtime_source=result.runtime_source,
         cloud_provider=result.cloud_provider,
         providers=project_config.providers,
         security=project_config.security,
@@ -611,20 +727,28 @@ def write_config_artifacts(
 ) -> ConfigWriteOutcome:
     env_overrides = build_env_overrides_from_project_config(project_config)
     env_overrides.update(env_updates)
-    write_project_config(session.project_paths.project_config_file, project_config)
-    env_write_result = write_canonical_env(
-        session.project_paths.env_file,
-        template=session.template,
-        existing_env=session.existing_env,
-        overrides=env_overrides,
-    )
+    write_project_config(session.workspace_paths.project_config_file, project_config)
+    env_write_result: EnvWriteResult | None = None
+    existing_env = session.existing_env
+    if session.project_paths is not None and session.template is not None and session.existing_env is not None:
+        env_write_result = write_canonical_env(
+            session.project_paths.env_file,
+            template=session.template,
+            existing_env=session.existing_env,
+            overrides=env_overrides,
+        )
+        existing_env = parse_env_file(session.project_paths.env_file, template=session.template)
     updated_session = ConfigSession(
         cli_context=session.cli_context,
+        workspace_paths=session.workspace_paths,
         project_paths=session.project_paths,
         template=session.template,
-        existing_env=parse_env_file(session.project_paths.env_file, template=session.template),
+        existing_env=existing_env,
         project_config=project_config,
         derived_from_legacy=False,
+        configured_runtime_source=project_config.runtime_source,
+        effective_runtime_source=project_config.runtime_source or session.effective_runtime_source,
+        runtime_source_derived_from_legacy=False,
         remembered_deploy_state=session.remembered_deploy_state,
     )
     return ConfigWriteOutcome(
@@ -638,13 +762,13 @@ def confirm_apply(
     cli_context: CLIContext,
     *,
     command_name: str,
-    env_path: Path,
+    env_path: Path | None,
     project_config_path: Path,
     summary_lines: tuple[str, ...],
     force: bool = False,
 ) -> None:
     if cli_context.non_interactive:
-        if env_path.exists() and not force and not cli_context.yes:
+        if env_path is not None and env_path.exists() and not force and not cli_context.yes:
             raise ConfigUsageError(
                 "backend/.env already exists. Re-run with --force or --yes in non-interactive mode."
             )
@@ -654,9 +778,10 @@ def confirm_apply(
     prompt_lines = [
         f"Apply {command_name} changes?",
         f"project_config_path: {project_config_path}",
-        f"env_path: {env_path}",
         *summary_lines,
     ]
+    if env_path is not None:
+        prompt_lines.insert(2, f"env_path: {env_path}")
     confirmed = click.confirm("\n".join(prompt_lines), default=True, show_default=True)
     if not confirmed:
         raise click.Abort()
@@ -667,24 +792,26 @@ def build_section_success_message(
     section_name: str,
     project_config: ProjectConfig,
     secret_readiness: SecretReadiness,
-    env_path: Path,
+    env_path: Path | None,
     project_config_path: Path,
     backup_path: Path | None,
 ) -> str:
     lines = [
         f"section: {section_name}",
         f"project_mode: {project_config.project_mode}",
+        f"runtime_source: {project_config.runtime_source or 'unset'}",
         f"cloud_provider: {project_config.cloud_provider or 'none'}",
         f"vision_memory: {'yes' if project_config.providers.vision.enabled else 'no'}",
         f"realtime_tooling: {'yes' if project_config.providers.tooling.enabled else 'no'}",
         f"backend_profile: {_normalize_backend_profile(project_config.security.backend_profile)}",
         f"project_config_path: {project_config_path}",
-        f"env_path: {env_path}",
         f"openai_api_key: {_presence_label(secret_readiness.openai_api_key_present)}",
         f"vision_provider_api_key: {_required_presence_label(secret_readiness.vision_provider_secret_required, secret_readiness.vision_provider_api_key_present)}",
         f"tavily_api_key: {_required_presence_label(secret_readiness.tavily_secret_required, secret_readiness.tavily_api_key_present)}",
         f"bearer_token: {_presence_label(secret_readiness.bearer_token_present)}",
     ]
+    if env_path is not None:
+        lines.insert(7, f"env_path: {env_path}")
     if backup_path is not None:
         lines.append(f"backup_path: {backup_path}")
     return "\n".join(lines)
@@ -697,6 +824,7 @@ def build_init_review_lines(
 ) -> tuple[str, ...]:
     return (
         f"project_mode: {project_config.project_mode}",
+        f"runtime_source: {project_config.runtime_source or 'unset'}",
         f"cloud_provider: {project_config.cloud_provider or 'none'}",
         f"vision_memory: {'yes' if project_config.providers.vision.enabled else 'no'}",
         f"realtime_tooling: {'yes' if project_config.providers.tooling.enabled else 'no'}",
@@ -717,7 +845,7 @@ def build_init_success_message(
     *,
     project_config: ProjectConfig,
     secret_readiness: SecretReadiness,
-    env_path: Path,
+    env_path: Path | None,
     project_config_path: Path,
     backup_path: Path | None,
 ) -> str:
@@ -730,9 +858,10 @@ def build_init_success_message(
     lines.extend(
         [
             f"project_config_path: {project_config_path}",
-            f"env_path: {env_path}",
         ]
     )
+    if env_path is not None:
+        lines.append(f"env_path: {env_path}")
     if backup_path is not None:
         lines.append(f"backup_path: {backup_path}")
     lines.extend(
@@ -766,8 +895,8 @@ def _run_section_edit(
         confirm_apply(
             cli_context,
             command_name=command_name,
-            env_path=session.project_paths.env_file,
-            project_config_path=session.project_paths.project_config_file,
+            env_path=session.env_path,
+            project_config_path=session.workspace_paths.project_config_file,
             summary_lines=review_lines,
         )
         outcome = write_config_artifacts(session, updated_project_config, env_updates)
@@ -797,22 +926,33 @@ def _run_section_edit(
             section_name=section_name,
             project_config=outcome.project_config,
             secret_readiness=outcome.secret_readiness,
-            env_path=outcome.env_write_result.env_path,
-            project_config_path=session.project_paths.project_config_file,
-            backup_path=outcome.env_write_result.backup_path,
+            env_path=None if outcome.env_write_result is None else outcome.env_write_result.env_path,
+            project_config_path=session.workspace_paths.project_config_file,
+            backup_path=None if outcome.env_write_result is None else outcome.env_write_result.backup_path,
         ),
         data={
-            "project_root": str(session.project_paths.project_root),
-            "project_config_path": str(session.project_paths.project_config_file),
-            "env_path": str(outcome.env_write_result.env_path),
+            "workspace_root": str(session.workspace_root),
+            "project_root": (
+                None
+                if session.project_paths is None
+                else str(session.project_paths.project_root)
+            ),
+            "project_config_path": str(session.workspace_paths.project_config_file),
+            "env_path": (
+                None
+                if outcome.env_write_result is None
+                else str(outcome.env_write_result.env_path)
+            ),
             "backup_path": (
                 str(outcome.env_write_result.backup_path)
-                if outcome.env_write_result.backup_path
+                if outcome.env_write_result is not None and outcome.env_write_result.backup_path
                 else None
             ),
             "project_config": outcome.project_config.to_payload(),
             "secret_readiness": outcome.secret_readiness.to_dict(),
             "updated_section": section_name,
+            "configured_runtime_source": outcome.project_config.runtime_source,
+            "effective_runtime_source": outcome.project_config.runtime_source,
         },
         exit_code=0,
     )
@@ -822,6 +962,10 @@ def _apply_provider_edit(
     session: ConfigSession,
     options: ProviderEditOptions,
 ) -> tuple[ProjectConfig, dict[str, str], tuple[str, ...]]:
+    session = ensure_source_runtime_session(
+        session,
+        command_name="portworld config edit providers",
+    )
     provider_result = collect_provider_section(session, options)
     updated_project_config, env_updates = apply_provider_section(
         session.project_config,
@@ -842,6 +986,10 @@ def _apply_security_edit(
     session: ConfigSession,
     options: SecurityEditOptions,
 ) -> tuple[ProjectConfig, dict[str, str], tuple[str, ...]]:
+    session = ensure_source_runtime_session(
+        session,
+        command_name="portworld config edit security",
+    )
     security_result = collect_security_section(session, options)
     updated_project_config, env_updates = apply_security_section(
         session.project_config,
@@ -886,13 +1034,24 @@ def _apply_cloud_edit(
 
 def _build_config_show_message(
     *,
+    workspace_root: Path,
     project_config: ProjectConfig,
     secret_readiness: SecretReadiness,
-    env_path: Path,
+    project_root: Path | None,
+    env_path: Path | None,
     derived_from_legacy: bool,
+    configured_runtime_source: str | None,
+    effective_runtime_source: str,
+    runtime_source_derived_from_legacy: bool,
 ) -> str:
     return format_key_value_lines(
+        ("workspace_root", workspace_root),
+        ("project_root", project_root),
         ("project_mode", project_config.project_mode),
+        ("runtime_source", project_config.runtime_source or "unset"),
+        ("configured_runtime_source", configured_runtime_source or "legacy_default"),
+        ("effective_runtime_source", effective_runtime_source),
+        ("runtime_source_derived_from_legacy", runtime_source_derived_from_legacy),
         ("cloud_provider", project_config.cloud_provider or "none"),
         ("realtime_provider", project_config.providers.realtime.provider),
         ("vision_memory", project_config.providers.vision.enabled),
@@ -920,6 +1079,15 @@ def _secret_readiness_with_updates(
     project_config: ProjectConfig,
     env_updates: dict[str, str],
 ) -> SecretReadiness:
+    if session.existing_env is None:
+        return SecretReadiness(
+            openai_api_key_present=None,
+            vision_provider_secret_required=project_config.providers.vision.enabled,
+            vision_provider_api_key_present=None,
+            tavily_secret_required=project_config.providers.tooling.enabled,
+            tavily_api_key_present=None,
+            bearer_token_present=None,
+        )
     known_values = dict(session.existing_env.known_values)
     known_values.update(env_updates)
 
@@ -1214,7 +1382,9 @@ def _parse_csv_tuple(raw_value: str) -> tuple[str, ...]:
     return values
 
 
-def _presence_label(is_present: bool) -> str:
+def _presence_label(is_present: bool | None) -> str:
+    if is_present is None:
+        return "unknown"
     return "present" if is_present else "missing"
 
 

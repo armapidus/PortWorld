@@ -5,6 +5,11 @@ from typing import Any
 
 from backend.bootstrap.memory_export import write_memory_export_zip
 from backend.bootstrap.runtime import check_runtime_configuration, build_backend_storage
+from portworld_cli.config_runtime import (
+    ConfigRuntimeError,
+    ensure_source_runtime_session,
+    load_config_session,
+)
 from portworld_cli.context import CLIContext
 from portworld_cli.output import CommandResult, DiagnosticCheck, format_key_value_lines
 from portworld_cli.paths import ProjectRootResolutionError
@@ -13,12 +18,16 @@ from backend.core.storage import now_ms
 
 
 def _build_settings(cli_context: CLIContext) -> Settings:
+    ensure_source_runtime_session(
+        load_config_session(cli_context),
+        command_name="portworld ops",
+    )
     paths = cli_context.resolve_project_paths()
     load_environment_files(paths.env_file)
     return Settings.from_env()
 
 
-def _failure_result(command: str, exc: Exception) -> CommandResult:
+def _failure_result(command: str, exc: Exception, *, exit_code: int = 1) -> CommandResult:
     return CommandResult(
         ok=False,
         command=command,
@@ -27,7 +36,7 @@ def _failure_result(command: str, exc: Exception) -> CommandResult:
             "status": "error",
             "error_type": type(exc).__name__,
         },
-        exit_code=1,
+        exit_code=exit_code,
     )
 
 
@@ -61,6 +70,8 @@ def run_check_config(cli_context: CLIContext, *, full_readiness: bool) -> Comman
         )
     except ProjectRootResolutionError as exc:
         return _repo_resolution_failure(command, exc)
+    except ConfigRuntimeError as exc:
+        return _failure_result(command, exc, exit_code=2)
     except Exception as exc:
         return _failure_result(command, exc)
 
@@ -105,6 +116,8 @@ def run_bootstrap_storage(cli_context: CLIContext) -> CommandResult:
         result = storage.bootstrap()
     except ProjectRootResolutionError as exc:
         return _repo_resolution_failure(command, exc)
+    except ConfigRuntimeError as exc:
+        return _failure_result(command, exc, exit_code=2)
     except Exception as exc:
         return _failure_result(command, exc)
 
@@ -138,6 +151,8 @@ def run_export_memory(cli_context: CLIContext, *, output_path: Path | None) -> C
         )
     except ProjectRootResolutionError as exc:
         return _repo_resolution_failure(command, exc)
+    except ConfigRuntimeError as exc:
+        return _failure_result(command, exc, exit_code=2)
     except Exception as exc:
         return _failure_result(command, exc)
 
@@ -172,6 +187,8 @@ def run_migrate_storage_layout(cli_context: CLIContext) -> CommandResult:
         migration_result = storage.migrate_legacy_storage_layout()
     except ProjectRootResolutionError as exc:
         return _repo_resolution_failure(command, exc)
+    except ConfigRuntimeError as exc:
+        return _failure_result(command, exc, exit_code=2)
     except Exception as exc:
         return _failure_result(command, exc)
 

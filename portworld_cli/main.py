@@ -26,7 +26,7 @@ from portworld_cli.context import CLIContext
     "project_root",
     type=click.Path(path_type=Path, file_okay=False, dir_okay=True, resolve_path=True),
     default=None,
-    help="Path to the PortWorld project root.",
+    help="Path to the PortWorld project or workspace root.",
 )
 @click.option("--verbose", is_flag=True, default=False, help="Enable verbose CLI output.")
 @click.option("--json", "json_output", is_flag=True, default=False, help="Emit JSON output.")

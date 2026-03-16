@@ -14,6 +14,11 @@ from typing import Any, Iterator
 import click
 import httpx
 
+from portworld_cli.config_runtime import (
+    ConfigRuntimeError,
+    ensure_source_runtime_session,
+    load_config_session,
+)
 from portworld_cli.context import CLIContext
 from portworld_cli.deploy_state import DeployState, read_deploy_state, write_deploy_state
 from portworld_cli.envfile import EnvFileParseError, load_env_template, parse_env_file
@@ -140,6 +145,10 @@ def run_deploy_gcp_cloud_run(
     checks: list[DiagnosticCheck] = []
 
     try:
+        ensure_source_runtime_session(
+            load_config_session(cli_context),
+            command_name=COMMAND_NAME,
+        )
         project_paths = cli_context.resolve_project_paths()
         if not project_paths.env_file.is_file():
             raise DeployStageError(
@@ -459,6 +468,7 @@ def run_deploy_gcp_cloud_run(
         CLIStateTypeError,
         DeployUsageError,
         ProjectConfigError,
+        ConfigRuntimeError,
     ) as exc:
         return _failure_result(
             stage="parameter_resolution",

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import click
 
@@ -18,6 +18,7 @@ from portworld_cli.config_runtime import (
     collect_provider_section,
     collect_security_section,
     confirm_apply,
+    ensure_source_runtime_session,
     load_config_session,
     preview_secret_readiness,
     write_config_artifacts,
@@ -50,6 +51,7 @@ class InitOptions:
     generate_bearer_token: bool
     clear_bearer_token: bool
     project_mode: str | None
+    runtime_source: str | None
     project: str | None
     region: str | None
     service: str | None
@@ -67,6 +69,11 @@ class InitOptions:
 def run_init(cli_context: CLIContext, options: InitOptions) -> CommandResult:
     try:
         session = load_config_session(cli_context)
+        session = ensure_source_runtime_session(
+            session,
+            command_name=COMMAND_NAME,
+            requested_runtime_source=options.runtime_source,
+        )
 
         provider_result = collect_provider_section(
             session,
@@ -106,6 +113,7 @@ def run_init(cli_context: CLIContext, options: InitOptions) -> CommandResult:
             _session_with_project_config(session, project_config),
             CloudEditOptions(
                 project_mode=options.project_mode,
+                runtime_source=options.runtime_source,
                 project=options.project,
                 region=options.region,
                 service=options.service,
@@ -128,8 +136,8 @@ def run_init(cli_context: CLIContext, options: InitOptions) -> CommandResult:
         confirm_apply(
             cli_context,
             command_name=COMMAND_NAME,
-            env_path=session.project_paths.env_file,
-            project_config_path=session.project_paths.project_config_file,
+            env_path=session.env_path,
+            project_config_path=session.workspace_paths.project_config_file,
             summary_lines=build_init_review_lines(
                 project_config=project_config,
                 secret_readiness=preview_outcome,
@@ -178,17 +186,22 @@ def run_init(cli_context: CLIContext, options: InitOptions) -> CommandResult:
         message=build_init_success_message(
             project_config=outcome.project_config,
             secret_readiness=outcome.secret_readiness,
-            env_path=outcome.env_write_result.env_path,
-            project_config_path=session.project_paths.project_config_file,
-            backup_path=outcome.env_write_result.backup_path,
+            env_path=None if outcome.env_write_result is None else outcome.env_write_result.env_path,
+            project_config_path=session.workspace_paths.project_config_file,
+            backup_path=None if outcome.env_write_result is None else outcome.env_write_result.backup_path,
         ),
         data={
+            "workspace_root": str(session.workspace_root),
             "project_root": str(session.project_paths.project_root),
-            "project_config_path": str(session.project_paths.project_config_file),
-            "env_path": str(outcome.env_write_result.env_path),
+            "project_config_path": str(session.workspace_paths.project_config_file),
+            "env_path": (
+                None
+                if outcome.env_write_result is None
+                else str(outcome.env_write_result.env_path)
+            ),
             "backup_path": (
                 str(outcome.env_write_result.backup_path)
-                if outcome.env_write_result.backup_path
+                if outcome.env_write_result is not None and outcome.env_write_result.backup_path
                 else None
             ),
             "project_config": outcome.project_config.to_payload(),
@@ -197,15 +210,15 @@ def run_init(cli_context: CLIContext, options: InitOptions) -> CommandResult:
         checks=tuple(checks),
         exit_code=0,
     )
+
+
 def _session_with_project_config(session, project_config):
-    return type(session)(
-        cli_context=session.cli_context,
-        project_paths=session.project_paths,
-        template=session.template,
-        existing_env=session.existing_env,
+    return replace(
+        session,
         project_config=project_config,
-        derived_from_legacy=session.derived_from_legacy,
-        remembered_deploy_state=session.remembered_deploy_state,
+        configured_runtime_source=project_config.runtime_source,
+        effective_runtime_source=project_config.runtime_source or session.effective_runtime_source,
+        runtime_source_derived_from_legacy=False,
     )
 
 

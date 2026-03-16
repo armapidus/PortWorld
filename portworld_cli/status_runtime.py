@@ -103,12 +103,23 @@ def run_status(cli_context: CLIContext) -> CommandResult:
             secret_readiness=secret_readiness,
         ),
         data={
-            "project_root": str(session.config_session.project_paths.project_root),
-            "project_config_path": str(session.config_session.project_paths.project_config_file),
+            "workspace_root": str(session.config_session.workspace_root),
+            "project_root": (
+                None
+                if session.config_session.project_paths is None
+                else str(session.config_session.project_paths.project_root)
+            ),
+            "project_config_path": str(session.config_session.workspace_paths.project_config_file),
             "state_paths": {
-                "gcp_cloud_run": str(session.config_session.project_paths.gcp_cloud_run_state_file),
+                "gcp_cloud_run": str(session.config_session.workspace_paths.gcp_cloud_run_state_file),
             },
             "project_mode": session.project_config.project_mode,
+            "runtime_source": session.project_config.runtime_source,
+            "configured_runtime_source": session.config_session.configured_runtime_source,
+            "effective_runtime_source": session.config_session.effective_runtime_source,
+            "runtime_source_derived_from_legacy": (
+                session.config_session.runtime_source_derived_from_legacy
+            ),
             "cloud_provider": session.project_config.cloud_provider,
             "active_target": active_target,
             "derived_from_legacy": session.derived_from_legacy,
@@ -226,7 +237,19 @@ def _build_status_message(
             [
                 "Project",
                 format_key_value_lines(
+                    ("workspace_root", session.config_session.workspace_root),
+                    (
+                        "project_root",
+                        None
+                        if session.config_session.project_paths is None
+                        else session.config_session.project_paths.project_root,
+                    ),
                     ("project_mode", session.project_config.project_mode),
+                    ("runtime_source", session.project_config.runtime_source or "unset"),
+                    (
+                        "effective_runtime_source",
+                        session.config_session.effective_runtime_source,
+                    ),
                     ("cloud_provider", session.project_config.cloud_provider or "none"),
                     ("active_target", active_target or "none"),
                     ("derived_from_legacy", session.derived_from_legacy),
@@ -318,7 +341,9 @@ def _format_epoch_ms(value: object) -> str | None:
     return timestamp.isoformat().replace("+00:00", "Z")
 
 
-def _presence_label(is_present: bool) -> str:
+def _presence_label(is_present: bool | None) -> str:
+    if is_present is None:
+        return "unknown"
     return "present" if is_present else "missing"
 
 

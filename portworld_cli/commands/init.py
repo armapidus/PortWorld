@@ -33,6 +33,12 @@ from portworld_cli.output import exit_with_result
     default=None,
     help="Project mode for this repo.",
 )
+@click.option(
+    "--runtime-source",
+    type=click.Choice(["source", "published"]),
+    default=None,
+    help="Runtime source mode for this workspace.",
+)
 @click.option("--project", default=None, help="Default GCP project id.")
 @click.option("--region", default=None, help="Default GCP region.")
 @click.option("--service", default=None, help="Default Cloud Run service name.")
@@ -63,6 +69,7 @@ def init_command(
     generate_bearer_token: bool,
     clear_bearer_token: bool,
     project_mode: str | None,
+    runtime_source: str | None,
     project: str | None,
     region: str | None,
     service: str | None,
@@ -97,6 +104,7 @@ def init_command(
                 generate_bearer_token=generate_bearer_token,
                 clear_bearer_token=clear_bearer_token,
                 project_mode=project_mode,
+                runtime_source=runtime_source,
                 project=project,
                 region=region,
                 service=service,

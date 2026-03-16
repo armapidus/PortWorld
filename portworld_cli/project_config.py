@@ -7,9 +7,11 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 PROJECT_MODE_LOCAL = "local"
 PROJECT_MODE_MANAGED = "managed"
+RUNTIME_SOURCE_SOURCE = "source"
+RUNTIME_SOURCE_PUBLISHED = "published"
 GCP_CLOUD_RUN_TARGET = "gcp-cloud-run"
 CLOUD_PROVIDER_GCP = "gcp"
 
@@ -46,6 +48,13 @@ class ProjectConfigTypeError(ProjectConfigError):
 
 class ProjectConfigVersionError(ProjectConfigError):
     """Raised when project config uses an unsupported schema version."""
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedProjectConfig:
+    config: "ProjectConfig"
+    schema_version: int
+    runtime_source_explicit: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,6 +165,7 @@ class DeployConfig:
 class ProjectConfig:
     schema_version: int = SCHEMA_VERSION
     project_mode: str = PROJECT_MODE_LOCAL
+    runtime_source: str | None = None
     cloud_provider: str | None = None
     providers: ProvidersConfig = field(default_factory=ProvidersConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
@@ -165,6 +175,7 @@ class ProjectConfig:
         return {
             "schema_version": self.schema_version,
             "project_mode": self.project_mode,
+            "runtime_source": self.runtime_source,
             "cloud_provider": self.cloud_provider,
             "providers": self.providers.to_payload(),
             "security": self.security.to_payload(),
@@ -174,7 +185,7 @@ class ProjectConfig:
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> "ProjectConfig":
         schema_version = _read_int(payload, "schema_version", default=SCHEMA_VERSION)
-        if schema_version != SCHEMA_VERSION:
+        if schema_version not in {1, SCHEMA_VERSION}:
             raise ProjectConfigVersionError(
                 f"Unsupported .portworld/project.json schema_version: {schema_version}."
             )
@@ -184,6 +195,11 @@ class ProjectConfig:
             "project_mode",
             default=PROJECT_MODE_LOCAL,
             allowed={PROJECT_MODE_LOCAL, PROJECT_MODE_MANAGED},
+        )
+        runtime_source = _read_optional_string(
+            payload,
+            "runtime_source",
+            allowed={RUNTIME_SOURCE_SOURCE, RUNTIME_SOURCE_PUBLISHED},
         )
         providers_payload = _read_object(payload, "providers", default={})
         security_payload = _read_object(payload, "security", default={})
@@ -206,6 +222,7 @@ class ProjectConfig:
         return cls(
             schema_version=schema_version,
             project_mode=project_mode,
+            runtime_source=runtime_source,
             cloud_provider=cloud_provider,
             providers=ProvidersConfig(
                 realtime=RealtimeProviderConfig(
@@ -310,6 +327,11 @@ class ProjectConfig:
 
 
 def load_project_config(path: Path) -> ProjectConfig | None:
+    record = load_project_config_record(path)
+    return None if record is None else record.config
+
+
+def load_project_config_record(path: Path) -> LoadedProjectConfig | None:
     if not path.exists():
         return None
 
@@ -324,10 +346,19 @@ def load_project_config(path: Path) -> ProjectConfig | None:
         raise ProjectConfigTypeError(
             f"CLI project config file must contain a JSON object: {path}"
         )
-    return ProjectConfig.from_payload(payload)
+    config = ProjectConfig.from_payload(payload)
+    return LoadedProjectConfig(
+        config=config,
+        schema_version=_read_int(payload, "schema_version", default=SCHEMA_VERSION),
+        runtime_source_explicit=payload.get("runtime_source") is not None,
+    )
 
 
 def write_project_config(path: Path, config: ProjectConfig) -> None:
+    if config.runtime_source is None:
+        raise ProjectConfigTypeError(
+            "CLI project config must set runtime_source before it can be written."
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
         prefix=f".{path.name}.",
@@ -349,6 +380,7 @@ def derive_project_config(
     *,
     env_values: Mapping[str, str],
     deploy_state: Mapping[str, Any] | None = None,
+    default_runtime_source: str = RUNTIME_SOURCE_SOURCE,
 ) -> ProjectConfig:
     remembered_state = deploy_state or {}
     remembered_project_id = _coerce_optional_text(remembered_state.get("project_id"))
@@ -376,6 +408,7 @@ def derive_project_config(
         project_mode=(
             PROJECT_MODE_MANAGED if remembered_target_exists else PROJECT_MODE_LOCAL
         ),
+        runtime_source=default_runtime_source,
         cloud_provider=(
             CLOUD_PROVIDER_GCP if remembered_target_exists else None
         ),

@@ -115,6 +115,12 @@ def config_edit_security_command(
     default=None,
     help="Project mode for this repo.",
 )
+@click.option(
+    "--runtime-source",
+    type=click.Choice(["source", "published"]),
+    default=None,
+    help="Runtime source mode for this workspace.",
+)
 @click.option("--project", default=None, help="Default GCP project id.")
 @click.option("--region", default=None, help="Default GCP region.")
 @click.option("--service", default=None, help="Default Cloud Run service name.")
@@ -131,6 +137,7 @@ def config_edit_security_command(
 def config_edit_cloud_command(
     cli_context: CLIContext,
     project_mode: str | None,
+    runtime_source: str | None,
     project: str | None,
     region: str | None,
     service: str | None,
@@ -151,6 +158,7 @@ def config_edit_cloud_command(
             cli_context,
             CloudEditOptions(
                 project_mode=project_mode,
+                runtime_source=runtime_source,
                 project=project,
                 region=region,
                 service=service,
