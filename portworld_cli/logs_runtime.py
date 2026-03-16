@@ -6,10 +6,7 @@ from portworld_cli.context import CLIContext
 from portworld_cli.gcp import GCPAdapters, GCPError
 from portworld_cli.inspection_runtime import load_inspection_session, resolve_gcp_inspection_target
 from portworld_cli.output import CommandResult
-from portworld_cli.paths import ProjectRootResolutionError
-from portworld_cli.project_config import ProjectConfigError
-from portworld_cli.state import CLIStateDecodeError, CLIStateTypeError
-from portworld_cli.envfile import EnvFileParseError
+from portworld_cli.services.common import ErrorMappingPolicy, map_command_exception
 
 
 COMMAND_NAME = "portworld logs gcp-cloud-run"
@@ -49,16 +46,12 @@ def run_logs_gcp_cloud_run(
             raise LogsUsageError("Missing GCP region. Pass --region or configure it first.")
         if not target.service_name:
             raise LogsUsageError("Missing Cloud Run service name. Pass --service or configure it first.")
-    except ProjectRootResolutionError as exc:
-        return _failure_result(exc, exit_code=1)
-    except (
-        CLIStateDecodeError,
-        CLIStateTypeError,
-        EnvFileParseError,
-        ProjectConfigError,
-        LogsUsageError,
-    ) as exc:
-        return _failure_result(exc, exit_code=2)
+    except Exception as exc:
+        return map_command_exception(
+            exc,
+            policy=ErrorMappingPolicy(command_name=COMMAND_NAME),
+            usage_error_types=(LogsUsageError,),
+        )
 
     adapters = GCPAdapters.create()
     result = adapters.logging.read_cloud_run_logs(
@@ -137,18 +130,6 @@ def _format_log_line(
             rendered_message,
         ]
     )
-
-
-def _failure_result(exc: Exception, *, exit_code: int) -> CommandResult:
-    return CommandResult(
-        ok=False,
-        command=COMMAND_NAME,
-        message=str(exc),
-        data={"status": "error", "error_type": type(exc).__name__},
-        exit_code=exit_code,
-    )
-
-
 def _gcp_failure_result(error: GCPError) -> CommandResult:
     payload: dict[str, object] = {
         "status": "error",
