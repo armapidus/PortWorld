@@ -5,8 +5,11 @@ REPO_OWNER="armapidus"
 REPO_NAME="PortWorld"
 INSTALLER_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/install.sh"
 DEFAULT_RELEASE_API_URL="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
+UV_INSTALLER_URL="https://astral.sh/uv/install.sh"
+UV_INSTALL_DIR="${UV_INSTALL_DIR:-$HOME/.local/bin}"
 PYPI_PACKAGE_NAME="${PORTWORLD_PYPI_PACKAGE:-portworld}"
 PYPI_PACKAGE_FALLBACK_NAME="${PORTWORLD_PYPI_PACKAGE_FALLBACK:-portworld-cli}"
+MINIMUM_PYTHON_VERSION="3.11"
 
 PORTWORLD_VERSION="${PORTWORLD_VERSION:-latest}"
 PORTWORLD_NO_INIT="${PORTWORLD_NO_INIT:-0}"
@@ -17,6 +20,14 @@ PORTWORLD_RELEASE_API_URL="${PORTWORLD_RELEASE_API_URL:-$DEFAULT_RELEASE_API_URL
 REQUESTED_VERSION="$PORTWORLD_VERSION"
 NO_INIT="$PORTWORLD_NO_INIT"
 NON_INTERACTIVE="$PORTWORLD_NON_INTERACTIVE"
+CURRENT_OS=""
+UV_BIN=""
+SELECTED_PYTHON=""
+USE_MANAGED_PYTHON=0
+INSTALL_TARGET=""
+RESOLVED_TAG=""
+RESOLVED_VERSION=""
+INSTALL_SOURCE_DESCRIPTION=""
 
 if [[ -t 1 && -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" ]]; then
   COLOR_INFO=$'\033[38;5;110m'
@@ -66,6 +77,9 @@ PortWorld installer for macOS and Linux
 Usage:
   curl -fsSL --proto '=https' --tlsv1.2 ${INSTALLER_URL} | bash
   curl -fsSL --proto '=https' --tlsv1.2 ${INSTALLER_URL} | bash -s -- [options]
+
+This bootstrap installs uv automatically when needed. If Python 3.11+ is not
+available locally, it installs a managed Python runtime before installing the CLI.
 
 Options:
   --help                 Show this help text.
@@ -117,9 +131,23 @@ require_command() {
   command -v "$name" >/dev/null 2>&1 || fail "Missing required command: $name"
 }
 
+prepend_path_dir() {
+  local dir="$1"
+  [[ -n "$dir" ]] || return 0
+  [[ -d "$dir" ]] || return 0
+  case ":$PATH:" in
+    *":$dir:"*) ;;
+    *) export PATH="$dir:$PATH" ;;
+  esac
+}
+
 ensure_supported_os() {
   case "$(uname -s 2>/dev/null || true)" in
-    Darwin|Linux)
+    Darwin)
+      CURRENT_OS="macos"
+      ;;
+    Linux)
+      CURRENT_OS="linux"
       ;;
     *)
       fail "Unsupported operating system. This installer supports macOS and Linux only."
@@ -143,63 +171,65 @@ curl_get() {
     "$url"
 }
 
-ensure_python_version() {
+python_version_string() {
   python3 - <<'PY'
 import sys
-if sys.version_info < (3, 11):
-    print(
-        f"Python 3.11 or newer is required; found {sys.version.split()[0]}",
-        file=sys.stderr,
-    )
-    raise SystemExit(1)
+print(sys.version.split()[0])
 PY
 }
 
-ensure_python_pip() {
-  if python3 -m pip --version >/dev/null 2>&1; then
-    return
-  fi
-  log_info "pip was not available through python3; trying ensurepip"
-  python3 -m ensurepip --upgrade >/dev/null 2>&1 || fail \
-    "python3 is present, but pip could not be bootstrapped. Install pip for python3 and retry."
-  python3 -m pip --version >/dev/null 2>&1 || fail \
-    "python3 is present, but pip is still unavailable after ensurepip."
-}
-
-ensure_pipx() {
-  if python3 -m pipx --version >/dev/null 2>&1; then
-    return
-  fi
-  log_info "pipx was not available; installing it with python3 -m pip --user"
-  ensure_python_pip
-  python3 -m pip install --user pipx >/dev/null
-  python3 -m pipx ensurepath >/dev/null || true
-  python3 -m pipx --version >/dev/null 2>&1 || fail "pipx installation did not succeed."
-}
-
-resolve_pipx_bin_dir() {
-  local pipx_bin_dir
-  pipx_bin_dir="$(python3 -m pipx environment --value PIPX_BIN_DIR 2>/dev/null || true)"
-  if [[ -n "$pipx_bin_dir" ]]; then
-    printf '%s\n' "$pipx_bin_dir"
-    return
-  fi
-
+python_meets_minimum() {
   python3 - <<'PY'
-import os
-import site
-print(os.path.join(site.USER_BASE, "bin"))
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 11) else 1)
 PY
 }
 
-ensure_portworld_on_path() {
-  local pipx_bin_dir
-  pipx_bin_dir="$(resolve_pipx_bin_dir)"
-  if [[ -d "$pipx_bin_dir" ]]; then
-    export PATH="$pipx_bin_dir:$PATH"
+run_selected_python() {
+  "$SELECTED_PYTHON" "$@"
+}
+
+ensure_uv() {
+  UV_BIN="$(command -v uv || true)"
+  if [[ -n "$UV_BIN" ]]; then
+    prepend_path_dir "$UV_INSTALL_DIR"
+    return
   fi
-  command -v portworld >/dev/null 2>&1 || fail \
-    "portworld was installed but is not on PATH. Open a new shell or add the pipx bin dir to PATH and retry."
+
+  section "Bootstrapping uv"
+  mkdir -p "$UV_INSTALL_DIR"
+  curl_get "$UV_INSTALLER_URL" | env UV_INSTALL_DIR="$UV_INSTALL_DIR" UV_NO_MODIFY_PATH=1 sh || fail \
+    "Unable to install uv via the official installer."
+  prepend_path_dir "$UV_INSTALL_DIR"
+  UV_BIN="$(command -v uv || true)"
+  [[ -n "$UV_BIN" ]] || fail \
+    "uv was installed but is not on PATH. Open a new shell or run: export PATH=\"$UV_INSTALL_DIR:\$PATH\""
+  log_success "uv installed"
+}
+
+ensure_python_runtime() {
+  if command -v python3 >/dev/null 2>&1 && python_meets_minimum; then
+    SELECTED_PYTHON="python3"
+    USE_MANAGED_PYTHON=0
+    log_info "Using system Python $(python_version_string)"
+    return
+  fi
+
+  section "Installing Python"
+  if command -v python3 >/dev/null 2>&1; then
+    log_info "System Python $(python_version_string) is too old; installing managed Python ${MINIMUM_PYTHON_VERSION}"
+  else
+    log_info "python3 was not found; installing managed Python ${MINIMUM_PYTHON_VERSION}"
+  fi
+
+  "$UV_BIN" python install "$MINIMUM_PYTHON_VERSION" || fail \
+    "Unable to install managed Python ${MINIMUM_PYTHON_VERSION} with uv."
+  prepend_path_dir "$UV_INSTALL_DIR"
+  SELECTED_PYTHON="$(command -v "python${MINIMUM_PYTHON_VERSION}" || true)"
+  [[ -n "$SELECTED_PYTHON" ]] || fail \
+    "Managed Python ${MINIMUM_PYTHON_VERSION} was installed, but its executable was not found on PATH."
+  USE_MANAGED_PYTHON=1
+  log_success "Managed Python ${MINIMUM_PYTHON_VERSION} installed"
 }
 
 normalize_tag() {
@@ -215,10 +245,18 @@ normalize_tag() {
   printf 'v%s\n' "$value"
 }
 
+version_from_tag() {
+  local tag="$1"
+  local normalized="${tag#v}"
+  [[ "$normalized" =~ ^[0-9]+(\.[0-9]+)*$ ]] || fail \
+    "Release tag '$tag' does not map to a valid Python package version."
+  printf '%s\n' "$normalized"
+}
+
 resolve_latest_release_tag() {
   local raw_json
   raw_json="$(curl_get "$PORTWORLD_RELEASE_API_URL")" || return 1
-  PORTWORLD_RELEASE_PAYLOAD="$raw_json" python3 -c '
+  PORTWORLD_RELEASE_PAYLOAD="$raw_json" run_selected_python -c '
 import json
 import os
 
@@ -233,41 +271,66 @@ print(tag.strip())
 '
 }
 
-build_archive_url() {
-  local tag="$1"
-  printf 'https://github.com/%s/%s/archive/refs/tags/%s.zip\n' "$REPO_OWNER" "$REPO_NAME" "$tag"
-}
-
-resolve_install_source() {
+resolve_install_target() {
   if [[ -n "$PORTWORLD_INSTALL_SOURCE_URL" ]]; then
+    INSTALL_TARGET="$PORTWORLD_INSTALL_SOURCE_URL"
+    INSTALL_SOURCE_DESCRIPTION="override"
+    RESOLVED_TAG="custom"
     RESOLVED_VERSION="custom"
-    INSTALL_SOURCE="$PORTWORLD_INSTALL_SOURCE_URL"
     return
   fi
 
   local requested
   requested="$(normalize_tag "$REQUESTED_VERSION")"
   if [[ "$requested" == "latest" ]]; then
-    local latest_tag
-    latest_tag="$(resolve_latest_release_tag)" || fail \
+    RESOLVED_TAG="$(resolve_latest_release_tag)" || fail \
       "Unable to resolve the latest PortWorld release tag from GitHub Releases."
-    RESOLVED_VERSION="$latest_tag"
-    INSTALL_SOURCE="$(build_archive_url "$latest_tag")"
-    return
+  else
+    RESOLVED_TAG="$requested"
   fi
+  RESOLVED_VERSION="$(version_from_tag "$RESOLVED_TAG")"
+  INSTALL_TARGET="${PYPI_PACKAGE_NAME}==${RESOLVED_VERSION}"
+  INSTALL_SOURCE_DESCRIPTION="PyPI"
+}
 
-  RESOLVED_VERSION="$requested"
-  INSTALL_SOURCE="$(build_archive_url "$requested")"
+ensure_portworld_on_path() {
+  local uv_tool_bin_dir
+  uv_tool_bin_dir="$("$UV_BIN" tool dir --bin 2>/dev/null || true)"
+  if [[ -z "$uv_tool_bin_dir" ]]; then
+    uv_tool_bin_dir="$HOME/.local/bin"
+  fi
+  prepend_path_dir "$uv_tool_bin_dir"
+  command -v portworld >/dev/null 2>&1 || fail \
+    "portworld was installed but is not on PATH. Open a new shell or run: export PATH=\"$uv_tool_bin_dir:\$PATH\""
 }
 
 run_install() {
+  local -a install_args
+
   section "Installing PortWorld CLI"
-  log_info "Source: $INSTALL_SOURCE"
-  if [[ "$RESOLVED_VERSION" != "custom" ]]; then
-    log_info "Version: $RESOLVED_VERSION"
+  if [[ "$INSTALL_SOURCE_DESCRIPTION" == "override" ]]; then
+    log_info "Install source override: $INSTALL_TARGET"
+  else
+    log_info "Source: $INSTALL_SOURCE_DESCRIPTION"
+    log_info "Release tag: $RESOLVED_TAG"
+    log_info "Package version: $RESOLVED_VERSION"
   fi
   log_info "PyPI package name: $PYPI_PACKAGE_NAME (fallback: $PYPI_PACKAGE_FALLBACK_NAME)"
-  python3 -m pipx install --force "$INSTALL_SOURCE"
+
+  install_args=("$UV_BIN" tool install --force)
+  if [[ "$USE_MANAGED_PYTHON" == "1" ]]; then
+    install_args+=(--managed-python --python "$SELECTED_PYTHON")
+  else
+    install_args+=(--python "$SELECTED_PYTHON" --no-python-downloads)
+  fi
+
+  if [[ "$INSTALL_SOURCE_DESCRIPTION" == "override" && -d "$INSTALL_TARGET" ]]; then
+    install_args+=(--editable "$INSTALL_TARGET")
+  else
+    install_args+=("$INSTALL_TARGET")
+  fi
+
+  "${install_args[@]}"
   ensure_portworld_on_path
   portworld --version >/dev/null
   log_success "PortWorld CLI installed"
@@ -310,10 +373,9 @@ main() {
   ensure_supported_os
   require_command bash
   require_command curl
-  require_command python3
-  ensure_python_version || fail "Python 3.11 or newer is required."
-  ensure_pipx
-  resolve_install_source
+  ensure_uv
+  ensure_python_runtime
+  resolve_install_target
   run_install
   run_init
 }
