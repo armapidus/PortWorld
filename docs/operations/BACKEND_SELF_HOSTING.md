@@ -12,14 +12,23 @@ It is intentionally narrow:
 ## Prerequisites
 
 - Docker with Compose support
-- one OpenAI API key for realtime sessions
+- one realtime provider key:
+  - `OPENAI_API_KEY` when `REALTIME_PROVIDER=openai`
+  - `GEMINI_LIVE_API_KEY` when `REALTIME_PROVIDER=gemini_live`
 
-Optional, depending on enabled features:
+Optional, depending on enabled features and selected providers:
 
-- one vision provider key for visual memory:
-  - preferred: `VISION_PROVIDER_API_KEY`
-  - fallback: `MISTRAL_API_KEY`
-- one Tavily API key for `web_search`
+- visual memory provider credentials when `VISION_MEMORY_ENABLED=true`
+- search provider credentials (`TAVILY_API_KEY`) when `REALTIME_TOOLING_ENABLED=true`
+
+For authoritative required/optional provider settings, use:
+
+```bash
+portworld providers list
+portworld providers show openai
+portworld providers show gemini_live
+portworld providers show mistral
+```
 
 ## Quick Start
 
@@ -76,19 +85,21 @@ Run the contributor/source path from the repo root. The operator path is the def
 If you prefer the manual path, `cp backend/.env.example backend/.env` still works. Edit `backend/.env` for one supported runtime mode:
 
 - realtime-only self-host
-  - set `OPENAI_API_KEY`
+  - set `REALTIME_PROVIDER` to `openai` or `gemini_live`
+  - set the selected realtime provider key
   - keep `VISION_MEMORY_ENABLED=false`
   - keep `REALTIME_TOOLING_ENABLED=false`
 - realtime plus visual memory
-  - set `OPENAI_API_KEY`
+  - set `REALTIME_PROVIDER` and the selected realtime provider key
   - set `VISION_MEMORY_ENABLED=true`
-  - prefer `VISION_PROVIDER_API_KEY`
-  - optional `VISION_PROVIDER_BASE_URL` for compatible hosted endpoints
-  - `MISTRAL_API_KEY` and `MISTRAL_BASE_URL` remain supported fallback aliases
+  - set `VISION_MEMORY_PROVIDER` to one of:
+    - `mistral`, `openai`, `azure_openai`, `gemini`, `claude`, `bedrock`, `groq`
+  - set the selected vision provider key(s)
 - realtime plus tooling
-  - set `OPENAI_API_KEY`
+  - set `REALTIME_PROVIDER` and the selected realtime provider key
   - set `REALTIME_TOOLING_ENABLED=true`
-  - set `TAVILY_API_KEY` only if `web_search` should be available
+  - keep `REALTIME_WEB_SEARCH_PROVIDER=tavily`
+  - set `TAVILY_API_KEY`
 
 Start the backend:
 
@@ -260,6 +271,9 @@ Repeat deploys reuse `.portworld/state/gcp-cloud-run.json`. After deploy, use:
 - public liveness: `GET /livez`
 - authenticated readiness: `GET /readyz`
 
+Cloud Run secret binding is selected-provider aware. `portworld doctor --target gcp-cloud-run`
+reports only the provider secrets required by your current provider selections.
+
 ## Notes
 
 - `BACKEND_BEARER_TOKEN` should be set for any shared or remotely reachable deployment.
@@ -269,4 +283,4 @@ Repeat deploys reuse `.portworld/state/gcp-cloud-run.json`. After deploy, use:
 - When `BACKEND_ENABLE_IP_RATE_LIMITS=true`, the backend IP-rate-limits `GET /profile`, `PUT /profile`, `POST /profile/reset`, `GET /memory/export`, `GET /memory/session/{session_id}/status`, and `POST /memory/session/{session_id}/reset`.
 - In development profile, IP rate limits stay off by default unless you explicitly enable them.
 - Visual memory keeps derived memory by default and deletes raw frames unless debug retention is enabled.
-- When `REALTIME_TOOLING_ENABLED=true` and `TAVILY_API_KEY` is unset, the backend still starts but omits `web_search`.
+- When `REALTIME_TOOLING_ENABLED=true` and provider credentials are incomplete, doctor/readiness checks report targeted missing keys for the selected providers.

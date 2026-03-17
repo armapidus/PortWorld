@@ -1,13 +1,13 @@
 # PortWorld Backend
 
-FastAPI + Uvicorn backend that relays realtime voice sessions to OpenAI, with opt-in visual memory and realtime tooling.
+FastAPI + Uvicorn backend that relays realtime voice sessions through selectable realtime providers, with opt-in visual memory and realtime tooling.
 
 ## Features
 
-- **Realtime voice relay** — bridges a WebSocket audio session to the OpenAI Realtime API; streams assistant audio back to the client
+- **Realtime voice relay** — bridges a WebSocket audio session to the selected realtime provider (`openai` or `gemini_live`) and streams assistant audio back to the client
 - **Persistent memory** — SQLite + filesystem storage for session memory and a user profile, with configurable retention
-- **Visual memory** *(opt-in)* — ingests JPEG frames via `POST /vision/frame`, routes them through adaptive scene-change gating, and builds semantic session memory using any OpenAI-compatible vision endpoint (default: Mistral)
-- **Realtime tooling** *(opt-in)* — registers memory-recall tools with the active OpenAI session; optionally adds web search via Tavily
+- **Visual memory** *(opt-in)* — ingests JPEG frames via `POST /vision/frame`, routes them through adaptive scene-change gating, and builds semantic session memory using the selected vision provider (`mistral`, `openai`, `azure_openai`, `gemini`, `claude`, `bedrock`, `groq`)
+- **Realtime tooling** *(opt-in)* — registers memory-recall tools with the active realtime session; optionally adds web search via Tavily
 - **Bearer token auth** — all non-health endpoints can require `Authorization: Bearer <token>`; production mode enforces this at startup
 - **Rate limiting** — sliding-window limits on WebSocket setup, session activation, vision ingest, and protected profile/memory-admin HTTP routes
 - **Memory export** — `GET /memory/export` streams a ZIP of all session and profile memory
@@ -17,7 +17,9 @@ FastAPI + Uvicorn backend that relays realtime voice sessions to OpenAI, with op
 
 - Python 3.11+
 - Docker and Docker Compose (for the Docker path)
-- An [OpenAI API key](https://platform.openai.com/api-keys) with Realtime API access
+- Provider credentials for your selected providers:
+  - `OPENAI_API_KEY` when `REALTIME_PROVIDER=openai`
+  - `GEMINI_LIVE_API_KEY` when `REALTIME_PROVIDER=gemini_live`
 
 ## CLI-first quick start
 
@@ -110,7 +112,7 @@ Public installer flags:
 
 ```bash
 cp backend/.env.example backend/.env
-# Open backend/.env and set OPENAI_API_KEY at minimum
+# Open backend/.env and set the selected realtime provider key at minimum
 docker compose up --build
 ```
 
@@ -122,7 +124,7 @@ Data is persisted in a named Docker volume (`portworld_backend_var`).
 cd backend
 pip install -r requirements.txt
 cp .env.example .env
-# Open .env and set OPENAI_API_KEY at minimum
+# Open .env and set the selected realtime provider key at minimum
 python -m backend.cli serve
 ```
 
@@ -138,24 +140,42 @@ Use `/livez` for public and Cloud Run liveness checks. `/healthz` remains availa
 ## Configuration
 
 Copy `.env.example` to `.env` and edit. The full reference with all options and defaults is in `.env.example`.
+Use `portworld providers list` and `portworld providers show <provider_id>` to inspect current provider requirements.
 
-**Required**
-
-| Variable | Description |
-|---|---|
-| `OPENAI_API_KEY` | OpenAI API key with Realtime API access |
-
-**Opt-in features**
+**Provider selection toggles**
 
 | Variable | Description |
 |---|---|
-| `VISION_MEMORY_ENABLED` | Set `true` to enable the visual memory pipeline |
-| `VISION_PROVIDER_API_KEY` | API key for the vision endpoint (required when vision is enabled) |
-| `VISION_PROVIDER_BASE_URL` | Base URL for any OpenAI-compatible vision endpoint (defaults to Mistral) |
-| `REALTIME_TOOLING_ENABLED` | Set `true` to register memory and search tools with the realtime session |
-| `TAVILY_API_KEY` | Enables the `web_search` tool (only used when tooling is enabled) |
+| `REALTIME_PROVIDER` | Realtime provider id (`openai` or `gemini_live`) |
+| `VISION_MEMORY_ENABLED` | Set `true` to enable the vision provider pipeline |
+| `VISION_MEMORY_PROVIDER` | Vision provider id when vision is enabled |
+| `REALTIME_TOOLING_ENABLED` | Set `true` to enable realtime tooling |
+| `REALTIME_WEB_SEARCH_PROVIDER` | Search provider id when tooling is enabled (currently `tavily`) |
 
-Some OpenAI-compatible Mistral endpoints reject `response_format` / structured-output mode for their tokenizer backend. When that happens, the backend automatically retries once without `response_format` and falls back to prompt-only JSON extraction.
+**Realtime provider required keys**
+
+| Variable | Description |
+|---|---|
+| `OPENAI_API_KEY` | Required when `REALTIME_PROVIDER=openai` |
+| `GEMINI_LIVE_API_KEY` | Required when `REALTIME_PROVIDER=gemini_live` |
+
+**Vision provider required keys (when `VISION_MEMORY_ENABLED=true`)**
+
+| Provider id | Required key(s) |
+|---|---|
+| `mistral` | `VISION_MISTRAL_API_KEY` |
+| `openai` | `VISION_OPENAI_API_KEY` |
+| `azure_openai` | `VISION_AZURE_OPENAI_API_KEY` |
+| `gemini` | `VISION_GEMINI_API_KEY` |
+| `claude` | `VISION_CLAUDE_API_KEY` |
+| `bedrock` | no required static key (set `VISION_BEDROCK_REGION` and optional AWS credentials as needed) |
+| `groq` | `VISION_GROQ_API_KEY` |
+
+**Search provider required keys (when `REALTIME_TOOLING_ENABLED=true`)**
+
+| Provider id | Required key(s) |
+|---|---|
+| `tavily` | `TAVILY_API_KEY` |
 
 **Production hardening**
 
@@ -211,6 +231,11 @@ portworld init
 # Validate local or Cloud Run readiness
 portworld doctor --target local
 portworld doctor --target gcp-cloud-run --project <project> --region <region>
+
+# Inspect provider capabilities and required keys
+portworld providers list
+portworld providers show openai
+portworld providers show bedrock
 
 # Deploy to Cloud Run
 portworld deploy gcp-cloud-run --project <project> --region <region> --cors-origins https://app.example.com
