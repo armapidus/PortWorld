@@ -263,6 +263,12 @@ Vision expansion should share helper code where useful, but not collapse all pro
 - SDK usage
 - provider-specific response parsing
 
+#### Slice 6 status (2026-03-17)
+
+- Landed shared vision helper utilities in `backend/vision/providers/shared.py` for reusable low-level concerns only: prompt/image helpers, HTTP transport error mapping, rate-limit parsing, structured-output fallback detection, and normalized observation mapping.
+- Refactored the existing Mistral vision adapter to consume shared helpers without changing the runtime contract or migration behavior.
+- Kept provider-specific request schema, auth, endpoints, and payload parsing inside each provider adapter.
+
 ### Step 7: Implement the first native vision adapter tranche
 
 Add official vision providers as separate adapters under the existing vision factory.
@@ -314,6 +320,12 @@ Add official vision providers as separate adapters under the existing vision fac
 
 - `VISION_MEMORY_PROVIDER` becomes truly multi-provider
 - each provider returns the same normalized `VisionObservation`
+
+#### Slice 7 status (2026-03-17)
+
+- Added native vision adapters for `openai`, `azure_openai`, `gemini`, `claude`, `bedrock`, and `groq` under `backend/vision/providers/**`.
+- Registered all new vision providers in the vision factory with explicit capability metadata and provider-specific startup validation hooks.
+- Added minimal provider-scoped vision settings/env surface needed for this tranche, while preserving existing Mistral migration aliases and resolution precedence.
 
 ### Step 8: Redesign the settings and env surface for provider growth
 
