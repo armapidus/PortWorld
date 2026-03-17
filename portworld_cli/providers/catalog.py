@@ -74,6 +74,27 @@ PROVIDER_CATALOG: tuple[ProviderCatalogEntry, ...] = (
         ),
     ),
     ProviderCatalogEntry(
+        id="aws",
+        display_name="AWS ECS/Fargate",
+        kind="cloud",
+        summary="Managed deployment path for PortWorld on AWS ECS/Fargate behind ALB HTTPS.",
+        default=False,
+        aliases=("aws-ecs-fargate",),
+        capability_tags=("deploy", "status"),
+        supported_targets=("aws-ecs-fargate",),
+        required_clis=("aws",),
+        setup_notes=(
+            "Configure AWS credentials with `aws configure` before managed commands.",
+            "Provide VPC/subnets, ECS cluster/service names, and an ISSUED ACM certificate ARN.",
+            "Use `portworld doctor --target aws-ecs-fargate` before first deploy.",
+        ),
+        command_paths=(
+            "portworld doctor --target aws-ecs-fargate",
+            "portworld deploy aws-ecs-fargate",
+            "portworld status",
+        ),
+    ),
+    ProviderCatalogEntry(
         id="openai",
         display_name="OpenAI Realtime",
         kind="realtime",
