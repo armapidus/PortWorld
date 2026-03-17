@@ -120,6 +120,18 @@ def config_edit_security_command(
     default=None,
     help="Runtime source mode for this workspace.",
 )
+@click.option(
+    "--cloud-provider",
+    type=click.Choice(["gcp", "aws", "azure"]),
+    default=None,
+    help="Managed cloud provider to configure.",
+)
+@click.option(
+    "--target",
+    type=click.Choice(["gcp-cloud-run", "aws-ecs-fargate", "azure-container-apps"]),
+    default=None,
+    help="Managed target to configure.",
+)
 @click.option("--project", default=None, help="Default GCP project id.")
 @click.option("--region", default=None, help="Default GCP region.")
 @click.option("--service", default=None, help="Default Cloud Run service name.")
@@ -132,11 +144,23 @@ def config_edit_security_command(
 @click.option("--concurrency", type=int, default=None, help="Default Cloud Run concurrency.")
 @click.option("--cpu", default=None, help="Default Cloud Run CPU.")
 @click.option("--memory", default=None, help="Default Cloud Run memory.")
+@click.option("--aws-region", default=None, help="Default AWS region.")
+@click.option("--aws-cluster", default=None, help="Default ECS cluster name.")
+@click.option("--aws-service", default=None, help="Default ECS service name.")
+@click.option("--aws-vpc-id", default=None, help="Default VPC id.")
+@click.option("--aws-subnet-ids", default=None, help="Default subnet ids (comma-separated).")
+@click.option("--azure-subscription", default=None, help="Default Azure subscription id.")
+@click.option("--azure-resource-group", default=None, help="Default Azure resource group.")
+@click.option("--azure-region", default=None, help="Default Azure region.")
+@click.option("--azure-environment", default=None, help="Default Container Apps environment name.")
+@click.option("--azure-app", default=None, help="Default Container App name.")
 @click.pass_obj
 def config_edit_cloud_command(
     cli_context: CLIContext,
     project_mode: str | None,
     runtime_source: str | None,
+    cloud_provider: str | None,
+    target: str | None,
     project: str | None,
     region: str | None,
     service: str | None,
@@ -149,6 +173,16 @@ def config_edit_cloud_command(
     concurrency: int | None,
     cpu: str | None,
     memory: str | None,
+    aws_region: str | None,
+    aws_cluster: str | None,
+    aws_service: str | None,
+    aws_vpc_id: str | None,
+    aws_subnet_ids: str | None,
+    azure_subscription: str | None,
+    azure_resource_group: str | None,
+    azure_region: str | None,
+    azure_environment: str | None,
+    azure_app: str | None,
 ) -> None:
     """Edit project mode and managed cloud defaults."""
     exit_with_result(
@@ -158,6 +192,8 @@ def config_edit_cloud_command(
             CloudEditOptions(
                 project_mode=project_mode,
                 runtime_source=runtime_source,
+                cloud_provider=cloud_provider,
+                target=target,
                 project=project,
                 region=region,
                 service=service,
@@ -170,6 +206,16 @@ def config_edit_cloud_command(
                 concurrency=concurrency,
                 cpu=cpu,
                 memory=memory,
+                aws_region=aws_region,
+                aws_cluster=aws_cluster,
+                aws_service=aws_service,
+                aws_vpc_id=aws_vpc_id,
+                aws_subnet_ids=aws_subnet_ids,
+                azure_subscription=azure_subscription,
+                azure_resource_group=azure_resource_group,
+                azure_region=azure_region,
+                azure_environment=azure_environment,
+                azure_app=azure_app,
             ),
         ),
     )

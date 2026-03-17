@@ -74,6 +74,8 @@ class InitOptions:
     clear_bearer_token: bool
     project_mode: str | None
     runtime_source: str | None
+    cloud_provider: str | None
+    target: str | None
     stack_name: str | None
     release_tag: str | None
     host_port: int | None
@@ -89,6 +91,16 @@ class InitOptions:
     concurrency: int | None
     cpu: str | None
     memory: str | None
+    aws_region: str | None
+    aws_cluster: str | None
+    aws_service: str | None
+    aws_vpc_id: str | None
+    aws_subnet_ids: str | None
+    azure_subscription: str | None
+    azure_resource_group: str | None
+    azure_region: str | None
+    azure_environment: str | None
+    azure_app: str | None
 
 
 def run_init(cli_context: CLIContext, options: InitOptions) -> CommandResult:
@@ -442,6 +454,8 @@ def _collect_init_sections(
         CloudEditOptions(
             project_mode=options.project_mode,
             runtime_source=runtime_source,
+            cloud_provider=options.cloud_provider,
+            target=options.target,
             project=options.project,
             region=options.region,
             service=options.service,
@@ -454,6 +468,16 @@ def _collect_init_sections(
             concurrency=options.concurrency,
             cpu=options.cpu,
             memory=options.memory,
+            aws_region=options.aws_region,
+            aws_cluster=options.aws_cluster,
+            aws_service=options.aws_service,
+            aws_vpc_id=options.aws_vpc_id,
+            aws_subnet_ids=options.aws_subnet_ids,
+            azure_subscription=options.azure_subscription,
+            azure_resource_group=options.azure_resource_group,
+            azure_region=options.azure_region,
+            azure_environment=options.azure_environment,
+            azure_app=options.azure_app,
         ),
         prompt_defaults_when_local=False,
     )

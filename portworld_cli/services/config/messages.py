@@ -56,9 +56,17 @@ def build_init_review_lines(
         f"backend_profile: {normalize_backend_profile(project_config.security.backend_profile)}",
         f"cors_origins: {','.join(project_config.security.cors_origins)}",
         f"allowed_hosts: {','.join(project_config.security.allowed_hosts)}",
+        f"preferred_target: {project_config.deploy.preferred_target or 'none'}",
         f"gcp_project_id: {project_config.deploy.gcp_cloud_run.project_id or 'unset'}",
         f"gcp_region: {project_config.deploy.gcp_cloud_run.region or 'unset'}",
         f"service_name: {project_config.deploy.gcp_cloud_run.service_name}",
+        f"aws_region: {project_config.deploy.aws_ecs_fargate.region or 'unset'}",
+        f"azure_region: {project_config.deploy.azure_container_apps.region or 'unset'}",
+        (
+            "managed_target_execution: gcp-only for deploy/doctor in current phase"
+            if project_config.cloud_provider in {"aws", "azure"}
+            else "managed_target_execution: active target support unchanged"
+        ),
         f"openai_api_key: {presence_label(secret_readiness.openai_api_key_present)}",
         f"vision_provider_api_key: {required_presence_label(secret_readiness.vision_provider_secret_required, secret_readiness.vision_provider_api_key_present)}",
         f"tavily_api_key: {required_presence_label(secret_readiness.tavily_secret_required, secret_readiness.tavily_api_key_present)}",
@@ -133,6 +141,33 @@ def build_config_show_message(
         ("gcp_project_id", project_config.deploy.gcp_cloud_run.project_id or "unset"),
         ("gcp_region", project_config.deploy.gcp_cloud_run.region or "unset"),
         ("gcp_service_name", project_config.deploy.gcp_cloud_run.service_name),
+        ("aws_region", project_config.deploy.aws_ecs_fargate.region or "unset"),
+        ("aws_cluster_name", project_config.deploy.aws_ecs_fargate.cluster_name or "unset"),
+        ("aws_service_name", project_config.deploy.aws_ecs_fargate.service_name or "unset"),
+        ("aws_vpc_id", project_config.deploy.aws_ecs_fargate.vpc_id or "unset"),
+        ("aws_subnet_ids", ",".join(project_config.deploy.aws_ecs_fargate.subnet_ids) or "unset"),
+        (
+            "azure_subscription_id",
+            project_config.deploy.azure_container_apps.subscription_id or "unset",
+        ),
+        (
+            "azure_resource_group",
+            project_config.deploy.azure_container_apps.resource_group or "unset",
+        ),
+        ("azure_region", project_config.deploy.azure_container_apps.region or "unset"),
+        (
+            "azure_environment_name",
+            project_config.deploy.azure_container_apps.environment_name or "unset",
+        ),
+        ("azure_app_name", project_config.deploy.azure_container_apps.app_name or "unset"),
+        (
+            "managed_target_execution",
+            (
+                "gcp-only for deploy/doctor in current phase"
+                if project_config.cloud_provider in {"aws", "azure"}
+                else "active target support unchanged"
+            ),
+        ),
         ("env_path", env_path),
         ("derived_from_legacy", derived_from_legacy),
         ("openai_api_key", presence_label(secret_readiness.openai_api_key_present)),

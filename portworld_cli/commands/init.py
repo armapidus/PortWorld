@@ -39,6 +39,18 @@ from portworld_cli.services.init import InitOptions, run_init
     default=None,
     help="Runtime source mode for this workspace.",
 )
+@click.option(
+    "--cloud-provider",
+    type=click.Choice(["gcp", "aws", "azure"]),
+    default=None,
+    help="Managed cloud provider to configure.",
+)
+@click.option(
+    "--target",
+    type=click.Choice(["gcp-cloud-run", "aws-ecs-fargate", "azure-container-apps"]),
+    default=None,
+    help="Managed target to configure.",
+)
 @click.option("--stack-name", default=None, help="Published workspace stack name under ~/.portworld/stacks.")
 @click.option(
     "--release-tag",
@@ -58,6 +70,16 @@ from portworld_cli.services.init import InitOptions, run_init
 @click.option("--concurrency", type=int, default=None, help="Default Cloud Run concurrency.")
 @click.option("--cpu", default=None, help="Default Cloud Run CPU.")
 @click.option("--memory", default=None, help="Default Cloud Run memory.")
+@click.option("--aws-region", default=None, help="Default AWS region.")
+@click.option("--aws-cluster", default=None, help="Default ECS cluster name.")
+@click.option("--aws-service", default=None, help="Default ECS service name.")
+@click.option("--aws-vpc-id", default=None, help="Default VPC id.")
+@click.option("--aws-subnet-ids", default=None, help="Default subnet ids (comma-separated).")
+@click.option("--azure-subscription", default=None, help="Default Azure subscription id.")
+@click.option("--azure-resource-group", default=None, help="Default Azure resource group.")
+@click.option("--azure-region", default=None, help="Default Azure region.")
+@click.option("--azure-environment", default=None, help="Default Container Apps environment name.")
+@click.option("--azure-app", default=None, help="Default Container App name.")
 @click.pass_obj
 def init_command(
     cli_context: CLIContext,
@@ -77,6 +99,8 @@ def init_command(
     clear_bearer_token: bool,
     project_mode: str | None,
     runtime_source: str | None,
+    cloud_provider: str | None,
+    target: str | None,
     stack_name: str | None,
     release_tag: str | None,
     host_port: int | None,
@@ -92,6 +116,16 @@ def init_command(
     concurrency: int | None,
     cpu: str | None,
     memory: str | None,
+    aws_region: str | None,
+    aws_cluster: str | None,
+    aws_service: str | None,
+    aws_vpc_id: str | None,
+    aws_subnet_ids: str | None,
+    azure_subscription: str | None,
+    azure_resource_group: str | None,
+    azure_region: str | None,
+    azure_environment: str | None,
+    azure_app: str | None,
 ) -> None:
     """Initialize local PortWorld backend configuration."""
     exit_with_result(
@@ -115,6 +149,8 @@ def init_command(
                 clear_bearer_token=clear_bearer_token,
                 project_mode=project_mode,
                 runtime_source=runtime_source,
+                cloud_provider=cloud_provider,
+                target=target,
                 stack_name=stack_name,
                 release_tag=release_tag,
                 host_port=host_port,
@@ -130,6 +166,16 @@ def init_command(
                 concurrency=concurrency,
                 cpu=cpu,
                 memory=memory,
+                aws_region=aws_region,
+                aws_cluster=aws_cluster,
+                aws_service=aws_service,
+                aws_vpc_id=aws_vpc_id,
+                aws_subnet_ids=aws_subnet_ids,
+                azure_subscription=azure_subscription,
+                azure_resource_group=azure_resource_group,
+                azure_region=azure_region,
+                azure_environment=azure_environment,
+                azure_app=azure_app,
             ),
         ),
     )
