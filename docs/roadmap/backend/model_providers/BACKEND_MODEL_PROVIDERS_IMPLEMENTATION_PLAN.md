@@ -180,6 +180,12 @@ The current tooling contract is explicitly OpenAI-shaped. Fix that before Gemini
 - realtime tooling stays in one runtime/catalog
 - provider adapters translate tool definitions and outputs into provider-specific wire formats
 
+#### Slice 3 status (2026-03-17)
+
+- Landed provider-neutral realtime tool registration contract (`ToolDefinition`) in core bridge/runtime flow.
+- Moved OpenAI tool-definition wire rendering into the OpenAI realtime adapter/client while preserving session-init and legacy schema retry behavior.
+- Removed core runtime OpenAI-specific tool-render helpers (`to_openai_tool`/`to_openai_tools`) from active tooling path.
+
 ### Step 4: Implement the Gemini Live realtime adapter
 
 Add Gemini Live as the second official realtime provider using a native adapter.
