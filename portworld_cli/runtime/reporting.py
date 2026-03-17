@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import shutil
 import subprocess
+from typing import Any, Mapping
 
 import httpx
 
@@ -230,6 +231,7 @@ def build_status_message(
     session: InspectionSession,
     active_target: str | None,
     last_known_payload: dict[str, object] | None,
+    deploy_by_target: Mapping[str, Mapping[str, Any]],
     live_status: LiveServiceStatus,
     local_runtime: LocalRuntimeStatus | None,
     health: HealthSummary,
@@ -311,6 +313,19 @@ def build_status_message(
             ]
         )
     sections.append("\n".join(["Last deploy", format_key_value_lines(*deploy_pairs)]))
+
+    by_target_pairs: list[tuple[str, object | None]] = []
+    for target, target_summary in deploy_by_target.items():
+        source = target_summary.get("source")
+        last_known = target_summary.get("last_known")
+        service_url = None
+        if isinstance(last_known, dict):
+            service_url = last_known.get("service_url")
+        if service_url:
+            by_target_pairs.append((target, f"{source} ({service_url})"))
+        else:
+            by_target_pairs.append((target, source))
+    sections.append("\n".join(["Deploy by target", format_key_value_lines(*by_target_pairs)]))
 
     live_pairs = [
         ("attempted", live_status.attempted),

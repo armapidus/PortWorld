@@ -21,6 +21,7 @@ from portworld_cli.workspace.project_config import (
 from portworld_cli.targets import MANAGED_TARGETS
 from portworld_cli.workspace.discovery.locator import ResolvedWorkspace, resolve_workspace
 from portworld_cli.workspace.store import WorkspaceStoreSnapshot, load_workspace_store
+from portworld_cli.workspace.state.state_store import read_json_state
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +128,7 @@ class PublishedWorkspaceSession(WorkspaceSession):
 class InspectionSession:
     config_session: WorkspaceSession
     deploy_state: DeployState
+    deploy_states_by_target: dict[str, DeployState]
 
     @property
     def project_config(self) -> ProjectConfig:
@@ -234,6 +236,7 @@ def load_inspection_session(cli_context: CLIContext) -> InspectionSession:
     return InspectionSession(
         config_session=config_session,
         deploy_state=DeployState.from_payload(config_session.remembered_deploy_state),
+        deploy_states_by_target=_load_deploy_states_by_target(config_session.workspace_paths),
     )
 
 
@@ -252,6 +255,14 @@ def resolve_gcp_inspection_target(
         or session.deploy_state.service_name
         or _strip(gcp_config.service_name),
     )
+
+
+def _load_deploy_states_by_target(workspace_paths: WorkspacePaths) -> dict[str, DeployState]:
+    deploy_states: dict[str, DeployState] = {}
+    for target in MANAGED_TARGETS:
+        payload = read_json_state(workspace_paths.state_file_for_target(target))
+        deploy_states[target] = DeployState.from_payload(payload)
+    return deploy_states
 
 
 def _load_workspace_session(
