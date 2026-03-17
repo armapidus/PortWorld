@@ -17,8 +17,24 @@ SUPPORTED_STORAGE_BACKENDS = {"local", "postgres_gcs"}
 SUPPORTED_OBJECT_STORE_PROVIDERS = {"filesystem", "gcs"}
 
 
-class MissingOpenAIAPIKeyError(RuntimeError):
-    pass
+class MissingRealtimeProviderAPIKeyError(RuntimeError):
+    def __init__(self, *, provider: str, env_var: str) -> None:
+        provider_name = provider.strip().lower()
+        self.provider = provider_name
+        self.env_var = env_var
+        self.code = f"MISSING_{provider_name.upper()}_API_KEY"
+        self.user_message = f"Server missing {env_var}"
+        super().__init__(
+            f"{env_var} is required when REALTIME_PROVIDER={provider_name}"
+        )
+
+
+class MissingOpenAIAPIKeyError(MissingRealtimeProviderAPIKeyError):
+    def __init__(self, message: str = "OPENAI_API_KEY is required at runtime") -> None:
+        super().__init__(provider="openai", env_var="OPENAI_API_KEY")
+        self.user_message = "Server missing OPENAI_API_KEY"
+        self.code = "MISSING_OPENAI_API_KEY"
+        RuntimeError.__init__(self, message)
 
 
 def load_environment_files(backend_env_path: Path | None = None) -> None:
@@ -253,7 +269,10 @@ class Settings:
         if provider_name == "openai":
             raise MissingOpenAIAPIKeyError("OPENAI_API_KEY is required at runtime")
         if provider_name == "gemini_live":
-            raise RuntimeError("GEMINI_LIVE_API_KEY is required when REALTIME_PROVIDER=gemini_live")
+            raise MissingRealtimeProviderAPIKeyError(
+                provider=provider_name,
+                env_var="GEMINI_LIVE_API_KEY",
+            )
         raise RuntimeError(
             f"Unsupported realtime provider {provider_name!r}: no api-key resolution path is defined."
         )

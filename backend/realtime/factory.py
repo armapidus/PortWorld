@@ -74,6 +74,11 @@ class RealtimeProviderRegistry:
 
 
 def build_default_realtime_provider_registry() -> RealtimeProviderRegistry:
+    from backend.realtime.providers.gemini_live import (
+        GEMINI_LIVE_REALTIME_CAPABILITIES,
+        build_gemini_live_session_bridge,
+        validate_gemini_live_realtime_settings,
+    )
     from backend.realtime.providers.openai import (
         OPENAI_REALTIME_CAPABILITIES,
         build_openai_session_bridge,
@@ -88,6 +93,15 @@ def build_default_realtime_provider_registry() -> RealtimeProviderRegistry:
             validate_settings=validate_openai_realtime_settings,
             validate_on_startup=True,
             capabilities=OPENAI_REALTIME_CAPABILITIES,
+        )
+    )
+    registry.register(
+        RealtimeProviderDefinition(
+            name="gemini_live",
+            build_bridge=build_gemini_live_session_bridge,
+            validate_settings=validate_gemini_live_realtime_settings,
+            validate_on_startup=True,
+            capabilities=GEMINI_LIVE_REALTIME_CAPABILITIES,
         )
     )
     return registry
