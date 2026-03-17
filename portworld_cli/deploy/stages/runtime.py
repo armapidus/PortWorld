@@ -133,8 +133,9 @@ def build_runtime_env_vars(
         final_env[key] = value
 
     final_env["BACKEND_PROFILE"] = "production"
-    final_env["BACKEND_STORAGE_BACKEND"] = "postgres_gcs"
+    final_env["BACKEND_STORAGE_BACKEND"] = "managed"
     final_env["BACKEND_OBJECT_STORE_PROVIDER"] = "gcs"
+    final_env["BACKEND_OBJECT_STORE_NAME"] = bucket_name
     final_env["BACKEND_OBJECT_STORE_BUCKET"] = bucket_name
     final_env["BACKEND_OBJECT_STORE_PREFIX"] = config.service_name
     final_env["CORS_ORIGINS"] = config.cors_origins
