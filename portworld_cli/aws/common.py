@@ -82,11 +82,36 @@ def validate_s3_bucket_name(name: str) -> str | None:
         return "S3 bucket name cannot contain adjacent periods."
     if ".-" in name or "-." in name:
         return "S3 bucket name cannot use dashes next to periods."
+    if name.startswith("xn--"):
+        return "S3 bucket name cannot start with the reserved prefix 'xn--'."
+    if name.startswith("sthree-"):
+        return "S3 bucket name cannot start with the reserved prefix 'sthree-'."
+    if name.startswith("amzn-s3-demo-"):
+        return "S3 bucket name cannot start with the reserved prefix 'amzn-s3-demo-'."
+    if name.endswith("-s3alias"):
+        return "S3 bucket name cannot end with the reserved suffix '-s3alias'."
+    if name.endswith("--ol-s3"):
+        return "S3 bucket name cannot end with the reserved suffix '--ol-s3'."
+    if name.endswith(".mrap"):
+        return "S3 bucket name cannot end with the reserved suffix '.mrap'."
+    if name.endswith("--x-s3"):
+        return "S3 bucket name cannot end with the reserved suffix '--x-s3'."
+    if name.endswith("--table-s3"):
+        return "S3 bucket name cannot end with the reserved suffix '--table-s3'."
     try:
         ipaddress.ip_address(name)
         return "S3 bucket name cannot be formatted as an IP address."
     except ValueError:
         return None
+
+
+def s3_bucket_name_tls_warning(name: str) -> str | None:
+    if "." in name:
+        return (
+            "S3 bucket name includes periods; virtual-hosted HTTPS certificate "
+            "validation can fail. Prefer bucket names without periods."
+        )
+    return None
 
 
 def is_postgres_url(value: str) -> bool:

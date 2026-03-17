@@ -90,6 +90,8 @@ def evaluate_azure_container_apps_readiness(
     )
     database_url = _first_non_empty(explicit_database_url, env_values.get("BACKEND_DATABASE_URL"))
     storage_account = _first_non_empty(explicit_storage_account)
+    if storage_account is None and azure_defaults is not None:
+        storage_account = _first_non_empty(azure_defaults.storage_account)
     blob_container = _first_non_empty(
         explicit_blob_container,
         env_values.get("BACKEND_OBJECT_STORE_NAME"),
@@ -113,6 +115,24 @@ def evaluate_azure_container_apps_readiness(
     account_subscription_id: str | None = None
     tenant_id: str | None = None
     if cli_ok:
+        extension = run_az_json(["extension", "show", "--name", "containerapp"])
+        checks.append(
+            DiagnosticCheck(
+                id="az_containerapp_extension_ready",
+                status="pass" if extension.ok else "fail",
+                message=(
+                    "Azure `containerapp` extension is available."
+                    if extension.ok
+                    else (extension.message or "Azure `containerapp` extension is missing.")
+                ),
+                action=(
+                    None
+                    if extension.ok
+                    else "Install or update the extension: `az extension add --name containerapp --upgrade`."
+                ),
+            )
+        )
+
         account = run_az_json(["account", "show"])
         if account.ok and isinstance(account.value, dict):
             account_subscription_id = read_dict_string(account.value, "id")
@@ -136,6 +156,30 @@ def evaluate_azure_container_apps_readiness(
                 )
             )
 
+        provider = run_az_json(["provider", "show", "--namespace", "Microsoft.App"])
+        provider_state: str | None = None
+        if provider.ok and isinstance(provider.value, dict):
+            provider_state = read_dict_string(provider.value, "registrationState")
+        checks.append(
+            DiagnosticCheck(
+                id="az_provider_microsoft_app_registered",
+                status="pass" if provider_state == "Registered" else "fail",
+                message=(
+                    "Resource provider Microsoft.App is registered."
+                    if provider_state == "Registered"
+                    else (
+                        f"Microsoft.App registrationState is {provider_state}."
+                        if provider_state
+                        else (provider.message or "Unable to resolve Microsoft.App registration state.")
+                    )
+                ),
+                action=(
+                    None
+                    if provider_state == "Registered"
+                    else "Register provider: `az provider register --namespace Microsoft.App`."
+                ),
+            )
+        )
     checks.extend(
         [
             _required_check("azure_subscription_selected", subscription_id, "Provide --azure-subscription or set active az account."),
@@ -257,6 +301,7 @@ def evaluate_azure_container_apps_readiness(
             )
         else:
             fqdn = _extract_fqdn(app_result.value)
+            external_ingress = _extract_external_ingress(app_result.value)
             checks.append(
                 DiagnosticCheck(
                     id="container_app_inspectable",
@@ -274,6 +319,22 @@ def evaluate_azure_container_apps_readiness(
                         else "Container App ingress FQDN is missing."
                     ),
                     action=None if fqdn else "Enable external ingress and redeploy app configuration.",
+                )
+            )
+            checks.append(
+                DiagnosticCheck(
+                    id="container_app_ingress_external",
+                    status="pass" if external_ingress else "fail",
+                    message=(
+                        "Container App ingress is externally accessible."
+                        if external_ingress
+                        else "Container App ingress is not external."
+                    ),
+                    action=(
+                        None
+                        if external_ingress
+                        else "Enable external ingress on the container app for provider FQDN access."
+                    ),
                 )
             )
 
@@ -328,3 +389,17 @@ def _first_non_empty(*values: str | None) -> str | None:
         if normalized is not None:
             return normalized
     return None
+
+
+def _extract_external_ingress(container_app_payload: dict[str, object]) -> bool:
+    properties = container_app_payload.get("properties")
+    if not isinstance(properties, dict):
+        return False
+    configuration = properties.get("configuration")
+    if not isinstance(configuration, dict):
+        return False
+    ingress = configuration.get("ingress")
+    if not isinstance(ingress, dict):
+        return False
+    external = ingress.get("external")
+    return bool(external)

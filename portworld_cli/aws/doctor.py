@@ -9,6 +9,7 @@ from portworld_cli.aws.common import (
     normalize_optional_text,
     run_aws_json,
     run_aws_text,
+    s3_bucket_name_tls_warning,
     split_csv_values,
     validate_s3_bucket_name,
 )
@@ -201,6 +202,7 @@ def evaluate_aws_ecs_fargate_readiness(
         )
     else:
         bucket_validation_error = validate_s3_bucket_name(bucket_name)
+        bucket_tls_warning = s3_bucket_name_tls_warning(bucket_name)
         checks.append(
             DiagnosticCheck(
                 id="s3_bucket_name_valid",
@@ -211,6 +213,18 @@ def evaluate_aws_ecs_fargate_readiness(
                     else bucket_validation_error
                 ),
                 action=None if bucket_validation_error is None else "Choose a valid S3 bucket name.",
+            )
+        )
+        checks.append(
+            DiagnosticCheck(
+                id="s3_bucket_name_tls_compatibility",
+                status="warn" if bucket_tls_warning else "pass",
+                message=bucket_tls_warning or "S3 bucket name is compatible with virtual-hosted HTTPS access.",
+                action=(
+                    "Use an S3 bucket name without periods if clients will use virtual-hosted HTTPS endpoints."
+                    if bucket_tls_warning
+                    else None
+                ),
             )
         )
 
@@ -299,6 +313,192 @@ def evaluate_aws_ecs_fargate_readiness(
                 )
             )
 
+    if cli_ok and region and cluster_name and service_name:
+        service_result = run_aws_json(
+            [
+                "ecs",
+                "describe-services",
+                "--region",
+                region,
+                "--cluster",
+                cluster_name,
+                "--services",
+                service_name,
+            ]
+        )
+        if not service_result.ok or not isinstance(service_result.value, dict):
+            checks.append(
+                DiagnosticCheck(
+                    id="ecs_service_describe",
+                    status="fail",
+                    message=service_result.message or "Unable to describe ECS service.",
+                    action="Verify ECS cluster/service names and permissions for ecs:DescribeServices.",
+                )
+            )
+        else:
+            service_payload = _first_ecs_service(service_result.value)
+            if service_payload is None:
+                checks.append(
+                    DiagnosticCheck(
+                        id="ecs_service_describe",
+                        status="fail",
+                        message="ECS service was not found for the selected cluster.",
+                        action="Create the ECS service or correct --aws-cluster/--aws-service.",
+                    )
+                )
+            else:
+                service_status = _read_dict_string(service_payload, "status")
+                checks.append(
+                    DiagnosticCheck(
+                        id="ecs_service_active",
+                        status="pass" if service_status == "ACTIVE" else "fail",
+                        message=(
+                            f"ECS service status is {service_status}."
+                            if service_status
+                            else "ECS service status is unavailable."
+                        ),
+                        action=(
+                            None
+                            if service_status == "ACTIVE"
+                            else "Ensure the ECS service exists and is ACTIVE before deploy."
+                        ),
+                    )
+                )
+
+                network_ok = _service_network_alignment_ok(
+                    service_payload=service_payload,
+                    expected_subnets=subnet_ids,
+                )
+                checks.append(
+                    DiagnosticCheck(
+                        id="ecs_service_network_alignment",
+                        status="pass" if network_ok else "fail",
+                        message=(
+                            "ECS service awsvpc subnets align with configured subnets."
+                            if network_ok
+                            else "ECS service networking does not align with configured subnets."
+                        ),
+                        action=(
+                            None
+                            if network_ok
+                            else "Align ECS service awsvpc subnet configuration with --aws-subnet-ids."
+                        ),
+                    )
+                )
+
+                task_definition_arn = _read_dict_string(service_payload, "taskDefinition")
+                if task_definition_arn:
+                    task_definition_result = run_aws_json(
+                        [
+                            "ecs",
+                            "describe-task-definition",
+                            "--region",
+                            region,
+                            "--task-definition",
+                            task_definition_arn,
+                        ]
+                    )
+                    if not task_definition_result.ok or not isinstance(task_definition_result.value, dict):
+                        checks.append(
+                            DiagnosticCheck(
+                                id="ecs_task_definition_describe",
+                                status="fail",
+                                message=task_definition_result.message or "Unable to describe task definition.",
+                                action="Verify permissions for ecs:DescribeTaskDefinition.",
+                            )
+                        )
+                    else:
+                        task_definition_payload = task_definition_result.value.get("taskDefinition")
+                        if not isinstance(task_definition_payload, dict):
+                            checks.append(
+                                DiagnosticCheck(
+                                    id="ecs_task_definition_describe",
+                                    status="fail",
+                                    message="Task definition payload was missing.",
+                                    action="Verify ECS task definition configuration.",
+                                )
+                            )
+                        else:
+                            network_mode = _read_dict_string(task_definition_payload, "networkMode")
+                            compatibilities = task_definition_payload.get("requiresCompatibilities")
+                            is_fargate = isinstance(compatibilities, list) and "FARGATE" in compatibilities
+                            checks.append(
+                                DiagnosticCheck(
+                                    id="ecs_task_definition_fargate_compatible",
+                                    status="pass" if network_mode == "awsvpc" and is_fargate else "fail",
+                                    message=(
+                                        "Task definition is Fargate compatible (networkMode=awsvpc)."
+                                        if network_mode == "awsvpc" and is_fargate
+                                        else "Task definition must use networkMode=awsvpc and include requiresCompatibilities=FARGATE."
+                                    ),
+                                    action=(
+                                        None
+                                        if network_mode == "awsvpc" and is_fargate
+                                        else "Register a Fargate-compatible task definition and update the service."
+                                    ),
+                                )
+                            )
+                            execution_role = _read_dict_string(task_definition_payload, "executionRoleArn")
+                            task_role = _read_dict_string(task_definition_payload, "taskRoleArn")
+                            checks.append(
+                                DiagnosticCheck(
+                                    id="ecs_execution_role_present",
+                                    status="pass" if execution_role else "fail",
+                                    message=(
+                                        f"Execution role resolved: {execution_role}"
+                                        if execution_role
+                                        else "Execution role ARN is missing."
+                                    ),
+                                    action=(
+                                        None
+                                        if execution_role
+                                        else "Set executionRoleArn with ECR/CloudWatch/Secrets permissions."
+                                    ),
+                                )
+                            )
+                            checks.append(
+                                DiagnosticCheck(
+                                    id="ecs_task_role_present",
+                                    status="pass" if task_role else "warn",
+                                    message=(
+                                        f"Task role resolved: {task_role}"
+                                        if task_role
+                                        else "Task role ARN is missing."
+                                    ),
+                                    action=(
+                                        None
+                                        if task_role
+                                        else "Set taskRoleArn when runtime AWS API access is required."
+                                    ),
+                                )
+                            )
+                            has_secret_refs = _task_definition_has_secret_refs(task_definition_payload)
+                            checks.append(
+                                DiagnosticCheck(
+                                    id="ecs_secrets_model_ready",
+                                    status="pass" if has_secret_refs else "warn",
+                                    message=(
+                                        "ECS task definition includes secret references."
+                                        if has_secret_refs
+                                        else "No ECS secret references were detected in container definitions."
+                                    ),
+                                    action=(
+                                        None
+                                        if has_secret_refs
+                                        else "Use ECS secrets mappings (for example Secrets Manager references) for sensitive values."
+                                    ),
+                                )
+                            )
+                else:
+                    checks.append(
+                        DiagnosticCheck(
+                            id="ecs_task_definition_describe",
+                            status="fail",
+                            message="ECS service did not report a task definition ARN.",
+                            action="Ensure the ECS service references a valid task definition.",
+                        )
+                    )
+
     details = AWSDoctorDetails(
         account_id=account_id,
         arn=arn,
@@ -347,3 +547,42 @@ def _first_non_empty(*values: str | None) -> str | None:
         if normalized is not None:
             return normalized
     return None
+
+
+def _first_ecs_service(payload: dict[str, object]) -> dict[str, object] | None:
+    services = payload.get("services")
+    if not isinstance(services, list) or not services:
+        return None
+    first = services[0]
+    if not isinstance(first, dict):
+        return None
+    return first
+
+
+def _service_network_alignment_ok(*, service_payload: dict[str, object], expected_subnets: tuple[str, ...]) -> bool:
+    if not expected_subnets:
+        return True
+    network_configuration = service_payload.get("networkConfiguration")
+    if not isinstance(network_configuration, dict):
+        return False
+    awsvpc_configuration = network_configuration.get("awsvpcConfiguration")
+    if not isinstance(awsvpc_configuration, dict):
+        return False
+    subnets = awsvpc_configuration.get("subnets")
+    if not isinstance(subnets, list):
+        return False
+    resolved_subnets = {value for value in subnets if isinstance(value, str)}
+    return set(expected_subnets).issubset(resolved_subnets)
+
+
+def _task_definition_has_secret_refs(task_definition_payload: dict[str, object]) -> bool:
+    container_definitions = task_definition_payload.get("containerDefinitions")
+    if not isinstance(container_definitions, list):
+        return False
+    for container in container_definitions:
+        if not isinstance(container, dict):
+            continue
+        secrets = container.get("secrets")
+        if isinstance(secrets, list) and len(secrets) > 0:
+            return True
+    return False

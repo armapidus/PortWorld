@@ -35,10 +35,16 @@ class AzureDoctorTests(unittest.TestCase):
         run_az_json: mock.Mock,
     ) -> None:
         run_az_json.side_effect = [
+            mock.Mock(ok=True, value={"name": "containerapp"}, message=None),
             mock.Mock(ok=True, value={"id": "sub-1", "tenantId": "tenant-1"}, message=None),
+            mock.Mock(ok=True, value={"registrationState": "Registered"}, message=None),
             mock.Mock(
                 ok=True,
-                value={"properties": {"configuration": {"ingress": {"fqdn": "app.westeurope.azurecontainerapps.io"}}}},
+                value={
+                    "properties": {
+                        "configuration": {"ingress": {"fqdn": "app.westeurope.azurecontainerapps.io", "external": True}}
+                    }
+                },
                 message=None,
             ),
         ]
@@ -58,7 +64,10 @@ class AzureDoctorTests(unittest.TestCase):
         self.assertTrue(evaluation.ok)
         by_id = {check.id: check for check in evaluation.checks}
         self.assertEqual(by_id["az_authenticated"].status, "pass")
+        self.assertEqual(by_id["az_containerapp_extension_ready"].status, "pass")
+        self.assertEqual(by_id["az_provider_microsoft_app_registered"].status, "pass")
         self.assertEqual(by_id["container_app_fqdn_present"].status, "pass")
+        self.assertEqual(by_id["container_app_ingress_external"].status, "pass")
 
 
 if __name__ == "__main__":

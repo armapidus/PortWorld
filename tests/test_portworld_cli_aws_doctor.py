@@ -46,6 +46,33 @@ class AWSDoctorTests(unittest.TestCase):
                 message=None,
             ),
             mock.Mock(ok=True, value={"Certificate": {"Status": "ISSUED"}}, message=None),
+            mock.Mock(
+                ok=True,
+                value={
+                    "services": [
+                        {
+                            "status": "ACTIVE",
+                            "taskDefinition": "arn:aws:ecs:us-east-1:123:task-definition/service:1",
+                            "networkConfiguration": {
+                                "awsvpcConfiguration": {"subnets": ["subnet-a", "subnet-b"]}
+                            },
+                        }
+                    ]
+                },
+                message=None,
+            ),
+            mock.Mock(
+                ok=True,
+                value={
+                    "taskDefinition": {
+                        "networkMode": "awsvpc",
+                        "requiresCompatibilities": ["FARGATE"],
+                        "executionRoleArn": "arn:aws:iam::123:role/ecsExec",
+                        "taskRoleArn": "arn:aws:iam::123:role/appTask",
+                    }
+                },
+                message=None,
+            ),
         ]
 
         evaluation = evaluate_aws_ecs_fargate_readiness(
@@ -66,6 +93,9 @@ class AWSDoctorTests(unittest.TestCase):
         self.assertEqual(by_id["aws_authenticated"].status, "pass")
         self.assertEqual(by_id["subnet_vpc_validation"].status, "pass")
         self.assertEqual(by_id["acm_certificate_valid"].status, "pass")
+        self.assertEqual(by_id["ecs_service_active"].status, "pass")
+        self.assertEqual(by_id["ecs_task_definition_fargate_compatible"].status, "pass")
+        self.assertEqual(by_id["ecs_execution_role_present"].status, "pass")
 
 
 if __name__ == "__main__":
