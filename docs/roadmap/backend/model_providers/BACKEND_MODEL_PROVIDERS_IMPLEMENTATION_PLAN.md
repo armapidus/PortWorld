@@ -43,6 +43,31 @@ The main limitation is that the realtime core is still OpenAI-shaped in several 
 
 The vision side is cleaner, but the env/config surface is still biased toward the existing Mistral path.
 
+## Repository Audit Snapshot (2026-03-17)
+
+This section records the codebase status at planning time so implementation starts from verified facts.
+
+### Confirmed in place
+
+- provider registry/factory seams exist for realtime and vision
+- bootstrap/runtime checks call selected-provider validation paths
+- OpenAI realtime path is complete and production-wired
+- Mistral vision path is complete and returns normalized `VisionObservation`
+
+### Confirmed missing or incomplete
+
+- no official realtime provider beyond `openai` (`gemini_live` is not implemented)
+- no official vision providers beyond `mistral` (`openai`, `azure_openai`, `gemini`, `claude`, `bedrock`, `groq` are not implemented)
+- realtime core still has OpenAI-protocol assumptions in bridge, turn management, and tool output submission
+- tool definition rendering is OpenAI-specific (`to_openai_tool()` path)
+- CLI/provider setup, doctor checks, and deploy secret binding are still keyed to OpenAI/Mistral/Tavily env assumptions
+
+### Important implementation implications
+
+- contract extraction and OpenAI refactor must land before Gemini Live to avoid duplicating protocol assumptions
+- provider requirement metadata must become a shared source of truth used by runtime, CLI, doctor, and deploy
+- migration aliases for current OpenAI + Mistral users must be preserved while adding provider-scoped settings
+
 ## Implementation Principles
 
 1. Keep the current registry/factory pattern and strengthen it.
@@ -101,6 +126,12 @@ Define explicit adapter contracts before adding more providers.
 - updated provider definition types
 - capability metadata types for realtime and vision
 - a written mapping of normalized realtime events and commands
+
+#### Slice 1 status (2026-03-17)
+
+- Landed contract-layer scaffolding with provider-neutral normalized realtime event typing and adapter protocols in `backend/realtime/contracts.py`.
+- Landed capability metadata fields + read-only accessors in realtime and vision factories, including OpenAI and Mistral metadata wiring.
+- Kept runtime behavior unchanged; this is parity scaffolding only.
 
 ### Step 2: Refactor the existing OpenAI realtime path onto the new contract
 
@@ -282,7 +313,7 @@ CLI support must land in the same milestone as runtime support.
 
 #### Work
 
-- expand `portworld_cli/provider_catalog.py` with the new realtime and vision providers
+- expand `portworld_cli/providers/catalog.py` with the new realtime and vision providers
 - update `.portworld/project.json` provider selections to support the new ids cleanly
 - update `portworld init` to prompt for:
   - realtime provider
@@ -333,7 +364,7 @@ Update docs only after the runtime and CLI shape are settled.
 #### Docs to update
 
 - `backend/README.md`
-- `docs/BACKEND_SELF_HOSTING.md`
+- `docs/operations/BACKEND_SELF_HOSTING.md`
 - `backend/.env.example`
 - provider roadmap docs where needed
 
@@ -352,14 +383,24 @@ Implement in the following order:
 1. provider contracts and capability metadata
 2. OpenAI realtime refactor onto the new contract
 3. provider-neutral tool rendering and submission
-4. Gemini Live realtime adapter
-5. realtime settings generalization
+4. realtime settings generalization (minimum provider-scoped config + validation)
+5. Gemini Live realtime adapter
 6. shared vision helper extraction
 7. native vision adapters
 8. settings/env migration layer
-9. CLI provider expansion
-10. doctor and deploy diagnostics
-11. docs and migration cleanup
+9. provider requirement source-of-truth integration across runtime + CLI + deploy
+10. CLI provider expansion (`init`, `config edit providers`)
+11. doctor and deploy diagnostics
+12. docs and migration cleanup
+
+### Delivery Gates
+
+Use these gates to prevent drift while shipping in slices.
+
+- Gate A (after Step 3): OpenAI behavior parity confirmed through `/ws/session` and tooling path
+- Gate B (after Step 5): `REALTIME_PROVIDER=gemini_live` works through existing websocket orchestration
+- Gate C (after Step 8): legacy OpenAI + Mistral envs still work unchanged
+- Gate D (after Step 11): doctor/deploy require only selected-provider secrets and report capability limits clearly
 
 ## Verification Plan
 
@@ -409,4 +450,3 @@ This roadmap item is complete when all of the following are true:
 - CLI setup and diagnostics support the new providers
 - current OpenAI + Mistral users can migrate without breakage
 - docs and env templates reflect the new provider surface clearly
-
