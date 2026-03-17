@@ -35,6 +35,7 @@
 - [Troubleshooting](#troubleshooting)
 - [Security Notes](#security-notes)
 - [Community](#community)
+- [Legal And Provenance](#legal-and-provenance)
 - [Releases](#releases)
 - [Additional Docs](#additional-docs)
 
@@ -211,6 +212,13 @@ Non-blocking image/profile warning in logs. Usually unrelated to network/audio f
 - Contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Code of Conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
+## Legal And Provenance
+
+- We only publish code and assets that maintainers have the right to redistribute.
+- Before release, verify third-party asset and snippet licenses (images, diagrams, screenshots, copied code/text).
+- Remove or replace material that cannot be redistributed under this repository license.
+- Keep model/provider names in docs as factual compatibility references, not endorsements.
+
 ## Releases
 
 - Changelog (canonical release history): [CHANGELOG.md](CHANGELOG.md)
@@ -226,4 +234,5 @@ Non-blocking image/profile warning in logs. Usually unrelated to network/audio f
 
 ## License
 
-Recommended for open-source release: Apache-2.0 or MIT.
+This repository is licensed under the MIT License.
+See [LICENSE](LICENSE).
