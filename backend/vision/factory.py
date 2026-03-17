@@ -58,24 +58,125 @@ class VisionProviderRegistry:
 
 
 def build_default_vision_provider_registry() -> VisionProviderRegistry:
+    from backend.vision.providers.azure_openai import (
+        build_azure_openai_vision_analyzer,
+        validate_azure_openai_vision_settings,
+    )
+    from backend.vision.providers.bedrock import (
+        build_bedrock_vision_analyzer,
+        validate_bedrock_vision_settings,
+    )
+    from backend.vision.providers.claude import (
+        build_claude_vision_analyzer,
+        validate_claude_vision_settings,
+    )
+    from backend.vision.providers.gemini import (
+        build_gemini_vision_analyzer,
+        validate_gemini_vision_settings,
+    )
+    from backend.vision.providers.groq import (
+        build_groq_vision_analyzer,
+        validate_groq_vision_settings,
+    )
     from backend.vision.providers.mistral import (
         build_mistral_vision_analyzer,
         validate_mistral_vision_settings,
     )
+    from backend.vision.providers.openai import (
+        build_openai_vision_analyzer,
+        validate_openai_vision_settings,
+    )
 
     registry = VisionProviderRegistry()
-    mistral_capabilities = VisionProviderCapabilities(
-        structured_output=False,
-        image_transport="data_url",
-        retry_hint="provider_managed",
-        rate_limit_hint="provider_managed",
-    )
     registry.register(
         VisionProviderDefinition(
             name="mistral",
             build_analyzer=build_mistral_vision_analyzer,
             validate_settings=validate_mistral_vision_settings,
-            capabilities=mistral_capabilities,
+            capabilities=VisionProviderCapabilities(
+                structured_output=False,
+                image_transport="data_url",
+                retry_hint="provider_managed",
+                rate_limit_hint="provider_managed",
+            ),
+        )
+    )
+    registry.register(
+        VisionProviderDefinition(
+            name="openai",
+            build_analyzer=build_openai_vision_analyzer,
+            validate_settings=validate_openai_vision_settings,
+            capabilities=VisionProviderCapabilities(
+                structured_output=True,
+                image_transport="data_url",
+                retry_hint="provider_managed",
+                rate_limit_hint="provider_managed",
+            ),
+        )
+    )
+    registry.register(
+        VisionProviderDefinition(
+            name="azure_openai",
+            build_analyzer=build_azure_openai_vision_analyzer,
+            validate_settings=validate_azure_openai_vision_settings,
+            capabilities=VisionProviderCapabilities(
+                structured_output=True,
+                image_transport="data_url",
+                retry_hint="provider_managed",
+                rate_limit_hint="provider_managed",
+            ),
+        )
+    )
+    registry.register(
+        VisionProviderDefinition(
+            name="gemini",
+            build_analyzer=build_gemini_vision_analyzer,
+            validate_settings=validate_gemini_vision_settings,
+            capabilities=VisionProviderCapabilities(
+                structured_output=True,
+                image_transport="inline_base64",
+                retry_hint="provider_managed",
+                rate_limit_hint="provider_managed",
+            ),
+        )
+    )
+    registry.register(
+        VisionProviderDefinition(
+            name="claude",
+            build_analyzer=build_claude_vision_analyzer,
+            validate_settings=validate_claude_vision_settings,
+            capabilities=VisionProviderCapabilities(
+                structured_output=False,
+                image_transport="inline_base64",
+                retry_hint="provider_managed",
+                rate_limit_hint="provider_managed",
+            ),
+        )
+    )
+    registry.register(
+        VisionProviderDefinition(
+            name="bedrock",
+            build_analyzer=build_bedrock_vision_analyzer,
+            validate_settings=validate_bedrock_vision_settings,
+            capabilities=VisionProviderCapabilities(
+                structured_output=False,
+                image_transport="native_bytes",
+                retry_hint="aws_sdk_managed",
+                rate_limit_hint="provider_managed",
+            ),
+        )
+    )
+    registry.register(
+        VisionProviderDefinition(
+            name="groq",
+            build_analyzer=build_groq_vision_analyzer,
+            validate_settings=validate_groq_vision_settings,
+            capabilities=VisionProviderCapabilities(
+                structured_output=True,
+                image_transport="data_url",
+                retry_hint="provider_managed",
+                rate_limit_hint="provider_managed",
+            ),
         )
     )
     return registry

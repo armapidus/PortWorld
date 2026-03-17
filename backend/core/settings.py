@@ -99,6 +99,22 @@ class Settings:
     mistral_base_url: str | None
     vision_mistral_api_key: str | None
     vision_mistral_base_url: str | None
+    vision_openai_api_key: str | None
+    vision_openai_base_url: str | None
+    vision_azure_openai_api_key: str | None
+    vision_azure_openai_endpoint: str | None
+    vision_azure_openai_api_version: str | None
+    vision_azure_openai_deployment: str | None
+    vision_gemini_api_key: str | None
+    vision_gemini_base_url: str | None
+    vision_claude_api_key: str | None
+    vision_claude_base_url: str | None
+    vision_bedrock_region: str | None
+    vision_bedrock_aws_access_key_id: str | None
+    vision_bedrock_aws_secret_access_key: str | None
+    vision_bedrock_aws_session_token: str | None
+    vision_groq_api_key: str | None
+    vision_groq_base_url: str | None
     vision_provider_api_key: str | None
     vision_provider_base_url: str | None
     tavily_api_key: str | None
@@ -304,6 +320,21 @@ class Settings:
         if provider_name == "mistral":
             key = (self.vision_mistral_api_key or "").strip()
             return key or None
+        if provider_name == "openai":
+            key = (self.vision_openai_api_key or "").strip()
+            return key or None
+        if provider_name == "azure_openai":
+            key = (self.vision_azure_openai_api_key or "").strip()
+            return key or None
+        if provider_name == "gemini":
+            key = (self.vision_gemini_api_key or "").strip()
+            return key or None
+        if provider_name == "claude":
+            key = (self.vision_claude_api_key or "").strip()
+            return key or None
+        if provider_name == "groq":
+            key = (self.vision_groq_api_key or "").strip()
+            return key or None
         return None
 
     def _resolve_vision_provider_scoped_base_url(self, *, provider: str) -> str | None:
@@ -311,6 +342,94 @@ class Settings:
         if provider_name == "mistral":
             base_url = (self.vision_mistral_base_url or "").strip()
             return base_url or None
+        if provider_name == "openai":
+            base_url = (self.vision_openai_base_url or "").strip()
+            return base_url or None
+        if provider_name == "gemini":
+            base_url = (self.vision_gemini_base_url or "").strip()
+            return base_url or None
+        if provider_name == "claude":
+            base_url = (self.vision_claude_base_url or "").strip()
+            return base_url or None
+        if provider_name == "groq":
+            base_url = (self.vision_groq_base_url or "").strip()
+            return base_url or None
+        return None
+
+    def resolve_vision_provider_endpoint(self, *, provider: str | None = None) -> str | None:
+        provider_name = (provider or self.vision_memory_provider).strip().lower()
+        if provider_name == "azure_openai":
+            endpoint = (self.vision_azure_openai_endpoint or "").strip()
+            return endpoint or None
+        return None
+
+    def resolve_vision_provider_api_version(self, *, provider: str | None = None) -> str | None:
+        provider_name = (provider or self.vision_memory_provider).strip().lower()
+        if provider_name == "azure_openai":
+            api_version = (self.vision_azure_openai_api_version or "").strip()
+            return api_version or None
+        return None
+
+    def resolve_vision_provider_deployment(self, *, provider: str | None = None) -> str | None:
+        provider_name = (provider or self.vision_memory_provider).strip().lower()
+        if provider_name == "azure_openai":
+            deployment = (self.vision_azure_openai_deployment or "").strip()
+            if deployment:
+                return deployment
+            model_name = (self.vision_memory_model or "").strip()
+            return model_name or None
+        return None
+
+    def resolve_vision_provider_region(self, *, provider: str | None = None) -> str | None:
+        provider_name = (provider or self.vision_memory_provider).strip().lower()
+        if provider_name == "bedrock":
+            region = (self.vision_bedrock_region or "").strip()
+            if region:
+                return region
+            fallback = (_get_env("AWS_REGION") or "").strip()
+            return fallback or None
+        return None
+
+    def resolve_vision_provider_aws_access_key_id(
+        self,
+        *,
+        provider: str | None = None,
+    ) -> str | None:
+        provider_name = (provider or self.vision_memory_provider).strip().lower()
+        if provider_name == "bedrock":
+            access_key_id = (self.vision_bedrock_aws_access_key_id or "").strip()
+            if access_key_id:
+                return access_key_id
+            fallback = (_get_env("AWS_ACCESS_KEY_ID") or "").strip()
+            return fallback or None
+        return None
+
+    def resolve_vision_provider_aws_secret_access_key(
+        self,
+        *,
+        provider: str | None = None,
+    ) -> str | None:
+        provider_name = (provider or self.vision_memory_provider).strip().lower()
+        if provider_name == "bedrock":
+            secret_access_key = (self.vision_bedrock_aws_secret_access_key or "").strip()
+            if secret_access_key:
+                return secret_access_key
+            fallback = (_get_env("AWS_SECRET_ACCESS_KEY") or "").strip()
+            return fallback or None
+        return None
+
+    def resolve_vision_provider_aws_session_token(
+        self,
+        *,
+        provider: str | None = None,
+    ) -> str | None:
+        provider_name = (provider or self.vision_memory_provider).strip().lower()
+        if provider_name == "bedrock":
+            session_token = (self.vision_bedrock_aws_session_token or "").strip()
+            if session_token:
+                return session_token
+            fallback = (_get_env("AWS_SESSION_TOKEN") or "").strip()
+            return fallback or None
         return None
 
     def resolve_vision_provider_api_key(self, *, provider: str | None = None) -> str | None:
@@ -341,6 +460,10 @@ class Settings:
 
     def require_vision_provider_api_key(self, *, provider: str | None = None) -> str:
         provider_name = (provider or self.vision_memory_provider).strip().lower()
+        if provider_name == "bedrock":
+            raise RuntimeError(
+                "BEDROCK does not use API keys. Configure AWS credentials and region settings."
+            )
         key = self.resolve_vision_provider_api_key(provider=provider_name)
         if key:
             return key
@@ -355,8 +478,10 @@ class Settings:
         )
 
     def validate_vision_provider_credentials(self, *, provider: str | None = None) -> None:
-        key = self.require_vision_provider_api_key(provider=provider)
         provider_name = (provider or self.vision_memory_provider).strip().lower()
+        if provider_name == "bedrock":
+            return
+        key = self.require_vision_provider_api_key(provider=provider_name)
         model_name = (self.vision_memory_model or "").strip()
         if provider_name == "mistral" and model_name and key == model_name:
             raise RuntimeError(
@@ -380,6 +505,24 @@ def _load_credentials_settings() -> dict[str, str | None]:
         "mistral_base_url": _get_env("MISTRAL_BASE_URL"),
         "vision_mistral_api_key": os.getenv("VISION_MISTRAL_API_KEY"),
         "vision_mistral_base_url": _get_env("VISION_MISTRAL_BASE_URL"),
+        "vision_openai_api_key": os.getenv("VISION_OPENAI_API_KEY"),
+        "vision_openai_base_url": _get_env("VISION_OPENAI_BASE_URL"),
+        "vision_azure_openai_api_key": os.getenv("VISION_AZURE_OPENAI_API_KEY"),
+        "vision_azure_openai_endpoint": _get_env("VISION_AZURE_OPENAI_ENDPOINT"),
+        "vision_azure_openai_api_version": _get_env("VISION_AZURE_OPENAI_API_VERSION"),
+        "vision_azure_openai_deployment": _get_env("VISION_AZURE_OPENAI_DEPLOYMENT"),
+        "vision_gemini_api_key": os.getenv("VISION_GEMINI_API_KEY"),
+        "vision_gemini_base_url": _get_env("VISION_GEMINI_BASE_URL"),
+        "vision_claude_api_key": os.getenv("VISION_CLAUDE_API_KEY"),
+        "vision_claude_base_url": _get_env("VISION_CLAUDE_BASE_URL"),
+        "vision_bedrock_region": _get_env("VISION_BEDROCK_REGION"),
+        "vision_bedrock_aws_access_key_id": os.getenv("VISION_BEDROCK_AWS_ACCESS_KEY_ID"),
+        "vision_bedrock_aws_secret_access_key": os.getenv(
+            "VISION_BEDROCK_AWS_SECRET_ACCESS_KEY"
+        ),
+        "vision_bedrock_aws_session_token": os.getenv("VISION_BEDROCK_AWS_SESSION_TOKEN"),
+        "vision_groq_api_key": os.getenv("VISION_GROQ_API_KEY"),
+        "vision_groq_base_url": _get_env("VISION_GROQ_BASE_URL"),
         "vision_provider_api_key": os.getenv("VISION_PROVIDER_API_KEY"),
         "vision_provider_base_url": _get_env("VISION_PROVIDER_BASE_URL"),
         "tavily_api_key": os.getenv("TAVILY_API_KEY"),
