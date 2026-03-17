@@ -211,6 +211,12 @@ Add Gemini Live as the second official realtime provider using a native adapter.
 - `/ws/session` works with `REALTIME_PROVIDER=gemini_live`
 - the same websocket/session orchestration path is used for OpenAI and Gemini
 
+#### Slice 5 status (2026-03-17)
+
+- Landed `gemini_live` as a second official realtime provider in `backend/realtime/providers/gemini_live.py`, including native websocket adapter methods for session init/update, audio append/commit, tool registration/submission, and normalized-event mapping to the shared bridge contract.
+- Registered Gemini Live in realtime provider registry/factory with provider-scoped settings validation and capability metadata.
+- Generalized missing realtime credential handling in websocket session activation to support provider-specific error codes while preserving existing OpenAI `MISSING_OPENAI_API_KEY` error shape/behavior.
+
 ### Step 5: Generalize realtime settings and credential validation
 
 The current settings surface is too tied to OpenAI.
