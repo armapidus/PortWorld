@@ -3,7 +3,11 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
+import socket
+import ssl
+from time import monotonic, sleep
 from time import time_ns
+from urllib.parse import urlparse
 
 import click
 import httpx
@@ -99,8 +103,25 @@ def run_deploy_azure_container_apps(
         )
 
         _confirm_mutations(cli_context, config)
+        stage_records.append(_stage_ok("mutation_plan", "Confirmed deploy mutations."))
 
-        fqdn = _resolve_container_app_fqdn(config)
+        resources.update(
+            {
+                "subscription_id": config.subscription_id,
+                "resource_group": config.resource_group,
+                "region": config.region,
+                "environment_name": config.environment_name,
+                "app_name": config.app_name,
+                "image_uri": config.image_uri,
+                "blob_container": config.blob_container,
+            }
+        )
+
+        fqdn = _run_azure_deploy_mutations(
+            config=config,
+            env_values=env_values,
+            stage_records=stage_records,
+        )
         if fqdn is None:
             raise DeployStageError(
                 stage="post_deploy_validation",
@@ -187,7 +208,7 @@ def run_deploy_azure_container_apps(
                 "published_image_ref": config.published_image_ref,
                 "resources": resources,
                 "stages": stage_records,
-                "runtime_env": _build_runtime_env_vars(env_values, config),
+                "runtime_env": _sanitize_runtime_env_for_output(_build_runtime_env_vars(env_values, config)),
             },
             exit_code=0,
         )
@@ -280,7 +301,7 @@ def _resolve_azure_deploy_config(
 
     storage_account = _require_value(
         cli_context,
-        value=options.storage_account,
+        value=_first_non_empty(options.storage_account, defaults.storage_account),
         prompt="Azure storage account name",
         error="Azure storage account name is required.",
     )
@@ -300,7 +321,11 @@ def _resolve_azure_deploy_config(
 
     blob_endpoint = _require_value(
         cli_context,
-        value=_first_non_empty(options.blob_endpoint, env_values.get("BACKEND_OBJECT_STORE_ENDPOINT")),
+        value=_first_non_empty(
+            options.blob_endpoint,
+            env_values.get("BACKEND_OBJECT_STORE_ENDPOINT"),
+            f"https://{storage_account}.blob.core.windows.net",
+        ),
         prompt="Azure blob endpoint URL",
         error="Azure blob endpoint is required.",
     )
@@ -402,6 +427,155 @@ def _resolve_container_app_fqdn(config: _ResolvedAzureDeployConfig) -> str | Non
     return normalized or None
 
 
+def _run_azure_deploy_mutations(
+    *,
+    config: _ResolvedAzureDeployConfig,
+    env_values: OrderedDict[str, str],
+    stage_records: list[dict[str, object]],
+) -> str | None:
+    set_subscription = run_az_json(["account", "set", "--subscription", config.subscription_id])
+    if not set_subscription.ok:
+        raise DeployStageError(
+            stage="subscription_set",
+            message=set_subscription.message or "Unable to set active Azure subscription.",
+            action="Verify subscription id and az login context.",
+        )
+    stage_records.append(_stage_ok("subscription_set", f"Using subscription `{config.subscription_id}`."))
+
+    current_app = run_az_json(
+        [
+            "containerapp",
+            "show",
+            "--subscription",
+            config.subscription_id,
+            "--resource-group",
+            config.resource_group,
+            "--name",
+            config.app_name,
+        ]
+    )
+    if not current_app.ok or not isinstance(current_app.value, dict):
+        raise DeployStageError(
+            stage="container_app_lookup",
+            message=current_app.message or "Unable to inspect Azure Container App.",
+            action="Create the app and ensure az permissions for containerapp show/update.",
+        )
+    stage_records.append(_stage_ok("container_app_lookup", f"Found Container App `{config.app_name}`."))
+
+    runtime_env = _build_runtime_env_vars(env_values, config)
+    plain_env, secret_env = _split_runtime_env_for_azure(runtime_env)
+    env_args = [f"{key}={value}" for key, value in plain_env.items()]
+    env_args.extend(f"{key}=secretref:{secret_name}" for key, secret_name in secret_env.items())
+    update_args = [
+        "containerapp",
+        "update",
+        "--subscription",
+        config.subscription_id,
+        "--resource-group",
+        config.resource_group,
+        "--name",
+        config.app_name,
+        "--image",
+        config.image_uri,
+    ]
+    if secret_env:
+        update_args.extend(
+            [
+                "--secrets",
+                *[
+                    f"{secret_name}={runtime_env[key]}"
+                    for key, secret_name in secret_env.items()
+                ],
+            ]
+        )
+    if env_args:
+        update_args.extend(["--set-env-vars", *env_args])
+    update_response = run_az_json(update_args)
+    if not update_response.ok:
+        raise DeployStageError(
+            stage="container_app_update",
+            message=update_response.message or "Unable to update Azure Container App.",
+            action="Verify app permissions and containerapp update arguments.",
+        )
+    stage_records.append(_stage_ok("container_app_update", f"Updated image to `{config.image_uri}`."))
+
+    fqdn = _wait_for_container_app_readiness(config=config)
+    if fqdn is None:
+        raise DeployStageError(
+            stage="container_app_wait_ready",
+            message="Container App did not report a ready external revision in time.",
+            action="Inspect Container App revisions and ingress settings.",
+        )
+    stage_records.append(_stage_ok("container_app_wait_ready", f"Container App is ready at `{fqdn}`."))
+    return fqdn
+
+
+def _wait_for_container_app_readiness(
+    *,
+    config: _ResolvedAzureDeployConfig,
+    timeout_seconds: float = 300.0,
+    poll_interval_seconds: float = 5.0,
+) -> str | None:
+    deadline = monotonic() + timeout_seconds
+    while monotonic() < deadline:
+        app = run_az_json(
+            [
+                "containerapp",
+                "show",
+                "--subscription",
+                config.subscription_id,
+                "--resource-group",
+                config.resource_group,
+                "--name",
+                config.app_name,
+            ]
+        )
+        if app.ok and isinstance(app.value, dict):
+            fqdn = _extract_fqdn_and_external(app.value)
+            if fqdn is not None and _revision_is_ready(app.value):
+                return fqdn
+        sleep(poll_interval_seconds)
+    return None
+
+
+def _revision_is_ready(payload: dict[str, object]) -> bool:
+    properties = payload.get("properties")
+    if not isinstance(properties, dict):
+        return False
+    provisioning_state = properties.get("provisioningState")
+    if isinstance(provisioning_state, str) and provisioning_state.strip() not in {"Succeeded", "Provisioned"}:
+        return False
+    latest_revision = properties.get("latestRevisionName")
+    ready_revision = properties.get("latestReadyRevisionName")
+    if isinstance(latest_revision, str) and isinstance(ready_revision, str):
+        if latest_revision.strip() and ready_revision.strip() and latest_revision.strip() != ready_revision.strip():
+            return False
+    running_status = properties.get("runningStatus")
+    if isinstance(running_status, str) and running_status.strip() and running_status.strip() != "Running":
+        return False
+    return True
+
+
+def _extract_fqdn_and_external(payload: dict[str, object]) -> str | None:
+    properties = payload.get("properties")
+    if not isinstance(properties, dict):
+        return None
+    configuration = properties.get("configuration")
+    if not isinstance(configuration, dict):
+        return None
+    ingress = configuration.get("ingress")
+    if not isinstance(ingress, dict):
+        return None
+    external = ingress.get("external")
+    if external is not True:
+        return None
+    fqdn = ingress.get("fqdn")
+    if not isinstance(fqdn, str):
+        return None
+    normalized = fqdn.strip()
+    return normalized or None
+
+
 def _build_runtime_env_vars(
     env_values: OrderedDict[str, str],
     config: _ResolvedAzureDeployConfig,
@@ -446,7 +620,13 @@ def _probe_livez(base_url: str) -> bool:
 
 
 def _probe_ws(base_url: str, bearer_token: str | None) -> bool:
+    parsed = urlparse(base_url)
+    if parsed.scheme != "https" or parsed.hostname is None:
+        return False
+    host = parsed.hostname
+    port = parsed.port or 443
     headers = {
+        "Host": host,
         "Connection": "Upgrade",
         "Upgrade": "websocket",
         "Sec-WebSocket-Version": "13",
@@ -456,10 +636,107 @@ def _probe_ws(base_url: str, bearer_token: str | None) -> bool:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     try:
-        response = httpx.get(f"{base_url.rstrip('/')}/ws/session", headers=headers, timeout=10.0)
+        raw_response = _tls_http_get_upgrade(
+            host=host,
+            port=port,
+            path="/ws/session",
+            headers=headers,
+            timeout=10.0,
+        )
     except Exception:
         return False
-    return response.status_code in {101, 400, 401, 426}
+    status_code = _parse_http_status_code(raw_response)
+    return status_code in {101, 401}
+
+
+def _tls_http_get_upgrade(
+    *,
+    host: str,
+    port: int,
+    path: str,
+    headers: dict[str, str],
+    timeout: float,
+) -> str:
+    request_lines = [f"GET {path} HTTP/1.1", *(f"{key}: {value}" for key, value in headers.items()), "", ""]
+    request = "\r\n".join(request_lines).encode("ascii", errors="ignore")
+    context = ssl.create_default_context()
+    with socket.create_connection((host, port), timeout=timeout) as tcp_sock:
+        with context.wrap_socket(tcp_sock, server_hostname=host) as tls_sock:
+            tls_sock.settimeout(timeout)
+            tls_sock.sendall(request)
+            chunks: list[bytes] = []
+            deadline = monotonic() + timeout
+            while monotonic() < deadline:
+                data = tls_sock.recv(4096)
+                if not data:
+                    break
+                chunks.append(data)
+                if b"\r\n\r\n" in b"".join(chunks):
+                    break
+            return b"".join(chunks).decode("iso-8859-1", errors="replace")
+
+
+def _parse_http_status_code(raw_response: str) -> int | None:
+    status_line = raw_response.splitlines()[0] if raw_response else ""
+    parts = status_line.split(" ")
+    if len(parts) < 2:
+        return None
+    try:
+        return int(parts[1])
+    except ValueError:
+        return None
+
+
+def _sanitize_runtime_env_for_output(runtime_env: OrderedDict[str, str]) -> OrderedDict[str, str]:
+    redacted: OrderedDict[str, str] = OrderedDict()
+    for key, value in runtime_env.items():
+        upper = key.upper()
+        if (
+            key in {"BACKEND_DATABASE_URL", "DATABASE_URL"}
+            or "TOKEN" in upper
+            or "SECRET" in upper
+            or "PASSWORD" in upper
+            or upper.endswith("_KEY")
+        ):
+            redacted[key] = "***REDACTED***"
+        else:
+            redacted[key] = value
+    return redacted
+
+
+def _split_runtime_env_for_azure(runtime_env: OrderedDict[str, str]) -> tuple[OrderedDict[str, str], OrderedDict[str, str]]:
+    plain_env: OrderedDict[str, str] = OrderedDict()
+    secret_env: OrderedDict[str, str] = OrderedDict()
+    for key, value in runtime_env.items():
+        if _is_sensitive_env_key(key):
+            secret_env[key] = _to_azure_secret_name(key)
+        else:
+            plain_env[key] = value
+    return plain_env, secret_env
+
+
+def _is_sensitive_env_key(key: str) -> bool:
+    upper = key.upper()
+    return (
+        key in {"BACKEND_DATABASE_URL", "DATABASE_URL"}
+        or "TOKEN" in upper
+        or "SECRET" in upper
+        or "PASSWORD" in upper
+        or upper.endswith("_KEY")
+    )
+
+
+def _to_azure_secret_name(key: str) -> str:
+    normalized = key.lower().replace("_", "-")
+    normalized = "".join(char for char in normalized if char.isalnum() or char == "-")
+    normalized = normalized.strip("-") or "secret"
+    if len(normalized) > 63:
+        normalized = normalized[:63].rstrip("-")
+    return normalized or "secret"
+
+
+def _stage_ok(stage: str, message: str) -> dict[str, object]:
+    return {"stage": stage, "status": "ok", "message": message}
 
 
 def _confirm_mutations(cli_context: CLIContext, config: _ResolvedAzureDeployConfig) -> None:

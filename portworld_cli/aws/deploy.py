@@ -3,6 +3,10 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
+import socket
+import ssl
+import subprocess
+from time import monotonic
 from time import time_ns
 from urllib.parse import urlparse
 
@@ -14,6 +18,7 @@ from portworld_cli.aws.common import (
     is_postgres_url,
     normalize_optional_text,
     run_aws_json,
+    run_aws_text,
     split_csv_values,
     validate_s3_bucket_name,
 )
@@ -96,6 +101,7 @@ def run_deploy_aws_ecs_fargate(
         )
 
         _confirm_mutations(cli_context, config)
+        stage_records.append(_stage_ok("mutation_plan", "Confirmed deploy mutations."))
 
         resources.update(
             {
@@ -108,6 +114,8 @@ def run_deploy_aws_ecs_fargate(
                 "image_uri": config.image_uri,
             }
         )
+
+        _run_aws_deploy_mutations(config, env_values=env_values, stage_records=stage_records, project_root=session.workspace_root)
 
         livez_ok = _probe_livez(config.alb_url)
         ws_ok = _probe_ws(config.alb_url, env_values.get("BACKEND_BEARER_TOKEN", ""))
@@ -177,7 +185,7 @@ def run_deploy_aws_ecs_fargate(
                 "published_image_ref": config.published_image_ref,
                 "resources": resources,
                 "stages": stage_records,
-                "runtime_env": _build_runtime_env_vars(env_values, config),
+                "runtime_env": _sanitize_runtime_env_for_output(_build_runtime_env_vars(env_values, config)),
             },
             exit_code=0,
         )
@@ -381,6 +389,375 @@ def _build_runtime_env_vars(env_values: OrderedDict[str, str], config: _Resolved
     return final_env
 
 
+def _run_aws_deploy_mutations(
+    config: _ResolvedAWSDeployConfig,
+    *,
+    env_values: OrderedDict[str, str],
+    stage_records: list[dict[str, object]],
+    project_root: Path,
+) -> None:
+    _ensure_ecr_repository(config, stage_records=stage_records)
+    _docker_login_to_ecr(config, stage_records=stage_records)
+    if config.image_source_mode == IMAGE_SOURCE_MODE_SOURCE_BUILD:
+        _build_and_push_image(config, stage_records=stage_records, project_root=project_root)
+    else:
+        stage_records.append(
+            _stage_ok(
+                "publish_image",
+                f"Skipped docker build/push for image_source_mode={config.image_source_mode}.",
+            )
+        )
+    _rollout_ecs_service(config, env_values=env_values, stage_records=stage_records)
+
+
+def _ensure_ecr_repository(config: _ResolvedAWSDeployConfig, *, stage_records: list[dict[str, object]]) -> None:
+    describe = run_aws_json(
+        [
+            "ecr",
+            "describe-repositories",
+            "--region",
+            config.region,
+            "--repository-names",
+            config.ecr_repository,
+        ]
+    )
+    if describe.ok:
+        stage_records.append(_stage_ok("ecr_repository", f"ECR repository `{config.ecr_repository}` is ready."))
+        return
+
+    message = (describe.message or "").lower()
+    if "repositorynotfoundexception" not in message and "not found" not in message:
+        raise DeployStageError(
+            stage="ecr_repository",
+            message=describe.message or "Unable to inspect ECR repository.",
+            action="Verify ecr:DescribeRepositories permissions and retry.",
+        )
+
+    created = run_aws_json(
+        [
+            "ecr",
+            "create-repository",
+            "--region",
+            config.region,
+            "--repository-name",
+            config.ecr_repository,
+        ]
+    )
+    if not created.ok:
+        raise DeployStageError(
+            stage="ecr_repository",
+            message=created.message or "Unable to create ECR repository.",
+            action="Ensure ecr:CreateRepository permission or pre-create repository.",
+        )
+    stage_records.append(_stage_ok("ecr_repository", f"Created ECR repository `{config.ecr_repository}`."))
+
+
+def _docker_login_to_ecr(config: _ResolvedAWSDeployConfig, *, stage_records: list[dict[str, object]]) -> None:
+    login = run_aws_text(["ecr", "get-login-password", "--region", config.region])
+    if not login.ok or not isinstance(login.value, str) or not login.value:
+        raise DeployStageError(
+            stage="docker_login",
+            message=login.message or "Unable to fetch ECR docker login password.",
+            action="Verify AWS auth and ECR permissions.",
+        )
+
+    registry = f"{config.account_id}.dkr.ecr.{config.region}.amazonaws.com"
+    completed = subprocess.run(
+        ["docker", "login", "--username", "AWS", "--password-stdin", registry],
+        input=login.value,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise DeployStageError(
+            stage="docker_login",
+            message=(completed.stderr or completed.stdout).strip() or "docker login to ECR failed.",
+            action="Ensure Docker is running and ECR auth is configured.",
+        )
+    stage_records.append(_stage_ok("docker_login", f"Logged into ECR registry `{registry}`."))
+
+
+def _build_and_push_image(
+    config: _ResolvedAWSDeployConfig,
+    *,
+    stage_records: list[dict[str, object]],
+    project_root: Path,
+) -> None:
+    completed = subprocess.run(
+        [
+            "docker",
+            "buildx",
+            "build",
+            "--platform",
+            "linux/amd64",
+            "-t",
+            config.image_uri,
+            "--push",
+            ".",
+        ],
+        cwd=str(project_root),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise DeployStageError(
+            stage="publish_image",
+            message=(completed.stderr or completed.stdout).strip() or "docker buildx build --push failed.",
+            action="Verify Docker buildx is available and registry push permissions are granted.",
+        )
+    stage_records.append(_stage_ok("publish_image", f"Built and pushed `{config.image_uri}`."))
+
+
+def _rollout_ecs_service(
+    config: _ResolvedAWSDeployConfig,
+    *,
+    env_values: OrderedDict[str, str],
+    stage_records: list[dict[str, object]],
+) -> None:
+    describe_services = run_aws_json(
+        [
+            "ecs",
+            "describe-services",
+            "--region",
+            config.region,
+            "--cluster",
+            config.cluster_name,
+            "--services",
+            config.service_name,
+        ]
+    )
+    if not describe_services.ok or not isinstance(describe_services.value, dict):
+        raise DeployStageError(
+            stage="ecs_service_describe",
+            message=describe_services.message or "Unable to describe ECS service.",
+            action="Verify ECS cluster/service names and IAM access.",
+        )
+    service = _extract_single_service(describe_services.value, config)
+    task_definition_arn = _read_dict_string(service, "taskDefinition")
+    if task_definition_arn is None:
+        raise DeployStageError(
+            stage="ecs_service_describe",
+            message="ECS service did not return a task definition ARN.",
+            action="Ensure ECS service is ACTIVE and configured.",
+        )
+    stage_records.append(_stage_ok("ecs_service_describe", f"Loaded ECS service `{config.service_name}`."))
+
+    describe_task_definition = run_aws_json(
+        [
+            "ecs",
+            "describe-task-definition",
+            "--region",
+            config.region,
+            "--task-definition",
+            task_definition_arn,
+        ]
+    )
+    if not describe_task_definition.ok or not isinstance(describe_task_definition.value, dict):
+        raise DeployStageError(
+            stage="task_definition_describe",
+            message=describe_task_definition.message or "Unable to describe ECS task definition.",
+            action="Verify ECS task definition permissions.",
+        )
+    current_task_definition = describe_task_definition.value.get("taskDefinition")
+    if not isinstance(current_task_definition, dict):
+        raise DeployStageError(
+            stage="task_definition_describe",
+            message="ECS task definition response was missing `taskDefinition`.",
+            action="Verify ECS API access and retry.",
+        )
+
+    runtime_env = _build_runtime_env_vars(env_values, config)
+    new_task_definition_payload = _build_task_definition_registration_payload(
+        config,
+        task_definition=current_task_definition,
+        runtime_env=runtime_env,
+    )
+    register = run_aws_json(
+        [
+            "ecs",
+            "register-task-definition",
+            "--region",
+            config.region,
+            "--cli-input-json",
+            _to_json_argument(new_task_definition_payload),
+        ]
+    )
+    if not register.ok or not isinstance(register.value, dict):
+        raise DeployStageError(
+            stage="task_definition_register",
+            message=register.message or "Unable to register updated task definition.",
+            action="Verify ECS task definition IAM permissions and payload validity.",
+        )
+    registered = register.value.get("taskDefinition")
+    if not isinstance(registered, dict):
+        raise DeployStageError(
+            stage="task_definition_register",
+            message="ECS register-task-definition response missing taskDefinition.",
+            action="Verify ECS API output format and retry.",
+        )
+    new_task_definition_arn = _read_dict_string(registered, "taskDefinitionArn")
+    if new_task_definition_arn is None:
+        raise DeployStageError(
+            stage="task_definition_register",
+            message="Registered task definition ARN could not be resolved.",
+            action="Verify ECS register-task-definition response and retry.",
+        )
+    stage_records.append(_stage_ok("task_definition_register", f"Registered `{new_task_definition_arn}`."))
+
+    update = run_aws_json(
+        [
+            "ecs",
+            "update-service",
+            "--region",
+            config.region,
+            "--cluster",
+            config.cluster_name,
+            "--service",
+            config.service_name,
+            "--task-definition",
+            new_task_definition_arn,
+            "--force-new-deployment",
+        ]
+    )
+    if not update.ok:
+        raise DeployStageError(
+            stage="ecs_service_update",
+            message=update.message or "Unable to update ECS service to new task definition.",
+            action="Verify ECS service update permissions and service health.",
+        )
+    stage_records.append(_stage_ok("ecs_service_update", f"Updated service `{config.service_name}` deployment."))
+
+    wait_result = run_aws_json(
+        [
+            "ecs",
+            "wait",
+            "services-stable",
+            "--region",
+            config.region,
+            "--cluster",
+            config.cluster_name,
+            "--services",
+            config.service_name,
+        ]
+    )
+    if not wait_result.ok:
+        raise DeployStageError(
+            stage="ecs_service_wait_stable",
+            message=wait_result.message or "ECS service did not become stable.",
+            action="Inspect ECS events and task logs, then retry deploy.",
+        )
+    stage_records.append(_stage_ok("ecs_service_wait_stable", f"Service `{config.service_name}` is stable."))
+
+
+def _extract_single_service(payload: dict[str, object], config: _ResolvedAWSDeployConfig) -> dict[str, object]:
+    services = payload.get("services")
+    if not isinstance(services, list):
+        raise DeployStageError(
+            stage="ecs_service_describe",
+            message="ECS describe-services response missing `services` list.",
+            action="Verify ECS API permissions and retry.",
+        )
+    if not services:
+        raise DeployStageError(
+            stage="ecs_service_describe",
+            message=f"ECS service `{config.service_name}` was not found in cluster `{config.cluster_name}`.",
+            action="Create the ECS service before deploy or correct --cluster/--service values.",
+        )
+    first = services[0]
+    if not isinstance(first, dict):
+        raise DeployStageError(
+            stage="ecs_service_describe",
+            message="ECS service payload format was invalid.",
+            action="Verify ECS API output and retry.",
+        )
+    return first
+
+
+def _build_task_definition_registration_payload(
+    config: _ResolvedAWSDeployConfig,
+    *,
+    task_definition: dict[str, object],
+    runtime_env: OrderedDict[str, str],
+) -> dict[str, object]:
+    container_definitions = task_definition.get("containerDefinitions")
+    if not isinstance(container_definitions, list) or not container_definitions:
+        raise DeployStageError(
+            stage="task_definition_register",
+            message="Existing task definition did not include container definitions.",
+            action="Update ECS task definition to include container definitions and retry.",
+        )
+
+    selected_index = 0
+    for index, candidate in enumerate(container_definitions):
+        if isinstance(candidate, dict) and _read_dict_string(candidate, "name") == config.service_name:
+            selected_index = index
+            break
+
+    updated_definitions: list[dict[str, object]] = []
+    for index, raw_definition in enumerate(container_definitions):
+        if not isinstance(raw_definition, dict):
+            raise DeployStageError(
+                stage="task_definition_register",
+                message="Container definition format was invalid.",
+                action="Ensure ECS task definition container definitions are valid JSON objects.",
+            )
+        definition = dict(raw_definition)
+        if index == selected_index:
+            definition["image"] = config.image_uri
+            definition["environment"] = [
+                {"name": key, "value": value}
+                for key, value in runtime_env.items()
+            ]
+        updated_definitions.append(definition)
+
+    payload: dict[str, object] = {
+        "family": task_definition.get("family"),
+        "networkMode": task_definition.get("networkMode"),
+        "containerDefinitions": updated_definitions,
+    }
+    _copy_task_definition_key(task_definition, payload, "taskRoleArn")
+    _copy_task_definition_key(task_definition, payload, "executionRoleArn")
+    _copy_task_definition_key(task_definition, payload, "volumes")
+    _copy_task_definition_key(task_definition, payload, "placementConstraints")
+    _copy_task_definition_key(task_definition, payload, "requiresCompatibilities")
+    _copy_task_definition_key(task_definition, payload, "cpu")
+    _copy_task_definition_key(task_definition, payload, "memory")
+    _copy_task_definition_key(task_definition, payload, "tags")
+    _copy_task_definition_key(task_definition, payload, "pidMode")
+    _copy_task_definition_key(task_definition, payload, "ipcMode")
+    _copy_task_definition_key(task_definition, payload, "proxyConfiguration")
+    _copy_task_definition_key(task_definition, payload, "inferenceAccelerators")
+    _copy_task_definition_key(task_definition, payload, "ephemeralStorage")
+    _copy_task_definition_key(task_definition, payload, "runtimePlatform")
+
+    if not isinstance(payload["family"], str) or not payload["family"]:
+        raise DeployStageError(
+            stage="task_definition_register",
+            message="Existing task definition family could not be resolved.",
+            action="Verify ECS task definition is valid and retry.",
+        )
+    return payload
+
+
+def _copy_task_definition_key(source: dict[str, object], target: dict[str, object], key: str) -> None:
+    value = source.get(key)
+    if value is None:
+        return
+    target[key] = value
+
+
+def _to_json_argument(payload: dict[str, object]) -> str:
+    import json
+
+    return json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+
+def _stage_ok(stage: str, message: str) -> dict[str, object]:
+    return {"stage": stage, "status": "ok", "message": message}
+
+
 def _probe_livez(alb_url: str) -> bool:
     try:
         response = httpx.get(f"{alb_url.rstrip('/')}/livez", timeout=10.0)
@@ -390,8 +767,13 @@ def _probe_livez(alb_url: str) -> bool:
 
 
 def _probe_ws(alb_url: str, bearer_token: str | None) -> bool:
-    # v1 handshake check via HTTP upgrade preflight semantics.
+    parsed = urlparse(alb_url)
+    if parsed.scheme != "https" or parsed.hostname is None:
+        return False
+    host = parsed.hostname
+    port = parsed.port or 443
     headers = {
+        "Host": host,
         "Connection": "Upgrade",
         "Upgrade": "websocket",
         "Sec-WebSocket-Version": "13",
@@ -401,10 +783,72 @@ def _probe_ws(alb_url: str, bearer_token: str | None) -> bool:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     try:
-        response = httpx.get(f"{alb_url.rstrip('/')}/ws/session", headers=headers, timeout=10.0)
+        raw_response = _tls_http_get_upgrade(
+            host=host,
+            port=port,
+            path="/ws/session",
+            headers=headers,
+            timeout=10.0,
+        )
     except Exception:
         return False
-    return response.status_code in {101, 400, 401, 426}
+    status_code = _parse_http_status_code(raw_response)
+    return status_code in {101, 401}
+
+
+def _tls_http_get_upgrade(
+    *,
+    host: str,
+    port: int,
+    path: str,
+    headers: dict[str, str],
+    timeout: float,
+) -> str:
+    request_lines = [f"GET {path} HTTP/1.1", *(f"{key}: {value}" for key, value in headers.items()), "", ""]
+    request = "\r\n".join(request_lines).encode("ascii", errors="ignore")
+    context = ssl.create_default_context()
+    with socket.create_connection((host, port), timeout=timeout) as tcp_sock:
+        with context.wrap_socket(tcp_sock, server_hostname=host) as tls_sock:
+            tls_sock.settimeout(timeout)
+            tls_sock.sendall(request)
+            chunks: list[bytes] = []
+            deadline = monotonic() + timeout
+            while monotonic() < deadline:
+                data = tls_sock.recv(4096)
+                if not data:
+                    break
+                chunks.append(data)
+                if b"\r\n\r\n" in b"".join(chunks):
+                    break
+            return b"".join(chunks).decode("iso-8859-1", errors="replace")
+
+
+def _parse_http_status_code(raw_response: str) -> int | None:
+    status_line = raw_response.splitlines()[0] if raw_response else ""
+    parts = status_line.split(" ")
+    if len(parts) < 2:
+        return None
+    try:
+        return int(parts[1])
+    except ValueError:
+        return None
+
+
+def _sanitize_runtime_env_for_output(runtime_env: OrderedDict[str, str]) -> OrderedDict[str, str]:
+    redacted: OrderedDict[str, str] = OrderedDict()
+    for key, value in runtime_env.items():
+        upper = key.upper()
+        if (
+            key in {"BACKEND_DATABASE_URL", "DATABASE_URL"}
+            or "TOKEN" in upper
+            or "SECRET" in upper
+            or "PASSWORD" in upper
+            or upper.endswith("_KEY")
+        ):
+            redacted[key] = "***REDACTED***"
+        else:
+            redacted[key] = value
+    return redacted
 
 
 def _confirm_mutations(cli_context: CLIContext, config: _ResolvedAWSDeployConfig) -> None:
