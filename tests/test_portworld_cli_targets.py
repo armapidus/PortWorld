@@ -5,6 +5,7 @@ import unittest
 
 from portworld_cli.targets import (
     ManagedTargetStatePaths,
+    TARGET_AWS_ECS_FARGATE,
     TARGET_GCP_CLOUD_RUN,
 )
 
@@ -28,7 +29,13 @@ class ManagedTargetStatePathsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             paths.file_for_target("unknown-target")
 
+    def test_aws_state_file_path_is_available(self) -> None:
+        paths = ManagedTargetStatePaths(Path("/tmp/portworld/.portworld/state"))
+        self.assertEqual(
+            paths.file_for_target(TARGET_AWS_ECS_FARGATE),
+            Path("/tmp/portworld/.portworld/state/aws-ecs-fargate.json"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
-

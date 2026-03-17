@@ -138,6 +138,9 @@ class InspectionSession:
 
     def active_target(self) -> str | None:
         if self.deploy_state.has_data():
+            preferred_target = self.project_config.deploy.preferred_target
+            if preferred_target in MANAGED_TARGETS:
+                return preferred_target
             return GCP_CLOUD_RUN_TARGET
         preferred_target = self.project_config.deploy.preferred_target
         if preferred_target in MANAGED_TARGETS:

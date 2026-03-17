@@ -13,6 +13,7 @@ from portworld_cli.workspace.project_config import (
     derive_project_config,
     load_project_config_record,
 )
+from portworld_cli.targets import MANAGED_TARGETS
 from portworld_cli.workspace.published import load_published_env_template
 from portworld_cli.workspace.state.state_store import read_json_state
 
@@ -43,9 +44,6 @@ def load_workspace_store(workspace_paths: WorkspacePaths) -> WorkspaceStoreSnaps
         else workspace_paths.workspace_env_file
     )
     existing_env = None if template is None else parse_env_file(env_path, template=template)
-    remembered_deploy_state = read_json_state(
-        workspace_paths.state_file_for_target(GCP_CLOUD_RUN_TARGET)
-    )
     loaded_project_config = load_project_config_record(workspace_paths.project_config_file)
     project_config = None if loaded_project_config is None else loaded_project_config.config
     derived_from_legacy = project_config is None
@@ -65,6 +63,20 @@ def load_workspace_store(workspace_paths: WorkspacePaths) -> WorkspaceStoreSnaps
     else:
         configured_runtime_source = project_config.runtime_source
         runtime_source_derived_from_legacy = not loaded_project_config.runtime_source_explicit
+
+    preferred_target = (
+        None if project_config is None else project_config.deploy.preferred_target
+    )
+    state_target = (
+        preferred_target if preferred_target in MANAGED_TARGETS else GCP_CLOUD_RUN_TARGET
+    )
+    remembered_deploy_state = read_json_state(
+        workspace_paths.state_file_for_target(state_target)
+    )
+    if state_target != GCP_CLOUD_RUN_TARGET and not remembered_deploy_state:
+        remembered_deploy_state = read_json_state(
+            workspace_paths.state_file_for_target(GCP_CLOUD_RUN_TARGET)
+        )
 
     effective_runtime_source = configured_runtime_source or (
         RUNTIME_SOURCE_SOURCE if project_paths is not None else RUNTIME_SOURCE_PUBLISHED
