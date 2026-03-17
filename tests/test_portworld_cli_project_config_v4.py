@@ -58,6 +58,26 @@ class ProjectConfigV4Tests(unittest.TestCase):
         self.assertEqual(config.deploy.preferred_target, TARGET_AWS_ECS_FARGATE)
         self.assertEqual(config.deploy.aws_ecs_fargate.region, "us-east-1")
 
+    def test_schema_v3_preferred_target_infers_provider_and_normalizes_sections(self) -> None:
+        payload = {
+            "schema_version": 3,
+            "project_mode": "managed",
+            "runtime_source": "source",
+            "providers": {},
+            "security": {},
+            "deploy": {
+                "preferred_target": TARGET_AWS_ECS_FARGATE,
+                "gcp_cloud_run": {},
+                "aws_ecs_fargate": {"region": "us-east-2"},
+            },
+        }
+        config = ProjectConfig.from_payload(payload)
+        self.assertEqual(config.schema_version, SCHEMA_VERSION)
+        self.assertEqual(config.cloud_provider, CLOUD_PROVIDER_AWS)
+        self.assertEqual(config.deploy.preferred_target, TARGET_AWS_ECS_FARGATE)
+        self.assertEqual(config.deploy.aws_ecs_fargate.region, "us-east-2")
+        self.assertIsNone(config.deploy.azure_container_apps.region)
+
     def test_local_mode_clears_cloud_provider_and_target(self) -> None:
         payload = {
             "schema_version": 4,
@@ -111,6 +131,24 @@ class ProjectConfigV4Tests(unittest.TestCase):
                 "aws_ecs_fargate": {},
                 "azure_container_apps": {},
                 "published_runtime": {},
+            },
+        }
+        with self.assertRaises(ProjectConfigTypeError):
+            ProjectConfig.from_payload(payload)
+
+    def test_schema_v3_rejects_provider_target_mismatch(self) -> None:
+        payload = {
+            "schema_version": 3,
+            "project_mode": "managed",
+            "runtime_source": "source",
+            "cloud_provider": CLOUD_PROVIDER_AWS,
+            "providers": {},
+            "security": {},
+            "deploy": {
+                "preferred_target": TARGET_AZURE_CONTAINER_APPS,
+                "gcp_cloud_run": {},
+                "aws_ecs_fargate": {},
+                "azure_container_apps": {},
             },
         }
         with self.assertRaises(ProjectConfigTypeError):

@@ -78,6 +78,45 @@ class BackendStorageSettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "BACKEND_OBJECT_STORE_ENDPOINT must be set"):
             settings.validate_storage_contract()
 
+    def test_managed_provider_matrix_validates(self) -> None:
+        for provider, endpoint in (
+            ("gcs", None),
+            ("s3", None),
+            ("azure_blob", "https://pwstorage123.blob.core.windows.net"),
+        ):
+            with self.subTest(provider=provider):
+                env = {
+                    "BACKEND_STORAGE_BACKEND": "managed",
+                    "BACKEND_DATABASE_URL": "postgresql://user:pass@localhost:5432/db",
+                    "BACKEND_OBJECT_STORE_PROVIDER": provider,
+                    "BACKEND_OBJECT_STORE_NAME": "store-name",
+                    "BACKEND_OBJECT_STORE_PREFIX": "svc",
+                }
+                if endpoint is not None:
+                    env["BACKEND_OBJECT_STORE_ENDPOINT"] = endpoint
+                settings = self._settings(env)
+                settings.validate_storage_contract()
+
+    def test_managed_bucket_alias_works_across_supported_providers(self) -> None:
+        for provider, endpoint in (
+            ("gcs", None),
+            ("s3", None),
+            ("azure_blob", "https://pwstorage123.blob.core.windows.net"),
+        ):
+            with self.subTest(provider=provider):
+                env = {
+                    "BACKEND_STORAGE_BACKEND": "managed",
+                    "BACKEND_DATABASE_URL": "postgresql://user:pass@localhost:5432/db",
+                    "BACKEND_OBJECT_STORE_PROVIDER": provider,
+                    "BACKEND_OBJECT_STORE_BUCKET": "legacy-store-name",
+                    "BACKEND_OBJECT_STORE_PREFIX": "svc",
+                }
+                if endpoint is not None:
+                    env["BACKEND_OBJECT_STORE_ENDPOINT"] = endpoint
+                settings = self._settings(env)
+                self.assertEqual(settings.backend_object_store_name, "legacy-store-name")
+                settings.validate_storage_contract()
+
     def test_local_requires_filesystem_provider(self) -> None:
         settings = self._settings(
             {
