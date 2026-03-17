@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any, Protocol
+from typing import Any
 
+from backend.realtime.contracts import RealtimeLifecycleAdapter
 from backend.tools.contracts import ToolCall
 from backend.tools.runtime import RealtimeToolingRuntime
 from backend.ws.protocol.contracts import now_ms
@@ -12,16 +13,12 @@ from backend.ws.protocol.contracts import now_ms
 logger = logging.getLogger(__name__)
 
 
-class UpstreamToolSender(Protocol):
-    async def send_json(self, event: dict[str, Any]) -> None: ...
-
-
 class ToolCallDispatcher:
     def __init__(
         self,
         *,
         session_id: str,
-        upstream_client: UpstreamToolSender,
+        upstream_client: RealtimeLifecycleAdapter,
         tooling_runtime: RealtimeToolingRuntime | None,
         send_response_create: Callable[[str], Awaitable[None]],
         send_onboarding_profile_ready: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
@@ -245,16 +242,7 @@ class ToolCallDispatcher:
         await self._send_tool_output_and_continue(call_id=call_id, output=output_json)
 
     async def _send_tool_output_and_continue(self, *, call_id: str, output: str) -> None:
-        await self._upstream_client.send_json(
-            {
-                "type": "conversation.item.create",
-                "item": {
-                    "type": "function_call_output",
-                    "call_id": call_id,
-                    "output": output,
-                },
-            }
-        )
+        await self._upstream_client.submit_tool_result(call_id=call_id, output=output)
         await self._send_response_create("tool_output")
 
     async def _maybe_emit_onboarding_ready(self, tool_result) -> None:

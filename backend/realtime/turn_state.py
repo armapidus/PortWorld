@@ -8,8 +8,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from backend.realtime.audio_uplink import ClientAudioUplink
-    from backend.realtime.client import OpenAIRealtimeClient
-    from backend.realtime.contracts import EnvelopeSender
+    from backend.realtime.contracts import EnvelopeSender, RealtimeLifecycleAdapter
     from backend.realtime.tool_dispatcher import ToolCallDispatcher
 
 logger = logging.getLogger(__name__)
@@ -50,7 +49,7 @@ class TurnManager:
         session_id: str,
         config: TurnConfig,
         state: TurnState,
-        upstream_client: "OpenAIRealtimeClient",
+        upstream_client: "RealtimeLifecycleAdapter",
         audio_uplink: "ClientAudioUplink",
         tool_dispatcher: "ToolCallDispatcher",
         send_envelope: "EnvelopeSender",
@@ -173,12 +172,12 @@ class TurnManager:
             self._audio_uplink.queue_size,
             self._audio_uplink.sent_count,
         )
-        await self._upstream_client.send_json({"type": "input_audio_buffer.commit"})
+        await self._upstream_client.commit_client_turn()
         self._state.manual_response_sent = True
         await self._send_response_create(source=f"manual_finalize:{reason}")
 
     async def _send_response_create(self, source: str) -> None:
-        await self._upstream_client.send_json({"type": "response.create"})
+        await self._upstream_client.create_response()
         self._state.has_active_upstream_response = True
         self._state.response_started = True
         self._cancel_finalize_task()
