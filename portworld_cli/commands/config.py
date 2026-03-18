@@ -2,6 +2,12 @@ from __future__ import annotations
 
 import click
 
+from backend.core.provider_requirements import (
+    PROVIDER_KIND_REALTIME,
+    PROVIDER_KIND_SEARCH,
+    PROVIDER_KIND_VISION,
+    supported_provider_ids,
+)
 from portworld_cli.providers.types import ProviderEditOptions
 from portworld_cli.context import CLIContext
 from portworld_cli.output import exit_with_result
@@ -12,6 +18,24 @@ from portworld_cli.services.config.edit_service import (
 )
 from portworld_cli.services.config.show_service import run_config_show
 from portworld_cli.services.config.types import CloudEditOptions, SecurityEditOptions
+
+
+def _reject_legacy_secret_flag(
+    _ctx: click.Context,
+    param: click.Parameter,
+    value: str | None,
+) -> None:
+    if value is None:
+        return None
+    migration_targets = {
+        "openai_api_key": "--realtime-api-key",
+        "vision_provider_api_key": "--vision-api-key",
+        "tavily_api_key": "--search-api-key",
+    }
+    replacement = migration_targets.get(param.name, "the canonical provider-scoped flag")
+    raise click.UsageError(
+        f"{param.opts[0]} has been removed. Use {replacement} instead."
+    )
 
 
 @click.group("config")
@@ -32,23 +56,65 @@ def config_edit_group() -> None:
 
 
 @config_edit_group.command("providers")
+@click.option(
+    "--realtime-provider",
+    type=click.Choice(supported_provider_ids(PROVIDER_KIND_REALTIME)),
+    default=None,
+    help="Select the realtime provider id.",
+)
 @click.option("--with-vision", is_flag=True, default=False, help="Enable visual memory.")
 @click.option("--without-vision", is_flag=True, default=False, help="Disable visual memory.")
+@click.option(
+    "--vision-provider",
+    type=click.Choice(supported_provider_ids(PROVIDER_KIND_VISION)),
+    default=None,
+    help="Select the vision provider id when visual memory is enabled.",
+)
 @click.option("--with-tooling", is_flag=True, default=False, help="Enable realtime tooling.")
 @click.option("--without-tooling", is_flag=True, default=False, help="Disable realtime tooling.")
-@click.option("--openai-api-key", default=None, help="OpenAI API key for realtime sessions.")
-@click.option("--vision-provider-api-key", default=None, help="Vision provider API key.")
-@click.option("--tavily-api-key", default=None, help="Tavily API key for web search.")
+@click.option(
+    "--search-provider",
+    type=click.Choice(supported_provider_ids(PROVIDER_KIND_SEARCH)),
+    default=None,
+    help="Select the web-search provider id when tooling is enabled.",
+)
+@click.option("--realtime-api-key", default=None, help="Realtime provider API key for the selected realtime provider.")
+@click.option("--vision-api-key", default=None, help="Vision provider API key for the selected vision provider.")
+@click.option("--search-api-key", default=None, help="Search provider API key for the selected search provider.")
+@click.option(
+    "--openai-api-key",
+    default=None,
+    hidden=True,
+    expose_value=False,
+    callback=_reject_legacy_secret_flag,
+)
+@click.option(
+    "--vision-provider-api-key",
+    default=None,
+    hidden=True,
+    expose_value=False,
+    callback=_reject_legacy_secret_flag,
+)
+@click.option(
+    "--tavily-api-key",
+    default=None,
+    hidden=True,
+    expose_value=False,
+    callback=_reject_legacy_secret_flag,
+)
 @click.pass_obj
 def config_edit_providers_command(
     cli_context: CLIContext,
+    realtime_provider: str | None,
     with_vision: bool,
     without_vision: bool,
+    vision_provider: str | None,
     with_tooling: bool,
     without_tooling: bool,
-    openai_api_key: str | None,
-    vision_provider_api_key: str | None,
-    tavily_api_key: str | None,
+    search_provider: str | None,
+    realtime_api_key: str | None,
+    vision_api_key: str | None,
+    search_api_key: str | None,
 ) -> None:
     """Edit provider choices, feature toggles, and related credentials."""
     exit_with_result(
@@ -56,13 +122,19 @@ def config_edit_providers_command(
         run_edit_providers(
             cli_context,
             ProviderEditOptions(
+                realtime_provider=realtime_provider,
                 with_vision=with_vision,
                 without_vision=without_vision,
+                vision_provider=vision_provider,
                 with_tooling=with_tooling,
                 without_tooling=without_tooling,
-                openai_api_key=openai_api_key,
-                vision_provider_api_key=vision_provider_api_key,
-                tavily_api_key=tavily_api_key,
+                search_provider=search_provider,
+                realtime_api_key=realtime_api_key,
+                vision_api_key=vision_api_key,
+                search_api_key=search_api_key,
+                openai_api_key=None,
+                vision_provider_api_key=None,
+                tavily_api_key=None,
             ),
         ),
     )

@@ -1,6 +1,6 @@
 # PortWorld Backend
 
-FastAPI + Uvicorn backend that relays realtime voice sessions to OpenAI, with opt-in visual memory and realtime tooling.
+FastAPI + Uvicorn backend that relays realtime voice sessions through selectable realtime providers, with opt-in visual memory and realtime tooling.
 
 ## Features
 
@@ -17,7 +17,9 @@ FastAPI + Uvicorn backend that relays realtime voice sessions to OpenAI, with op
 
 - Python 3.11+
 - Docker and Docker Compose (for the Docker path)
-- An [OpenAI API key](https://platform.openai.com/api-keys) with Realtime API access
+- Provider credentials for your selected providers:
+  - `OPENAI_API_KEY` when `REALTIME_PROVIDER=openai`
+  - `GEMINI_LIVE_API_KEY` when `REALTIME_PROVIDER=gemini_live`
 
 ## CLI-first quick start
 
@@ -138,24 +140,43 @@ Use `/livez` for public and Cloud Run liveness checks. `/healthz` remains availa
 ## Configuration
 
 Copy `.env.example` to `.env` and edit. The full reference with all options and defaults is in `.env.example`.
+Use `portworld providers list` and `portworld providers show <provider_id>` to inspect current provider requirements.
+Legacy provider alias keys are not supported. Use canonical provider-scoped keys only.
 
-**Required**
-
-| Variable | Description |
-|---|---|
-| `OPENAI_API_KEY` | OpenAI API key with Realtime API access |
-
-**Opt-in features**
+**Provider selection toggles**
 
 | Variable | Description |
 |---|---|
-| `VISION_MEMORY_ENABLED` | Set `true` to enable the visual memory pipeline |
-| `VISION_PROVIDER_API_KEY` | API key for the vision endpoint (required when vision is enabled) |
-| `VISION_PROVIDER_BASE_URL` | Base URL for any OpenAI-compatible vision endpoint (defaults to Mistral) |
-| `REALTIME_TOOLING_ENABLED` | Set `true` to register memory and search tools with the realtime session |
-| `TAVILY_API_KEY` | Enables the `web_search` tool (only used when tooling is enabled) |
+| `REALTIME_PROVIDER` | Realtime provider id (`openai` or `gemini_live`) |
+| `VISION_MEMORY_ENABLED` | Set `true` to enable the vision provider pipeline |
+| `VISION_MEMORY_PROVIDER` | Vision provider id when vision is enabled |
+| `REALTIME_TOOLING_ENABLED` | Set `true` to enable realtime tooling |
+| `REALTIME_WEB_SEARCH_PROVIDER` | Search provider id when tooling is enabled (currently `tavily`) |
 
-Some OpenAI-compatible Mistral endpoints reject `response_format` / structured-output mode for their tokenizer backend. When that happens, the backend automatically retries once without `response_format` and falls back to prompt-only JSON extraction.
+**Realtime provider required keys**
+
+| Variable | Description |
+|---|---|
+| `OPENAI_API_KEY` | Required when `REALTIME_PROVIDER=openai` |
+| `GEMINI_LIVE_API_KEY` | Required when `REALTIME_PROVIDER=gemini_live` |
+
+**Vision provider required keys (when `VISION_MEMORY_ENABLED=true`)**
+
+| Provider id | Required key(s) |
+|---|---|
+| `mistral` | `VISION_MISTRAL_API_KEY` |
+| `openai` | `VISION_OPENAI_API_KEY` |
+| `azure_openai` | `VISION_AZURE_OPENAI_API_KEY` plus `VISION_AZURE_OPENAI_ENDPOINT` |
+| `gemini` | `VISION_GEMINI_API_KEY` |
+| `claude` | `VISION_CLAUDE_API_KEY` |
+| `bedrock` | required config: `VISION_BEDROCK_REGION` (optional AWS credentials: `VISION_BEDROCK_AWS_ACCESS_KEY_ID`, `VISION_BEDROCK_AWS_SECRET_ACCESS_KEY`, `VISION_BEDROCK_AWS_SESSION_TOKEN`) |
+| `groq` | `VISION_GROQ_API_KEY` |
+
+**Search provider required keys (when `REALTIME_TOOLING_ENABLED=true`)**
+
+| Provider id | Required key(s) |
+|---|---|
+| `tavily` | `TAVILY_API_KEY` |
 
 **Production hardening**
 

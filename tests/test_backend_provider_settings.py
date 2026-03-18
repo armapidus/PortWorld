@@ -1,0 +1,73 @@
+from __future__ import annotations
+
+import os
+import unittest
+from unittest import mock
+
+from backend.core.settings import Settings
+
+
+class BackendProviderSettingsTests(unittest.TestCase):
+    def _settings(self, extra_env: dict[str, str]) -> Settings:
+        with mock.patch.dict(os.environ, extra_env, clear=True):
+            return Settings.from_env()
+
+    def test_gemini_live_realtime_settings_are_loaded(self) -> None:
+        settings = self._settings(
+            {
+                "REALTIME_PROVIDER": "gemini_live",
+                "GEMINI_LIVE_API_KEY": "gemini-live-key",
+                "GEMINI_LIVE_MODEL": "gemini-live-model",
+                "GEMINI_LIVE_BASE_URL": "https://example.test",
+                "GEMINI_LIVE_ENDPOINT": "/live/ws",
+            }
+        )
+        self.assertEqual(settings.require_realtime_api_key(provider="gemini_live"), "gemini-live-key")
+        self.assertEqual(settings.resolve_realtime_model(provider="gemini_live"), "gemini-live-model")
+        self.assertEqual(settings.resolve_realtime_base_url(provider="gemini_live"), "https://example.test")
+        self.assertEqual(settings.resolve_realtime_endpoint(provider="gemini_live"), "/live/ws")
+
+    def test_azure_openai_vision_settings_are_loaded(self) -> None:
+        settings = self._settings(
+            {
+                "VISION_MEMORY_ENABLED": "true",
+                "VISION_MEMORY_PROVIDER": "azure_openai",
+                "VISION_MEMORY_MODEL": "ignored-fallback",
+                "VISION_AZURE_OPENAI_API_KEY": "azure-key",
+                "VISION_AZURE_OPENAI_ENDPOINT": "https://example.openai.azure.com",
+                "VISION_AZURE_OPENAI_API_VERSION": "2024-10-21",
+                "VISION_AZURE_OPENAI_DEPLOYMENT": "vision-deployment",
+            }
+        )
+        self.assertEqual(settings.require_vision_provider_api_key(provider="azure_openai"), "azure-key")
+        self.assertEqual(
+            settings.resolve_vision_provider_endpoint(provider="azure_openai"),
+            "https://example.openai.azure.com",
+        )
+        self.assertEqual(
+            settings.resolve_vision_provider_api_version(provider="azure_openai"),
+            "2024-10-21",
+        )
+        self.assertEqual(
+            settings.resolve_vision_provider_deployment(provider="azure_openai"),
+            "vision-deployment",
+        )
+
+    def test_mistral_vision_settings_are_loaded(self) -> None:
+        settings = self._settings(
+            {
+                "VISION_MEMORY_ENABLED": "true",
+                "VISION_MEMORY_PROVIDER": "mistral",
+                "VISION_MISTRAL_API_KEY": "mistral-key",
+                "VISION_MISTRAL_BASE_URL": "https://mistral.example.test",
+            }
+        )
+        self.assertEqual(settings.require_vision_provider_api_key(provider="mistral"), "mistral-key")
+        self.assertEqual(
+            settings.resolve_vision_provider_base_url(provider="mistral"),
+            "https://mistral.example.test",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
