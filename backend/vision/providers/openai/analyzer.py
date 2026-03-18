@@ -32,36 +32,41 @@ from backend.vision.providers.shared import (
     sanitize_url_for_logging,
 )
 
-DEFAULT_MISTRAL_BASE_URL = "https://api.mistral.ai"
+DEFAULT_OPENAI_BASE_URL = "https://api.openai.com"
 
 logger = logging.getLogger(__name__)
 
 
-def validate_mistral_vision_settings(settings: Settings) -> None:
-    settings.validate_vision_provider_credentials(provider="mistral")
+def validate_openai_vision_settings(settings: Settings) -> None:
+    settings.validate_vision_provider_credentials(provider="openai")
+    model_name = settings.vision_memory_model.strip()
+    if not model_name:
+        raise RuntimeError(
+            "VISION_MEMORY_MODEL is required when VISION_MEMORY_PROVIDER=openai"
+        )
 
 
-def build_mistral_vision_analyzer(*, settings: Settings) -> "MistralVisionAnalyzer":
-    return MistralVisionAnalyzer(
-        api_key=settings.require_vision_provider_api_key(provider="mistral"),
+def build_openai_vision_analyzer(*, settings: Settings) -> "OpenAIVisionAnalyzer":
+    return OpenAIVisionAnalyzer(
+        api_key=settings.require_vision_provider_api_key(provider="openai"),
         model_name=settings.vision_memory_model,
-        base_url=settings.resolve_vision_provider_base_url(provider="mistral"),
+        base_url=settings.resolve_vision_provider_base_url(provider="openai"),
     )
 
 
 @dataclass(slots=True)
-class MistralVisionAnalyzer:
+class OpenAIVisionAnalyzer:
     api_key: str
     model_name: str
     base_url: str | None = None
-    provider_name: str = field(default="mistral", init=False)
+    provider_name: str = field(default="openai", init=False)
     _client: httpx.AsyncClient | None = field(default=None, init=False, repr=False)
     _supports_response_format: bool = field(default=True, init=False, repr=False)
 
     async def startup(self) -> None:
         if self._client is None:
             self._client = httpx.AsyncClient(
-                base_url=(self.base_url or DEFAULT_MISTRAL_BASE_URL).rstrip("/"),
+                base_url=(self.base_url or DEFAULT_OPENAI_BASE_URL).rstrip("/"),
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
                     "Accept": "application/json",
@@ -88,14 +93,13 @@ class MistralVisionAnalyzer:
             image_media_type=image_media_type,
             include_response_format=self._supports_response_format,
         )
-
         try:
             response = await self._post_completion(client=client, request_body=request_body)
         except VisionProviderError as exc:
             if self._supports_response_format and is_response_format_compatibility_error(exc):
                 self._supports_response_format = False
                 base_url_for_log = sanitize_url_for_logging(
-                    (self.base_url or DEFAULT_MISTRAL_BASE_URL).rstrip("/")
+                    (self.base_url or DEFAULT_OPENAI_BASE_URL).rstrip("/")
                 )
                 logger.warning(
                     "Vision provider rejected response_format; retrying without structured output provider=%s model=%s base_url=%s provider_message=%s",
@@ -104,13 +108,15 @@ class MistralVisionAnalyzer:
                     base_url_for_log,
                     (sanitize_sensitive_text(exc.provider_message) or "")[:220] or None,
                 )
-                fallback_body = self._build_request_body(
-                    image_bytes=image_bytes,
-                    frame_context=frame_context,
-                    image_media_type=image_media_type,
-                    include_response_format=False,
+                response = await self._post_completion(
+                    client=client,
+                    request_body=self._build_request_body(
+                        image_bytes=image_bytes,
+                        frame_context=frame_context,
+                        image_media_type=image_media_type,
+                        include_response_format=False,
+                    ),
                 )
-                response = await self._post_completion(client=client, request_body=fallback_body)
             else:
                 raise
 
@@ -130,12 +136,16 @@ class MistralVisionAnalyzer:
             raise VisionProviderError(
                 status_code=response.status_code,
                 provider_error_code="provider_payload_invalid_json",
-                provider_message=(
-                    "Vision provider returned an observation payload that could not be parsed"
-                ),
+                provider_message="Vision provider returned an observation payload that could not be parsed",
                 payload_excerpt=extract_provider_content_excerpt_from_chat_choices(response_json),
             ) from exc
-        return self._normalize_observation(payload=payload, frame_context=frame_context)
+        return normalize_observation(payload=payload, frame_context=frame_context)
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            await self.startup()
+        assert self._client is not None
+        return self._client
 
     async def _post_completion(
         self,
@@ -149,19 +159,13 @@ class MistralVisionAnalyzer:
             request_body=request_body,
         )
 
-    async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None:
-            await self.startup()
-        assert self._client is not None
-        return self._client
-
     def _build_request_body(
         self,
         *,
         image_bytes: bytes,
         frame_context: VisionFrameContext,
         image_media_type: str,
-        include_response_format: bool = True,
+        include_response_format: bool,
     ) -> dict[str, Any]:
         data_url = build_data_url(image_bytes=image_bytes, image_media_type=image_media_type)
         payload: dict[str, Any] = {
@@ -170,23 +174,12 @@ class MistralVisionAnalyzer:
             "top_p": DEFAULT_VISION_TOP_P,
             "max_tokens": DEFAULT_VISION_MAX_TOKENS,
             "messages": [
-                {
-                    "role": "system",
-                    "content": VISION_SYSTEM_PROMPT,
-                },
+                {"role": "system", "content": VISION_SYSTEM_PROMPT},
                 {
                     "role": "user",
                     "content": [
-                        {
-                            "type": "text",
-                            "text": build_user_prompt(frame_context=frame_context),
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": data_url,
-                            },
-                        },
+                        {"type": "text", "text": build_user_prompt(frame_context=frame_context)},
+                        {"type": "image_url", "image_url": {"url": data_url}},
                     ],
                 },
             ],
@@ -198,18 +191,10 @@ class MistralVisionAnalyzer:
     def _extract_provider_payload(self, response_json: dict[str, Any]) -> ProviderObservationPayload:
         choices = response_json.get("choices")
         if not isinstance(choices, list) or not choices:
-            raise ValueError("Mistral response did not include choices")
+            raise ValueError("OpenAI response did not include choices")
 
         message = choices[0].get("message")
         if not isinstance(message, dict):
-            raise ValueError("Mistral response did not include a message payload")
+            raise ValueError("OpenAI response did not include a message payload")
 
         return parse_provider_observation_payload(coalesce_text_content(message.get("content")))
-
-    def _normalize_observation(
-        self,
-        *,
-        payload: ProviderObservationPayload,
-        frame_context: VisionFrameContext,
-    ) -> VisionObservation:
-        return normalize_observation(payload=payload, frame_context=frame_context)

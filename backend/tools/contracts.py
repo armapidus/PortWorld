@@ -11,14 +11,6 @@ class ToolDefinition:
     description: str
     input_schema: dict[str, Any]
 
-    def to_openai_tool(self) -> dict[str, Any]:
-        return {
-            "type": "function",
-            "name": self.name,
-            "description": self.description,
-            "parameters": self.input_schema,
-        }
-
 
 @dataclass(frozen=True, slots=True)
 class ToolCall:

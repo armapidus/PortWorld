@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from backend.tools.contracts import ToolCall, ToolDefinition, ToolExecutor, ToolResult
 
@@ -58,9 +57,6 @@ class RealtimeToolRegistry:
 
     def list_definitions(self) -> list[ToolDefinition]:
         return [registered.definition for registered in self._tools.values()]
-
-    def to_openai_tools(self) -> list[dict[str, Any]]:
-        return [definition.to_openai_tool() for definition in self.list_definitions()]
 
     async def execute(self, call: ToolCall) -> ToolResult:
         registered = self.resolve(call.name)
