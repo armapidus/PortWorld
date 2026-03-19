@@ -7,8 +7,14 @@ import logging
 from typing import Any
 
 from backend.realtime.audio_uplink import ClientAudioUplink
-from backend.realtime.client import OpenAIRealtimeClient, RealtimeClientError
-from backend.realtime.contracts import BinarySender, EnvelopeSender
+from backend.realtime.client import RealtimeClientError
+from backend.realtime.contracts import (
+    BinarySender,
+    EnvelopeSender,
+    NormalizedRealtimeEvent,
+    NormalizedRealtimeEventTypes,
+    RealtimeAdapterContract,
+)
 from backend.realtime.tool_dispatcher import ToolCallDispatcher
 from backend.realtime.turn_state import TurnConfig, TurnManager, TurnState
 from backend.tools.runtime import RealtimeToolingRuntime
@@ -16,17 +22,16 @@ from backend.ws.protocol.contracts import now_ms
 from backend.ws.protocol.frame_codec import SERVER_AUDIO_FRAME_TYPE
 
 logger = logging.getLogger(__name__)
-SESSION_READY_EVENT_TYPES = {"session.created", "session.updated"}
 
 
 class IOSRealtimeBridge:
-    """Relay between iOS websocket transport and OpenAI realtime websocket."""
+    """Relay between iOS websocket transport and a provider realtime adapter."""
 
     def __init__(
         self,
         *,
         session_id: str,
-        upstream_client: OpenAIRealtimeClient,
+        upstream_client: RealtimeAdapterContract,
         send_envelope: EnvelopeSender,
         send_binary_frame: BinarySender,
         server_turn_detection_enabled: bool = False,
@@ -36,6 +41,7 @@ class IOSRealtimeBridge:
         tooling_runtime: RealtimeToolingRuntime | None = None,
         session_instructions: str | None = None,
         auto_start_response: bool = False,
+        response_create_starts_turn: bool = True,
     ) -> None:
         self._session_id = session_id
         self._upstream_client = upstream_client
@@ -44,6 +50,7 @@ class IOSRealtimeBridge:
         self._tooling_runtime = tooling_runtime
         self._session_instructions = session_instructions
         self._auto_start_response = auto_start_response
+        self._response_create_starts_turn = response_create_starts_turn
 
         self._upstream_task: asyncio.Task[None] | None = None
         self._closed = False
@@ -72,6 +79,7 @@ class IOSRealtimeBridge:
             server_turn_detection_enabled=server_turn_detection_enabled,
             manual_turn_fallback_enabled=manual_turn_fallback_enabled,
             manual_turn_fallback_delay_s=max(100, manual_turn_fallback_delay_ms) / 1000.0,
+            response_create_starts_turn=response_create_starts_turn,
         )
         turn_state = TurnState()
         self._turn_manager = TurnManager(
@@ -100,7 +108,7 @@ class IOSRealtimeBridge:
         logger.info("Initializing upstream realtime session=%s", self._session_id)
         tools = None
         if self._tooling_runtime is not None:
-            tools = self._tooling_runtime.to_openai_tools()
+            tools = self._tooling_runtime.list_tool_definitions()
         await self._upstream_client.initialize_session(
             tools=tools,
             instructions=self._session_instructions,
@@ -159,9 +167,7 @@ class IOSRealtimeBridge:
         self._turn_manager.state.current_response_id = None
 
         try:
-            await self._upstream_client.send_json(
-                {"type": "response.cancel", "response_id": response_id}
-            )
+            await self._upstream_client.cancel_response(response_id=response_id)
             logger.info(
                 "Upstream response.cancel sent session=%s response_id=%s",
                 self._session_id,
@@ -180,7 +186,7 @@ class IOSRealtimeBridge:
 
     async def _run_upstream_loop(self) -> None:
         try:
-            async for event in self._upstream_client.iter_events():
+            async for event in self._upstream_client.iter_normalized_events():
                 await self._handle_upstream_event(event)
         except asyncio.CancelledError:
             raise
@@ -207,33 +213,38 @@ class IOSRealtimeBridge:
                 retriable=True,
             )
 
-    async def _handle_upstream_event(self, event: dict[str, Any]) -> None:
+    async def _handle_upstream_event(self, event: NormalizedRealtimeEvent) -> None:
         event_type = event.get("type")
         if not isinstance(event_type, str):
             logger.debug("Ignoring upstream event with non-string type: %s", event)
             return
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
 
         handler = self._UPSTREAM_EVENT_HANDLERS.get(event_type)
         if handler is not None:
-            await handler(self, event)
+            await handler(self, payload)
             return
 
-        if event_type in SESSION_READY_EVENT_TYPES:
+        if event_type == NormalizedRealtimeEventTypes.SESSION_READY:
             logger.info("Upstream %s session=%s", event_type, self._session_id)
             self._mark_session_ready()
             return
 
-        if event_type == "response.output_item.done":
-            item = event.get("item")
-            if isinstance(item, dict) and item.get("type") == "function_call":
-                await self._tool_dispatcher.handle_event(event)
+        if event_type == NormalizedRealtimeEventTypes.TOOL_CALL_COMPLETED:
+            await self._tool_dispatcher.handle_event(payload)
             return
 
-        if event_type == "input_audio_buffer.committed":
+        if event_type == NormalizedRealtimeEventTypes.INPUT_AUDIO_COMMITTED:
             logger.debug("Upstream input_audio_buffer.committed session=%s", self._session_id)
             return
 
-        logger.debug("Unhandled upstream event type=%s", event_type)
+        logger.debug(
+            "Unhandled upstream event type=%s source=%s",
+            event_type,
+            event.get("source"),
+        )
 
     async def _handle_audio_delta(self, event: dict[str, Any]) -> None:
         self._turn_manager.on_audio_delta()
@@ -269,14 +280,13 @@ class IOSRealtimeBridge:
         await self._on_upstream_error_event(event)
 
     _UPSTREAM_EVENT_HANDLERS: dict[str, Any] = {
-        "response.output_audio.delta": _handle_audio_delta,
-        "response.output_audio.done": _handle_audio_done,
-        "response.done": _handle_response_done,
-        "input_audio_buffer.speech_started": _handle_speech_started,
-        "input_audio_buffer.speech_stopped": _handle_speech_stopped,
-        "response.created": _handle_response_created,
-        "response.function_call_arguments.done": _handle_function_call_done,
-        "error": _handle_error_event,
+        NormalizedRealtimeEventTypes.RESPONSE_AUDIO_DELTA: _handle_audio_delta,
+        NormalizedRealtimeEventTypes.RESPONSE_AUDIO_DONE: _handle_audio_done,
+        NormalizedRealtimeEventTypes.RESPONSE_DONE: _handle_response_done,
+        NormalizedRealtimeEventTypes.INPUT_SPEECH_STARTED: _handle_speech_started,
+        NormalizedRealtimeEventTypes.INPUT_SPEECH_STOPPED: _handle_speech_stopped,
+        NormalizedRealtimeEventTypes.RESPONSE_CREATED: _handle_response_created,
+        NormalizedRealtimeEventTypes.ERROR: _handle_error_event,
     }
 
     async def _on_response_done(self, event: dict[str, Any]) -> None:
@@ -458,8 +468,10 @@ class IOSRealtimeBridge:
         try:
             tools = None
             if self._tooling_runtime is not None:
-                tools = self._tooling_runtime.to_openai_tools()
-            did_retry = await retry_method(
+                tools = self._tooling_runtime.list_tool_definitions()
+            did_retry = await self._upstream_client.maybe_recover_session_init_error(
+                code=code,
+                message=message,
                 tools=tools,
                 instructions=self._session_instructions,
             )
@@ -515,8 +527,9 @@ class IOSRealtimeBridge:
         )
 
     async def _send_response_create(self, source: str) -> None:
-        await self._upstream_client.send_json({"type": "response.create"})
-        self._turn_manager.on_response_created()
+        await self._upstream_client.create_response()
+        if self._response_create_starts_turn:
+            self._turn_manager.on_response_created()
         logger.info("Upstream response.create sent session=%s source=%s", self._session_id, source)
 
     async def _send_onboarding_profile_ready(self, payload: dict[str, Any]) -> None:

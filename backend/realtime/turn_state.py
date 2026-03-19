@@ -8,8 +8,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from backend.realtime.audio_uplink import ClientAudioUplink
-    from backend.realtime.client import OpenAIRealtimeClient
-    from backend.realtime.contracts import EnvelopeSender
+    from backend.realtime.contracts import EnvelopeSender, RealtimeLifecycleAdapter
     from backend.realtime.tool_dispatcher import ToolCallDispatcher
 
 logger = logging.getLogger(__name__)
@@ -41,6 +40,7 @@ class TurnConfig:
     server_turn_detection_enabled: bool = False
     manual_turn_fallback_enabled: bool = True
     manual_turn_fallback_delay_s: float = 0.9
+    response_create_starts_turn: bool = True
 
 
 class TurnManager:
@@ -50,7 +50,7 @@ class TurnManager:
         session_id: str,
         config: TurnConfig,
         state: TurnState,
-        upstream_client: "OpenAIRealtimeClient",
+        upstream_client: "RealtimeLifecycleAdapter",
         audio_uplink: "ClientAudioUplink",
         tool_dispatcher: "ToolCallDispatcher",
         send_envelope: "EnvelopeSender",
@@ -173,14 +173,15 @@ class TurnManager:
             self._audio_uplink.queue_size,
             self._audio_uplink.sent_count,
         )
-        await self._upstream_client.send_json({"type": "input_audio_buffer.commit"})
+        await self._upstream_client.commit_client_turn()
         self._state.manual_response_sent = True
         await self._send_response_create(source=f"manual_finalize:{reason}")
 
     async def _send_response_create(self, source: str) -> None:
-        await self._upstream_client.send_json({"type": "response.create"})
-        self._state.has_active_upstream_response = True
-        self._state.response_started = True
+        await self._upstream_client.create_response()
+        if self._config.response_create_starts_turn:
+            self._state.has_active_upstream_response = True
+            self._state.response_started = True
         self._cancel_finalize_task()
         logger.info("Upstream response.create sent session=%s source=%s", self._session_id, source)
 

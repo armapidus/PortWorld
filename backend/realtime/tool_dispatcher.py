@@ -13,7 +13,12 @@ logger = logging.getLogger(__name__)
 
 
 class UpstreamToolSender(Protocol):
-    async def send_json(self, event: dict[str, Any]) -> None: ...
+    async def submit_tool_result(
+        self,
+        *,
+        call_id: str,
+        output: str,
+    ) -> None: ...
 
 
 class ToolCallDispatcher:
@@ -245,15 +250,9 @@ class ToolCallDispatcher:
         await self._send_tool_output_and_continue(call_id=call_id, output=output_json)
 
     async def _send_tool_output_and_continue(self, *, call_id: str, output: str) -> None:
-        await self._upstream_client.send_json(
-            {
-                "type": "conversation.item.create",
-                "item": {
-                    "type": "function_call_output",
-                    "call_id": call_id,
-                    "output": output,
-                },
-            }
+        await self._upstream_client.submit_tool_result(
+            call_id=call_id,
+            output=output,
         )
         await self._send_response_create("tool_output")
 

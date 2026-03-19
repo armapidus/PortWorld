@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
 import logging
-from typing import Any, Protocol
+from typing import Protocol
 
 from backend.realtime.client import RealtimeClientError
 
@@ -12,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class UpstreamAudioSender(Protocol):
-    async def send_json(self, event: dict[str, Any]) -> None: ...
+    async def append_client_audio(self, pcm16_audio: bytes) -> None: ...
 
 
 class ClientAudioUplink:
@@ -136,12 +135,7 @@ class ClientAudioUplink:
                 try:
                     if payload_bytes is None:
                         return
-                    await self._upstream_client.send_json(
-                        {
-                            "type": "input_audio_buffer.append",
-                            "audio": base64.b64encode(payload_bytes).decode("ascii"),
-                        }
-                    )
+                    await self._upstream_client.append_client_audio(payload_bytes)
                     self._sent_count += 1
                 finally:
                     self._queue.task_done()

@@ -745,11 +745,67 @@ class GeminiLiveRealtimeClient:
 
     @staticmethod
     def _to_gemini_function_declaration(tool: ToolDefinition) -> dict[str, Any]:
-        return {
+        declaration: dict[str, Any] = {
             "name": tool.name,
             "description": tool.description,
-            "parameters": dict(tool.input_schema),
         }
+        parameters = GeminiLiveRealtimeClient._to_gemini_schema(tool.input_schema)
+        if parameters is not None:
+            declaration["parameters"] = parameters
+        return declaration
+
+    @classmethod
+    def _to_gemini_schema(cls, schema: object) -> dict[str, Any] | None:
+        if not isinstance(schema, dict):
+            return None
+
+        sanitized: dict[str, Any] = {}
+        for key, value in schema.items():
+            if key == "additionalProperties":
+                continue
+            if key == "properties":
+                if not isinstance(value, dict):
+                    continue
+                properties: dict[str, Any] = {}
+                for property_name, property_schema in value.items():
+                    sanitized_property = cls._to_gemini_schema(property_schema)
+                    if sanitized_property is not None:
+                        properties[property_name] = sanitized_property
+                if properties:
+                    sanitized["properties"] = properties
+                continue
+            if key == "items":
+                sanitized_items = cls._to_gemini_schema(value)
+                if sanitized_items is not None:
+                    sanitized["items"] = sanitized_items
+                continue
+            if key == "required":
+                if isinstance(value, list):
+                    required = [item for item in value if isinstance(item, str) and item]
+                    if required:
+                        sanitized["required"] = required
+                continue
+            if key in {
+                "type",
+                "description",
+                "enum",
+                "format",
+                "nullable",
+                "minimum",
+                "maximum",
+                "minItems",
+                "maxItems",
+                "minLength",
+                "maxLength",
+            }:
+                sanitized[key] = value
+
+        # Gemini function declarations accept a subset of OpenAPI schema keys.
+        # Omitting parameters entirely is more compatible for no-arg functions
+        # than sending an empty object schema.
+        if sanitized.get("type") == "object" and not sanitized.get("properties"):
+            return None
+        return sanitized or None
 
     def _ensure_active_response_id(self) -> str:
         if self._active_response_id is not None:
