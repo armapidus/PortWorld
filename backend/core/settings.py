@@ -17,6 +17,14 @@ STORAGE_BACKEND_MANAGED = "managed"
 LEGACY_STORAGE_BACKEND_POSTGRES_GCS = "postgres_gcs"
 SUPPORTED_STORAGE_BACKENDS = {"local", STORAGE_BACKEND_MANAGED, LEGACY_STORAGE_BACKEND_POSTGRES_GCS}
 SUPPORTED_OBJECT_STORE_PROVIDERS = {"filesystem", "gcs", "s3", "azure_blob"}
+DEFAULT_VISION_MODELS_BY_PROVIDER: dict[str, str] = {
+    "mistral": "ministral-3b-2512",
+    "openai": "gpt-4.1-mini",
+    "gemini": "gemini-2.0-flash",
+    "claude": "claude-3-5-sonnet-latest",
+    "bedrock": "anthropic.claude-3-5-sonnet-20240620-v1:0",
+    "groq": "llama-3.2-90b-vision-preview",
+}
 
 
 class MissingRealtimeProviderAPIKeyError(RuntimeError):
@@ -98,22 +106,29 @@ def _parse_csv_env(*names: str, default: str) -> list[str]:
 class Settings:
     openai_api_key: str | None
     vision_mistral_api_key: str | None
+    vision_mistral_model: str | None
     vision_mistral_base_url: str | None
     vision_openai_api_key: str | None
+    vision_openai_model: str | None
     vision_openai_base_url: str | None
     vision_azure_openai_api_key: str | None
+    vision_azure_openai_model: str | None
     vision_azure_openai_endpoint: str | None
     vision_azure_openai_api_version: str | None
     vision_azure_openai_deployment: str | None
     vision_gemini_api_key: str | None
+    vision_gemini_model: str | None
     vision_gemini_base_url: str | None
     vision_claude_api_key: str | None
+    vision_claude_model: str | None
     vision_claude_base_url: str | None
     vision_bedrock_region: str | None
+    vision_bedrock_model: str | None
     vision_bedrock_aws_access_key_id: str | None
     vision_bedrock_aws_secret_access_key: str | None
     vision_bedrock_aws_session_token: str | None
     vision_groq_api_key: str | None
+    vision_groq_model: str | None
     vision_groq_base_url: str | None
     tavily_api_key: str | None
     tavily_base_url: str | None
@@ -361,6 +376,31 @@ class Settings:
             return base_url or None
         return None
 
+    def _resolve_vision_provider_scoped_model(self, *, provider: str) -> str | None:
+        provider_name = provider.strip().lower()
+        if provider_name == "mistral":
+            model_name = (self.vision_mistral_model or "").strip()
+            return model_name or None
+        if provider_name == "openai":
+            model_name = (self.vision_openai_model or "").strip()
+            return model_name or None
+        if provider_name == "azure_openai":
+            model_name = (self.vision_azure_openai_model or "").strip()
+            return model_name or None
+        if provider_name == "gemini":
+            model_name = (self.vision_gemini_model or "").strip()
+            return model_name or None
+        if provider_name == "claude":
+            model_name = (self.vision_claude_model or "").strip()
+            return model_name or None
+        if provider_name == "bedrock":
+            model_name = (self.vision_bedrock_model or "").strip()
+            return model_name or None
+        if provider_name == "groq":
+            model_name = (self.vision_groq_model or "").strip()
+            return model_name or None
+        return None
+
     def resolve_vision_provider_endpoint(self, *, provider: str | None = None) -> str | None:
         provider_name = (provider or self.vision_memory_provider).strip().lower()
         if provider_name == "azure_openai":
@@ -381,9 +421,23 @@ class Settings:
             deployment = (self.vision_azure_openai_deployment or "").strip()
             if deployment:
                 return deployment
-            model_name = (self.vision_memory_model or "").strip()
-            return model_name or None
+            model_name = self._resolve_vision_provider_scoped_model(provider=provider_name)
+            if model_name:
+                return model_name
+            legacy_model_name = (self.vision_memory_model or "").strip()
+            return legacy_model_name or None
         return None
+
+    def resolve_vision_provider_model(self, *, provider: str | None = None) -> str | None:
+        provider_name = (provider or self.vision_memory_provider).strip().lower()
+        model_name = self._resolve_vision_provider_scoped_model(provider=provider_name)
+        if model_name:
+            return model_name
+        legacy_model_name = (self.vision_memory_model or "").strip()
+        if legacy_model_name:
+            return legacy_model_name
+        default_model_name = DEFAULT_VISION_MODELS_BY_PROVIDER.get(provider_name, "").strip()
+        return default_model_name or None
 
     def resolve_vision_provider_region(self, *, provider: str | None = None) -> str | None:
         provider_name = (provider or self.vision_memory_provider).strip().lower()
@@ -463,11 +517,11 @@ class Settings:
         if provider_name == "bedrock":
             return
         key = self.require_vision_provider_api_key(provider=provider_name)
-        model_name = (self.vision_memory_model or "").strip()
+        model_name = (self.resolve_vision_provider_model(provider=provider_name) or "").strip()
         if provider_name == "mistral" and model_name and key == model_name:
             raise RuntimeError(
                 "VISION_MISTRAL_API_KEY is invalid: "
-                "it matches VISION_MEMORY_MODEL. Set an API key, not a model id."
+                "it matches the configured Mistral model. Set an API key, not a model id."
             )
         if provider_name == "mistral" and key.lower().startswith("mistralai/"):
             raise RuntimeError(
@@ -483,24 +537,31 @@ def _load_credentials_settings() -> dict[str, str | None]:
     return {
         "openai_api_key": os.getenv("OPENAI_API_KEY"),
         "vision_mistral_api_key": os.getenv("VISION_MISTRAL_API_KEY"),
+        "vision_mistral_model": _get_env("VISION_MISTRAL_MODEL"),
         "vision_mistral_base_url": _get_env("VISION_MISTRAL_BASE_URL"),
         "vision_openai_api_key": os.getenv("VISION_OPENAI_API_KEY"),
+        "vision_openai_model": _get_env("VISION_OPENAI_MODEL"),
         "vision_openai_base_url": _get_env("VISION_OPENAI_BASE_URL"),
         "vision_azure_openai_api_key": os.getenv("VISION_AZURE_OPENAI_API_KEY"),
+        "vision_azure_openai_model": _get_env("VISION_AZURE_OPENAI_MODEL"),
         "vision_azure_openai_endpoint": _get_env("VISION_AZURE_OPENAI_ENDPOINT"),
         "vision_azure_openai_api_version": _get_env("VISION_AZURE_OPENAI_API_VERSION"),
         "vision_azure_openai_deployment": _get_env("VISION_AZURE_OPENAI_DEPLOYMENT"),
         "vision_gemini_api_key": os.getenv("VISION_GEMINI_API_KEY"),
+        "vision_gemini_model": _get_env("VISION_GEMINI_MODEL"),
         "vision_gemini_base_url": _get_env("VISION_GEMINI_BASE_URL"),
         "vision_claude_api_key": os.getenv("VISION_CLAUDE_API_KEY"),
+        "vision_claude_model": _get_env("VISION_CLAUDE_MODEL"),
         "vision_claude_base_url": _get_env("VISION_CLAUDE_BASE_URL"),
         "vision_bedrock_region": _get_env("VISION_BEDROCK_REGION"),
+        "vision_bedrock_model": _get_env("VISION_BEDROCK_MODEL"),
         "vision_bedrock_aws_access_key_id": os.getenv("VISION_BEDROCK_AWS_ACCESS_KEY_ID"),
         "vision_bedrock_aws_secret_access_key": os.getenv(
             "VISION_BEDROCK_AWS_SECRET_ACCESS_KEY"
         ),
         "vision_bedrock_aws_session_token": os.getenv("VISION_BEDROCK_AWS_SESSION_TOKEN"),
         "vision_groq_api_key": os.getenv("VISION_GROQ_API_KEY"),
+        "vision_groq_model": _get_env("VISION_GROQ_MODEL"),
         "vision_groq_base_url": _get_env("VISION_GROQ_BASE_URL"),
         "tavily_api_key": os.getenv("TAVILY_API_KEY"),
         "tavily_base_url": _get_env("TAVILY_BASE_URL"),
@@ -601,7 +662,7 @@ def _load_vision_settings() -> dict[str, str | int | bool]:
             default=False,
         ),
         "vision_memory_provider": (_get_env("VISION_MEMORY_PROVIDER") or "mistral").strip().lower(),
-        "vision_memory_model": (_get_env("VISION_MEMORY_MODEL") or "ministral-3b-2512").strip(),
+        "vision_memory_model": (_get_env("VISION_MEMORY_MODEL") or "").strip(),
         "vision_short_term_window_seconds": _parse_int_env(
             "VISION_SHORT_TERM_WINDOW_SECONDS",
             default=30,
