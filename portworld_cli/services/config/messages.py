@@ -34,6 +34,8 @@ def build_section_success_message(
         f"project_config_path: {project_config_path}",
         f"required_provider_secrets: {_required_secret_status(secret_readiness)}",
         f"missing_provider_secrets: {','.join(secret_readiness.missing_required_secret_keys) or 'none'}",
+        f"required_provider_config: {_required_config_status(secret_readiness)}",
+        f"missing_provider_config: {','.join(secret_readiness.missing_required_config_keys) or 'none'}",
         f"bearer_token: {presence_label(secret_readiness.bearer_token_present)}",
     ]
     if env_path is not None:
@@ -69,6 +71,8 @@ def build_init_review_lines(
         "managed_target_execution: target-aware deploy/doctor support active",
         f"required_provider_secrets: {_required_secret_status(secret_readiness)}",
         f"missing_provider_secrets: {','.join(secret_readiness.missing_required_secret_keys) or 'none'}",
+        f"required_provider_config: {_required_config_status(secret_readiness)}",
+        f"missing_provider_config: {','.join(secret_readiness.missing_required_config_keys) or 'none'}",
         f"bearer_token: {presence_label(secret_readiness.bearer_token_present)}",
     )
 
@@ -167,6 +171,11 @@ def build_config_show_message(
             "missing_provider_secrets",
             ",".join(secret_readiness.missing_required_secret_keys) or "none",
         ),
+        ("required_provider_config", _required_config_status(secret_readiness)),
+        (
+            "missing_provider_config",
+            ",".join(secret_readiness.missing_required_config_keys) or "none",
+        ),
         ("bearer_token", presence_label(secret_readiness.bearer_token_present)),
     ]
     if effective_runtime_source == RUNTIME_SOURCE_PUBLISHED:
@@ -185,4 +194,13 @@ def _required_secret_status(secret_readiness: SecretReadiness) -> str:
     parts: list[str] = []
     for key in secret_readiness.required_secret_keys:
         parts.append(f"{key}:{presence_label(secret_readiness.key_presence.get(key))}")
+    return ",".join(parts)
+
+
+def _required_config_status(secret_readiness: SecretReadiness) -> str:
+    if not secret_readiness.required_config_keys:
+        return "none_required"
+    parts: list[str] = []
+    for key in secret_readiness.required_config_keys:
+        parts.append(f"{key}:{presence_label(secret_readiness.config_key_presence.get(key))}")
     return ",".join(parts)

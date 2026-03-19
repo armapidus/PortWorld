@@ -27,4 +27,4 @@ class ProviderSectionResult:
     vision_provider: str
     tooling_enabled: bool
     search_provider: str
-    secret_env_updates: dict[str, str]
+    env_updates: dict[str, str]

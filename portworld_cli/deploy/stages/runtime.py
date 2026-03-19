@@ -5,11 +5,7 @@ from collections import OrderedDict
 from contextlib import contextmanager
 from typing import Any, Iterator
 
-from backend.core.provider_requirements import (
-    compute_selected_provider_key_set,
-    list_provider_requirements,
-    resolve_selected_providers,
-)
+from backend.core.provider_requirements import list_provider_requirements
 from portworld_cli.deploy.config import DeployStageError, ResolvedDeployConfig
 from portworld_cli.gcp import GCPAdapters, build_postgres_url
 
@@ -50,29 +46,8 @@ LOCAL_ONLY_ENV_KEYS: tuple[str, ...] = (
 
 
 def _effective_sensitive_env_keys(env_values: OrderedDict[str, str]) -> tuple[str, ...]:
-    selected = resolve_selected_providers(env_values)
-    key_set = compute_selected_provider_key_set(selected)
-    selected_secret_keys = tuple(
-        dict.fromkeys(
-            key
-            for entry in key_set.entries
-            for key in (
-                *entry.secret_binding.required_env_keys,
-                *entry.secret_binding.optional_env_keys,
-            )
-            if key
-        ).keys()
-    )
-    return tuple(
-        dict.fromkeys(
-            (
-                *selected_secret_keys,
-                *_DEPRECATED_SENSITIVE_ENV_KEYS,
-                "BACKEND_BEARER_TOKEN",
-                "BACKEND_DATABASE_URL",
-            )
-        ).keys()
-    )
+    del env_values
+    return _CORE_SENSITIVE_ENV_KEYS
 
 
 def ensure_cloud_sql(

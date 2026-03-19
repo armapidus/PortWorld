@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from backend.core.provider_requirements import (
-    build_missing_secret_diagnostics,
+    build_provider_requirement_diagnostics,
     compute_selected_provider_key_set,
     resolve_selected_providers,
 )
@@ -45,6 +45,7 @@ def write_config_artifacts(
         effective_runtime_source=project_config.runtime_source or session.effective_runtime_source,
         runtime_source_derived_from_legacy=False,
         remembered_deploy_state=session.remembered_deploy_state,
+        remembered_deploy_state_target=session.remembered_deploy_state_target,
         workspace_resolution_source=session.workspace_resolution_source,
         active_workspace_root=session.active_workspace_root,
     )
@@ -73,15 +74,20 @@ def _secret_readiness_with_updates(
     key_set = compute_selected_provider_key_set(selected)
 
     if session.existing_env is None:
-        key_presence = {key: None for key in key_set.required_env_keys}
+        key_presence = {key: None for key in key_set.required_secret_env_keys}
+        config_key_presence = {key: None for key in key_set.required_non_secret_env_keys}
         return SecretReadiness(
             selected_realtime_provider=selected.realtime_provider,
             selected_vision_provider=selected.vision_provider,
             selected_search_provider=selected.search_provider,
-            required_secret_keys=key_set.required_env_keys,
-            optional_secret_keys=key_set.optional_env_keys,
+            required_secret_keys=key_set.required_secret_env_keys,
+            optional_secret_keys=key_set.optional_secret_env_keys,
             missing_required_secret_keys=(),
+            required_config_keys=key_set.required_non_secret_env_keys,
+            optional_config_keys=key_set.optional_non_secret_env_keys,
+            missing_required_config_keys=(),
             key_presence=key_presence,
+            config_key_presence=config_key_presence,
             bearer_token_present=None,
         )
     env_values = _build_effective_env_values(
@@ -89,23 +95,31 @@ def _secret_readiness_with_updates(
         config_selection=config_selection,
         env_updates=env_updates,
     )
-    diagnostics = build_missing_secret_diagnostics(
+    diagnostics = build_provider_requirement_diagnostics(
         env_values,
         selected=selected,
     )
     key_presence = {
-        key: diagnostics.key_presence.get(key, False)
-        for key in diagnostics.required_env_keys
+        key: diagnostics.secret_key_presence.get(key, False)
+        for key in diagnostics.required_secret_env_keys
+    }
+    config_key_presence = {
+        key: diagnostics.non_secret_key_presence.get(key, False)
+        for key in diagnostics.required_non_secret_env_keys
     }
 
     return SecretReadiness(
         selected_realtime_provider=diagnostics.selected.realtime_provider,
         selected_vision_provider=diagnostics.selected.vision_provider,
         selected_search_provider=diagnostics.selected.search_provider,
-        required_secret_keys=diagnostics.required_env_keys,
-        optional_secret_keys=diagnostics.optional_env_keys,
-        missing_required_secret_keys=diagnostics.missing_required_env_keys,
+        required_secret_keys=diagnostics.required_secret_env_keys,
+        optional_secret_keys=diagnostics.optional_secret_env_keys,
+        missing_required_secret_keys=diagnostics.missing_required_secret_env_keys,
+        required_config_keys=diagnostics.required_non_secret_env_keys,
+        optional_config_keys=diagnostics.optional_non_secret_env_keys,
+        missing_required_config_keys=diagnostics.missing_required_non_secret_env_keys,
         key_presence=key_presence,
+        config_key_presence=config_key_presence,
         bearer_token_present=bool((env_values.get("BACKEND_BEARER_TOKEN", "") or "").strip()),
     )
 

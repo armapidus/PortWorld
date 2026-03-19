@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.core.provider_requirements import (
-    build_missing_secret_diagnostics,
+    build_provider_requirement_diagnostics,
     compute_selected_provider_key_set,
     resolve_selected_providers,
 )
@@ -39,7 +39,11 @@ class SecretReadiness:
     required_secret_keys: tuple[str, ...]
     optional_secret_keys: tuple[str, ...]
     missing_required_secret_keys: tuple[str, ...]
+    required_config_keys: tuple[str, ...]
+    optional_config_keys: tuple[str, ...]
+    missing_required_config_keys: tuple[str, ...]
     key_presence: dict[str, bool | None]
+    config_key_presence: dict[str, bool | None]
     bearer_token_present: bool | None
 
     def to_dict(self) -> dict[str, object]:
@@ -50,7 +54,11 @@ class SecretReadiness:
             "required_secret_keys": list(self.required_secret_keys),
             "optional_secret_keys": list(self.optional_secret_keys),
             "missing_required_secret_keys": list(self.missing_required_secret_keys),
+            "required_config_keys": list(self.required_config_keys),
+            "optional_config_keys": list(self.optional_config_keys),
+            "missing_required_config_keys": list(self.missing_required_config_keys),
             "key_presence": dict(self.key_presence),
+            "config_key_presence": dict(self.config_key_presence),
             "openai_api_key_present": self.openai_api_key_present,
             "vision_provider_secret_required": self.vision_provider_secret_required,
             "vision_provider_api_key_present": self.vision_provider_api_key_present,
@@ -126,15 +134,20 @@ class WorkspaceSession:
         key_set = compute_selected_provider_key_set(selected)
 
         if self.existing_env is None:
-            key_presence = {key: None for key in key_set.required_env_keys}
+            key_presence = {key: None for key in key_set.required_secret_env_keys}
+            config_key_presence = {key: None for key in key_set.required_non_secret_env_keys}
             return SecretReadiness(
                 selected_realtime_provider=selected.realtime_provider,
                 selected_vision_provider=selected.vision_provider,
                 selected_search_provider=selected.search_provider,
-                required_secret_keys=key_set.required_env_keys,
-                optional_secret_keys=key_set.optional_env_keys,
+                required_secret_keys=key_set.required_secret_env_keys,
+                optional_secret_keys=key_set.optional_secret_env_keys,
                 missing_required_secret_keys=(),
+                required_config_keys=key_set.required_non_secret_env_keys,
+                optional_config_keys=key_set.optional_non_secret_env_keys,
+                missing_required_config_keys=(),
                 key_presence=key_presence,
+                config_key_presence=config_key_presence,
                 bearer_token_present=None,
             )
 
@@ -143,23 +156,31 @@ class WorkspaceSession:
             existing_env=self.existing_env,
             config_overrides=config_selection,
         )
-        diagnostics = build_missing_secret_diagnostics(
+        diagnostics = build_provider_requirement_diagnostics(
             env_values,
             selected=selected,
         )
         key_presence = {
-            key: diagnostics.key_presence.get(key, False)
-            for key in diagnostics.required_env_keys
+            key: diagnostics.secret_key_presence.get(key, False)
+            for key in diagnostics.required_secret_env_keys
+        }
+        config_key_presence = {
+            key: diagnostics.non_secret_key_presence.get(key, False)
+            for key in diagnostics.required_non_secret_env_keys
         }
 
         return SecretReadiness(
             selected_realtime_provider=diagnostics.selected.realtime_provider,
             selected_vision_provider=diagnostics.selected.vision_provider,
             selected_search_provider=diagnostics.selected.search_provider,
-            required_secret_keys=diagnostics.required_env_keys,
-            optional_secret_keys=diagnostics.optional_env_keys,
-            missing_required_secret_keys=diagnostics.missing_required_env_keys,
+            required_secret_keys=diagnostics.required_secret_env_keys,
+            optional_secret_keys=diagnostics.optional_secret_env_keys,
+            missing_required_secret_keys=diagnostics.missing_required_secret_env_keys,
+            required_config_keys=diagnostics.required_non_secret_env_keys,
+            optional_config_keys=diagnostics.optional_non_secret_env_keys,
+            missing_required_config_keys=diagnostics.missing_required_non_secret_env_keys,
             key_presence=key_presence,
+            config_key_presence=config_key_presence,
             bearer_token_present=bool((env_values.get("BACKEND_BEARER_TOKEN", "")).strip()),
         )
 

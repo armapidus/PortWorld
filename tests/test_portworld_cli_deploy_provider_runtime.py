@@ -62,6 +62,7 @@ class DeployProviderRuntimeTests(unittest.TestCase):
                 ("REALTIME_WEB_SEARCH_PROVIDER", "tavily"),
                 ("OPENAI_API_KEY", "openai-key"),
                 ("VISION_OPENAI_API_KEY", "vision-key"),
+                ("VISION_GEMINI_API_KEY", "unselected-gemini-key"),
                 ("TAVILY_API_KEY", "tavily-key"),
                 ("VISION_PROVIDER_API_KEY", "deprecated-vision-key"),
                 ("MISTRAL_API_KEY", "deprecated-mistral-key"),
@@ -78,6 +79,7 @@ class DeployProviderRuntimeTests(unittest.TestCase):
 
         self.assertNotIn("OPENAI_API_KEY", runtime_env)
         self.assertNotIn("VISION_OPENAI_API_KEY", runtime_env)
+        self.assertNotIn("VISION_GEMINI_API_KEY", runtime_env)
         self.assertNotIn("TAVILY_API_KEY", runtime_env)
         self.assertNotIn("VISION_PROVIDER_API_KEY", runtime_env)
         self.assertNotIn("MISTRAL_API_KEY", runtime_env)

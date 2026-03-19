@@ -5,6 +5,7 @@ from backend.core.provider_requirements import (
     PROVIDER_KIND_SEARCH,
     PROVIDER_KIND_VISION,
     compute_selected_provider_key_set,
+    get_provider_requirement,
     resolve_effective_env_value,
     supported_provider_ids,
 )
@@ -23,6 +24,7 @@ def collect_provider_section(
 ) -> ProviderSectionResult:
     from portworld_cli.services.config.prompts import (
         resolve_choice_value,
+        resolve_required_text_value,
         resolve_secret_value,
         resolve_toggle,
     )
@@ -61,6 +63,12 @@ def collect_provider_section(
             explicit_value=options.vision_provider,
             choices=supported_provider_ids(PROVIDER_KIND_VISION),
         )
+    _validate_provider_toggle_dependencies(
+        vision_enabled=vision_enabled,
+        tooling_enabled=session.project_config.providers.tooling.enabled,
+        options=options,
+        check_tooling=False,
+    )
 
     tooling_enabled = resolve_toggle(
         session.cli_context,
@@ -81,6 +89,12 @@ def collect_provider_section(
             explicit_value=options.search_provider,
             choices=supported_provider_ids(PROVIDER_KIND_SEARCH),
         )
+    _validate_provider_toggle_dependencies(
+        vision_enabled=vision_enabled,
+        tooling_enabled=tooling_enabled,
+        options=options,
+        check_tooling=True,
+    )
 
     selection_inputs = {
         "REALTIME_PROVIDER": realtime_provider,
@@ -93,9 +107,9 @@ def collect_provider_section(
         selected=_selected_providers(selection_inputs)
     )
 
-    secret_env_updates: dict[str, str] = {}
+    env_updates: dict[str, str] = {}
     for entry in key_set.entries:
-        for env_key in entry.required_env_keys:
+        for env_key in entry.required_secret_env_keys:
             existing_value, _ = resolve_effective_env_value(
                 values=existing_values,
                 provider_kind=entry.kind,
@@ -108,12 +122,26 @@ def collect_provider_section(
                 options=options,
             )
             label = f"{env_key} ({entry.display_name})"
-            secret_env_updates[env_key] = resolve_secret_value(
+            env_updates[env_key] = resolve_secret_value(
                 session.cli_context,
                 label=label,
                 existing_value=existing_value or "",
                 explicit_value=explicit_value,
                 required=True,
+            )
+        for env_key in entry.required_non_secret_env_keys:
+            existing_value, _ = resolve_effective_env_value(
+                values=existing_values,
+                provider_kind=entry.kind,
+                provider_id=entry.provider_id,
+                env_key=env_key,
+            )
+            label = f"{env_key} ({entry.display_name})"
+            env_updates[env_key] = resolve_required_text_value(
+                session.cli_context,
+                prompt=label,
+                current_value=existing_value or "",
+                explicit_value=None,
             )
 
     return ProviderSectionResult(
@@ -122,7 +150,7 @@ def collect_provider_section(
         vision_provider=vision_provider,
         tooling_enabled=tooling_enabled,
         search_provider=search_provider,
-        secret_env_updates=secret_env_updates,
+        env_updates=env_updates,
     )
 
 
@@ -159,13 +187,17 @@ def apply_provider_section(
         "REALTIME_TOOLING_ENABLED": "true" if result.tooling_enabled else "false",
         "REALTIME_WEB_SEARCH_PROVIDER": result.search_provider,
     }
-    env_updates.update(result.secret_env_updates)
+    env_updates.update(result.env_updates)
 
     if not result.vision_enabled:
-        for key in _required_keys_for_provider(PROVIDER_KIND_VISION, result.vision_provider):
+        for key in _required_secret_keys_for_provider(PROVIDER_KIND_VISION, result.vision_provider):
+            env_updates.setdefault(key, "")
+        for key in _required_non_secret_keys_for_provider(PROVIDER_KIND_VISION, result.vision_provider):
             env_updates.setdefault(key, "")
     if not result.tooling_enabled:
-        for key in _required_keys_for_provider(PROVIDER_KIND_SEARCH, result.search_provider):
+        for key in _required_secret_keys_for_provider(PROVIDER_KIND_SEARCH, result.search_provider):
+            env_updates.setdefault(key, "")
+        for key in _required_non_secret_keys_for_provider(PROVIDER_KIND_SEARCH, result.search_provider):
             env_updates.setdefault(key, "")
 
     return updated_project_config, env_updates
@@ -186,6 +218,28 @@ def _validate_provider_flag_conflicts(options: ProviderEditOptions) -> None:
         raise ConfigUsageError("--tavily-api-key has been removed. Use --search-api-key.")
 
 
+def _validate_provider_toggle_dependencies(
+    *,
+    vision_enabled: bool,
+    tooling_enabled: bool,
+    options: ProviderEditOptions,
+    check_tooling: bool,
+) -> None:
+    from portworld_cli.services.config.errors import ConfigUsageError
+
+    if not check_tooling:
+        if options.vision_provider is not None and not vision_enabled:
+            raise ConfigUsageError("--vision-provider requires visual memory to be enabled.")
+        if (options.vision_api_key or "").strip() and not vision_enabled:
+            raise ConfigUsageError("--vision-api-key requires visual memory to be enabled.")
+        return
+
+    if options.search_provider is not None and not tooling_enabled:
+        raise ConfigUsageError("--search-provider requires realtime tooling to be enabled.")
+    if (options.search_api_key or "").strip() and not tooling_enabled:
+        raise ConfigUsageError("--search-api-key requires realtime tooling to be enabled.")
+
+
 def _selected_providers(selection_inputs: dict[str, str]):
     from backend.core.provider_requirements import resolve_selected_providers
 
@@ -203,10 +257,15 @@ def _default_choice(current: str, *, choices: tuple[str, ...]) -> str:
     return choices[0]
 
 
-def _required_keys_for_provider(kind: str, provider_id: str) -> tuple[str, ...]:
-    from backend.core.provider_requirements import get_provider_requirement
+def _required_secret_keys_for_provider(kind: str, provider_id: str) -> tuple[str, ...]:
+    return get_provider_requirement(kind=kind, provider_id=provider_id).required_secret_env_keys
 
-    return get_provider_requirement(kind=kind, provider_id=provider_id).required_env_keys
+
+def _required_non_secret_keys_for_provider(kind: str, provider_id: str) -> tuple[str, ...]:
+    return get_provider_requirement(
+        kind=kind,
+        provider_id=provider_id,
+    ).required_non_secret_env_keys
 
 
 def _explicit_secret_value(

@@ -4,7 +4,7 @@ FastAPI + Uvicorn backend that relays realtime voice sessions through selectable
 
 ## Features
 
-- **Realtime voice relay** — bridges a WebSocket audio session to the OpenAI Realtime API; streams assistant audio back to the client
+- **Realtime voice relay** — bridges a WebSocket audio session to the selected realtime provider; streams assistant audio back to the client
 - **Persistent memory** — SQLite + filesystem storage for session memory and a user profile, with configurable retention
 - **Visual memory** *(opt-in)* — ingests JPEG frames via `POST /vision/frame`, routes them through adaptive scene-change gating, and builds semantic session memory using any OpenAI-compatible vision endpoint (default: Mistral)
 - **Realtime tooling** *(opt-in)* — registers memory-recall tools with the active OpenAI session; optionally adds web search via Tavily
@@ -112,7 +112,7 @@ Public installer flags:
 
 ```bash
 cp backend/.env.example backend/.env
-# Open backend/.env and set OPENAI_API_KEY at minimum
+# Open backend/.env and set the credentials required by your selected providers
 docker compose up --build
 ```
 
@@ -124,7 +124,7 @@ Data is persisted in a named Docker volume (`portworld_backend_var`).
 cd backend
 pip install -r requirements.txt
 cp .env.example .env
-# Open .env and set OPENAI_API_KEY at minimum
+# Open .env and set the credentials required by your selected providers
 python -m backend.cli serve
 ```
 

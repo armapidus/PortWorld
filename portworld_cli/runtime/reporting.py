@@ -371,6 +371,11 @@ def build_status_message(
                         "missing_provider_secrets",
                         ",".join(secret_readiness.missing_required_secret_keys) or "none",
                     ),
+                    ("required_provider_config", required_config_status(secret_readiness)),
+                    (
+                        "missing_provider_config",
+                        ",".join(secret_readiness.missing_required_config_keys) or "none",
+                    ),
                     (
                         "selected_realtime_provider",
                         secret_readiness.selected_realtime_provider,
@@ -410,4 +415,13 @@ def required_secret_status(secret_readiness: SecretReadiness) -> str:
     parts: list[str] = []
     for key in secret_readiness.required_secret_keys:
         parts.append(f"{key}:{presence_label(secret_readiness.key_presence.get(key))}")
+    return ",".join(parts)
+
+
+def required_config_status(secret_readiness: SecretReadiness) -> str:
+    if not secret_readiness.required_config_keys:
+        return "none_required"
+    parts: list[str] = []
+    for key in secret_readiness.required_config_keys:
+        parts.append(f"{key}:{presence_label(secret_readiness.config_key_presence.get(key))}")
     return ",".join(parts)

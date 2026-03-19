@@ -5,6 +5,7 @@ import unittest
 from unittest import mock
 
 from backend.core.settings import Settings
+from backend.vision.providers.mistral.analyzer import build_mistral_vision_analyzer
 
 
 class BackendProviderSettingsTests(unittest.TestCase):
@@ -67,6 +68,21 @@ class BackendProviderSettingsTests(unittest.TestCase):
             settings.resolve_vision_provider_base_url(provider="mistral"),
             "https://mistral.example.test",
         )
+
+    def test_mistral_vision_analyzer_builds_from_provider_scoped_settings(self) -> None:
+        settings = self._settings(
+            {
+                "VISION_MEMORY_ENABLED": "true",
+                "VISION_MEMORY_PROVIDER": "mistral",
+                "VISION_MEMORY_MODEL": "pixtral-large-latest",
+                "VISION_MISTRAL_API_KEY": "mistral-key",
+                "VISION_MISTRAL_BASE_URL": "https://mistral.example.test",
+            }
+        )
+        analyzer = build_mistral_vision_analyzer(settings=settings)
+        self.assertEqual(analyzer.api_key, "mistral-key")
+        self.assertEqual(analyzer.model_name, "pixtral-large-latest")
+        self.assertEqual(analyzer.base_url, "https://mistral.example.test")
 
 
 if __name__ == "__main__":
