@@ -39,7 +39,7 @@ class BackendProviderSettingsTests(unittest.TestCase):
             {
                 "VISION_MEMORY_ENABLED": "true",
                 "VISION_MEMORY_PROVIDER": "azure_openai",
-                "VISION_MEMORY_MODEL": "ignored-fallback",
+                "VISION_AZURE_OPENAI_MODEL": "ignored-fallback",
                 "VISION_AZURE_OPENAI_API_KEY": "azure-key",
                 "VISION_AZURE_OPENAI_ENDPOINT": "https://example.openai.azure.com",
                 "VISION_AZURE_OPENAI_API_VERSION": "2024-10-21",
@@ -80,7 +80,7 @@ class BackendProviderSettingsTests(unittest.TestCase):
             {
                 "VISION_MEMORY_ENABLED": "true",
                 "VISION_MEMORY_PROVIDER": "mistral",
-                "VISION_MEMORY_MODEL": "pixtral-large-latest",
+                "VISION_MISTRAL_MODEL": "pixtral-large-latest",
                 "VISION_MISTRAL_API_KEY": "mistral-key",
                 "VISION_MISTRAL_BASE_URL": "https://mistral.example.test",
             }
@@ -89,6 +89,47 @@ class BackendProviderSettingsTests(unittest.TestCase):
         self.assertEqual(analyzer.api_key, "mistral-key")
         self.assertEqual(analyzer.model_name, "pixtral-large-latest")
         self.assertEqual(analyzer.base_url, "https://mistral.example.test")
+
+    def test_provider_scoped_vision_models_override_legacy_shared_model(self) -> None:
+        settings = self._settings(
+            {
+                "VISION_MEMORY_ENABLED": "true",
+                "VISION_MEMORY_PROVIDER": "openai",
+                "VISION_MEMORY_MODEL": "legacy-shared-model",
+                "VISION_OPENAI_MODEL": "gpt-4.1-mini",
+                "VISION_GEMINI_MODEL": "gemini-2.0-flash",
+            }
+        )
+
+        self.assertEqual(
+            settings.resolve_vision_provider_model(provider="openai"),
+            "gpt-4.1-mini",
+        )
+        self.assertEqual(
+            settings.resolve_vision_provider_model(provider="gemini"),
+            "gemini-2.0-flash",
+        )
+
+    def test_vision_provider_model_defaults_are_provider_scoped(self) -> None:
+        settings = self._settings(
+            {
+                "VISION_MEMORY_ENABLED": "true",
+                "VISION_MEMORY_PROVIDER": "openai",
+            }
+        )
+
+        self.assertEqual(settings.resolve_vision_provider_model(provider="mistral"), "ministral-3b-2512")
+        self.assertEqual(settings.resolve_vision_provider_model(provider="openai"), "gpt-4.1-mini")
+        self.assertEqual(settings.resolve_vision_provider_model(provider="gemini"), "gemini-2.0-flash")
+        self.assertEqual(settings.resolve_vision_provider_model(provider="claude"), "claude-3-5-sonnet-latest")
+        self.assertEqual(
+            settings.resolve_vision_provider_model(provider="bedrock"),
+            "anthropic.claude-3-5-sonnet-20240620-v1:0",
+        )
+        self.assertEqual(
+            settings.resolve_vision_provider_model(provider="groq"),
+            "llama-3.2-90b-vision-preview",
+        )
 
     def test_openai_realtime_registry_exports_capabilities(self) -> None:
         registry = build_default_realtime_provider_registry()
