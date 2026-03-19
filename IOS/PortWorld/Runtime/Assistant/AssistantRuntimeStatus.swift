@@ -45,10 +45,14 @@ struct AssistantRuntimeStatus {
   var visionUploadCount: Int = 0
   var visionUploadFailureCount: Int = 0
   var visionLastErrorText: String = ""
-  var debugPhoneVisionModeText: String = "disabled"
-  var debugPhoneVisionDetailText: String = ""
-  var debugPhoneVisionToggleTitle: String = "Enable Phone Camera Vision Test"
-  var canToggleDebugPhoneVision: Bool = false
+  var phoneVisionCaptureStateText: String = "inactive"
+  var phoneVisionUploadCount: Int = 0
+  var phoneVisionUploadFailureCount: Int = 0
+  var phoneVisionLastErrorText: String = ""
+  var phoneVisionModeText: String = "disabled"
+  var phoneVisionDetailText: String = ""
+  var phoneVisionToggleTitle: String = "Enable Phone Vision"
+  var canTogglePhoneVision: Bool = false
   var infoText: String = ""
   var errorText: String = ""
 

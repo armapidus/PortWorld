@@ -52,6 +52,8 @@ struct SettingsView: View {
           VStack(alignment: .leading, spacing: PWSpace.section) {
             backendSection(readiness: readiness)
               .id(SettingsScrollTarget.backend)
+            phoneVisionSection
+              .id(SettingsScrollTarget.phoneVision)
             glassesSection(readiness: readiness)
               .id(SettingsScrollTarget.glasses)
             practiceSection
@@ -167,6 +169,48 @@ private extension SettingsView {
     }
   }
 
+  var phoneVisionSection: some View {
+    PWCard {
+      VStack(alignment: .leading, spacing: PWSpace.lg) {
+        Text("Phone Vision")
+          .font(PWTypography.headline)
+          .foregroundStyle(PWColor.textPrimary)
+
+        PWStatusRow(
+          title: phoneVisionTitle,
+          value: phoneVisionDetail,
+          tone: phoneVisionTone,
+          systemImage: phoneVisionSystemImage
+        )
+
+        if viewModel.status.phoneVisionUploadCount > 0 || viewModel.status.phoneVisionUploadFailureCount > 0 {
+          PWStatusRow(
+            title: "Uploads",
+            value: "success=\(viewModel.status.phoneVisionUploadCount) failed=\(viewModel.status.phoneVisionUploadFailureCount)",
+            tone: viewModel.status.phoneVisionUploadFailureCount > 0 ? .warning : .neutral,
+            systemImage: "camera.aperture"
+          )
+        }
+
+        if viewModel.status.phoneVisionLastErrorText.isEmpty == false {
+          PWStatusRow(
+            title: "Last error",
+            value: viewModel.status.phoneVisionLastErrorText,
+            tone: .error,
+            systemImage: "exclamationmark.triangle"
+          )
+        }
+
+        PWSecondaryButton(
+          title: viewModel.status.phoneVisionToggleTitle,
+          isDisabled: viewModel.status.canTogglePhoneVision == false
+        ) {
+          viewModel.setPhoneVisionEnabled(viewModel.status.phoneVisionModeText != "enabled")
+        }
+      }
+    }
+  }
+
   var practiceSection: some View {
     PWCard {
       VStack(alignment: .leading, spacing: PWSpace.lg) {
@@ -234,6 +278,33 @@ private extension SettingsView {
 
   var backendButtonTitle: String {
     hasUnsavedBackendChanges ? "Save & Verify Backend" : "Re-check Backend"
+  }
+
+  var phoneVisionTitle: String {
+    "Phone vision is \(viewModel.status.phoneVisionModeText)"
+  }
+
+  var phoneVisionDetail: String {
+    let base = viewModel.status.phoneVisionDetailText
+    let captureState = viewModel.status.phoneVisionCaptureStateText
+    if captureState == "inactive" {
+      return base
+    }
+    return "\(base)\nCurrent state: \(captureState)."
+  }
+
+  var phoneVisionTone: PWStatusTone {
+    if viewModel.status.phoneVisionLastErrorText.isEmpty == false {
+      return .error
+    }
+    if viewModel.status.phoneVisionModeText == "enabled" {
+      return .success
+    }
+    return .neutral
+  }
+
+  var phoneVisionSystemImage: String {
+    viewModel.status.phoneVisionModeText == "enabled" ? "camera.fill" : "camera"
   }
 
   var hasUnsavedBackendChanges: Bool {

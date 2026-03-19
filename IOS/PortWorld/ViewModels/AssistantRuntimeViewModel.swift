@@ -8,10 +8,7 @@ final class AssistantRuntimeViewModel: ObservableObject {
   @Published private(set) var status: AssistantRuntimeStatus
   @Published private(set) var isProfileOnboardingReady = false
 
-  #if DEBUG
-    private static let debugPhoneVisionPreferenceKey = "portworld.debug.phoneVisionEnabled"
-  #endif
-
+  private let appSettingsStore: AppSettingsStore
   private let controller: AssistantRuntimeController
   private let wearablesRuntimeManager: WearablesRuntimeManager
   private var controllerStatus: AssistantRuntimeStatus
@@ -20,7 +17,7 @@ final class AssistantRuntimeViewModel: ObservableObject {
   private var pendingGlassesActivation = false
   private var isStartingPhoneRuntimeForGlassesRoute = false
   private var isStoppingGlassesRoute = false
-  private var isDebugPhoneVisionEnabled = false
+  private var isPhoneVisionEnabled = false
   private var phonePhotoCaptureController: PhonePhotoCaptureController?
   private var phoneVisionFrameUploader: VisionFrameUploaderProtocol?
   private var phoneVisionCaptureStateText = "inactive"
@@ -30,18 +27,16 @@ final class AssistantRuntimeViewModel: ObservableObject {
   private var cancellables = Set<AnyCancellable>()
 
   init(
+    appSettingsStore: AppSettingsStore,
     wearablesRuntimeManager: WearablesRuntimeManager,
     config: AssistantRuntimeConfig = AssistantRuntimeConfig.load()
   ) {
+    self.appSettingsStore = appSettingsStore
     self.wearablesRuntimeManager = wearablesRuntimeManager
     self.controller = AssistantRuntimeController(config: config)
     self.controllerStatus = controller.status
     self.status = controller.status
-    #if DEBUG
-      self.isDebugPhoneVisionEnabled = UserDefaults.standard.bool(
-        forKey: Self.debugPhoneVisionPreferenceKey
-      )
-    #endif
+    self.isPhoneVisionEnabled = appSettingsStore.settings.phoneVisionEnabled
     bindController()
     bindWearablesRuntimeManager()
     resolveRouteSelectionIfNeeded()
@@ -120,15 +115,14 @@ final class AssistantRuntimeViewModel: ObservableObject {
     controller.handleScenePhaseChange(phase)
   }
 
-  func toggleDebugPhoneVisionMode() {
-    #if DEBUG
-      isDebugPhoneVisionEnabled.toggle()
-      UserDefaults.standard.set(isDebugPhoneVisionEnabled, forKey: Self.debugPhoneVisionPreferenceKey)
-      Task { @MainActor [weak self] in
-        await self?.synchronizeVisionCaptureIfNeeded()
-        self?.publishMergedStatus()
-      }
-    #endif
+  func setPhoneVisionEnabled(_ enabled: Bool) {
+    guard isPhoneVisionEnabled != enabled else { return }
+    isPhoneVisionEnabled = enabled
+    appSettingsStore.setPhoneVisionEnabled(enabled)
+    Task { @MainActor [weak self] in
+      await self?.synchronizeVisionCaptureIfNeeded()
+      self?.publishMergedStatus()
+    }
   }
 
   private var isGlassesRouteOwned: Bool {
@@ -243,6 +237,18 @@ final class AssistantRuntimeViewModel: ObservableObject {
     wearablesRuntimeManager.$glassesDevelopmentReadinessDetail
       .sink { [weak self] _ in self?.publishMergedStatus() }
       .store(in: &cancellables)
+
+    appSettingsStore.$settings
+      .sink { [weak self] settings in
+        guard let self else { return }
+        guard self.isPhoneVisionEnabled != settings.phoneVisionEnabled else { return }
+        self.isPhoneVisionEnabled = settings.phoneVisionEnabled
+        Task { @MainActor [weak self] in
+          await self?.synchronizeVisionCaptureIfNeeded()
+          self?.publishMergedStatus()
+        }
+      }
+      .store(in: &cancellables)
   }
 
   private func handleWearablesRuntimeManagerChange() {
@@ -278,7 +284,7 @@ final class AssistantRuntimeViewModel: ObservableObject {
   private func synchronizeVisionCaptureIfNeeded() async {
     let shouldCapturePhoneVision =
       selectedRoute == .phone &&
-      isDebugPhoneVisionEnabled &&
+      isPhoneVisionEnabled &&
       controllerStatus.assistantRuntimeState == .activeConversation &&
       controllerStatus.sessionID != "-"
 
@@ -292,7 +298,7 @@ final class AssistantRuntimeViewModel: ObservableObject {
     if shouldCapturePhoneVision {
       await startPhoneVisionCaptureIfNeeded()
     } else {
-      await stopPhoneVisionCapture(resetState: selectedRoute != .phone || !isDebugPhoneVisionEnabled)
+      await stopPhoneVisionCapture(resetState: selectedRoute != .phone || !isPhoneVisionEnabled)
     }
 
     await wearablesRuntimeManager.setVisionCaptureActive(
@@ -426,12 +432,16 @@ final class AssistantRuntimeViewModel: ObservableObject {
     mergedStatus.visionUploadCount = visionStatus.uploadCount
     mergedStatus.visionUploadFailureCount = visionStatus.uploadFailureCount
     mergedStatus.visionLastErrorText = visionStatus.lastErrorText
-    mergedStatus.debugPhoneVisionModeText = debugPhoneVisionModeText()
-    mergedStatus.debugPhoneVisionDetailText = debugPhoneVisionDetailText()
-    mergedStatus.debugPhoneVisionToggleTitle = isDebugPhoneVisionEnabled
-      ? "Disable Phone Camera Vision Test"
-      : "Enable Phone Camera Vision Test"
-    mergedStatus.canToggleDebugPhoneVision = canToggleDebugPhoneVision()
+    mergedStatus.phoneVisionCaptureStateText = phoneVisionCaptureStateText
+    mergedStatus.phoneVisionUploadCount = phoneVisionUploadCount
+    mergedStatus.phoneVisionUploadFailureCount = phoneVisionUploadFailureCount
+    mergedStatus.phoneVisionLastErrorText = phoneVisionLastErrorText
+    mergedStatus.phoneVisionModeText = phoneVisionModeText()
+    mergedStatus.phoneVisionDetailText = phoneVisionDetailText()
+    mergedStatus.phoneVisionToggleTitle = isPhoneVisionEnabled
+      ? "Disable Phone Vision"
+      : "Enable Phone Vision"
+    mergedStatus.canTogglePhoneVision = canTogglePhoneVision()
     mergedStatus.mockWorkflowText = mockWorkflowText()
     mergedStatus.glassesDevelopmentDetailText = glassesRouteDetailText()
     mergedStatus.canChangeRoute =
@@ -644,7 +654,7 @@ final class AssistantRuntimeViewModel: ObservableObject {
     lastErrorText: String
   ) {
     if selectedRoute == .phone &&
-      (isDebugPhoneVisionEnabled ||
+      (isPhoneVisionEnabled ||
         phoneVisionCaptureStateText != "inactive" ||
         phoneVisionUploadCount > 0 ||
         phoneVisionUploadFailureCount > 0 ||
@@ -665,89 +675,73 @@ final class AssistantRuntimeViewModel: ObservableObject {
     )
   }
 
-  private func debugPhoneVisionModeText() -> String {
-    #if DEBUG
-      return isDebugPhoneVisionEnabled ? "enabled" : "disabled"
-    #else
-      return "unavailable"
-    #endif
+  private func phoneVisionModeText() -> String {
+    isPhoneVisionEnabled ? "enabled" : "disabled"
   }
 
-  private func debugPhoneVisionDetailText() -> String {
-    #if DEBUG
-      if isDebugPhoneVisionEnabled {
-        return "When the phone route reaches an active conversation, the app will capture one phone-camera JPEG per second and upload it to /vision/frame."
-      }
-      return "Debug-only test path. Enable this to exercise the backend vision endpoint from the iPhone camera without glasses."
-    #else
-      return ""
-    #endif
+  private func phoneVisionDetailText() -> String {
+    if isPhoneVisionEnabled {
+      return "During active phone conversations, PortWorld captures phone-camera JPEG frames and uploads them to the backend vision endpoint."
+    }
+    return "Opt in to share phone-camera frames with the backend during active phone conversations."
   }
 
-  private func canToggleDebugPhoneVision() -> Bool {
-    #if DEBUG
-      return pendingGlassesActivation == false && wearablesRuntimeManager.isGlassesSessionRequested == false
-    #else
-      return false
-    #endif
+  private func canTogglePhoneVision() -> Bool {
+    pendingGlassesActivation == false && wearablesRuntimeManager.isGlassesSessionRequested == false
   }
 
   private func startPhoneVisionCaptureIfNeeded() async {
-    #if DEBUG
-      if phonePhotoCaptureController == nil {
-        let captureController = PhonePhotoCaptureController()
-        captureController.onSnapshotUpdated = { [weak self] snapshot in
-          guard let self else { return }
-          self.applyPhoneVisionSnapshot(snapshot)
-        }
-        captureController.onPhotoCaptured = { [weak self] image, timestampMs in
-          guard let self else { return }
-          Task {
-            await self.phoneVisionFrameUploader?.submitLatestFrame(image, captureTimestampMs: timestampMs)
-          }
-        }
-        phonePhotoCaptureController = captureController
+    if phonePhotoCaptureController == nil {
+      let captureController = PhonePhotoCaptureController()
+      captureController.onSnapshotUpdated = { [weak self] snapshot in
+        guard let self else { return }
+        self.applyPhoneVisionSnapshot(snapshot)
       }
-
-      let sessionID = controllerStatus.sessionID
-      guard !sessionID.isEmpty, sessionID != "-" else { return }
-
-      if phoneVisionFrameUploader == nil {
-        let uploader = VisionFrameUploader(
-          endpointURL: controller.config.visionFrameURL,
-          defaultHeaders: controller.config.requestHeaders,
-          sessionID: sessionID,
-          uploadIntervalMs: Int64((1000.0 / max(0.1, controller.config.photoFps)).rounded())
-        )
-        await uploader.bindUploadResultHandler { [weak self] result in
-          self?.handlePhoneVisionUploadResult(result)
-        }
-        phoneVisionFrameUploader = uploader
-      } else {
-        await phoneVisionFrameUploader?.updateSessionID(sessionID)
-        await phoneVisionFrameUploader?.bindUploadResultHandler { [weak self] result in
-          self?.handlePhoneVisionUploadResult(result)
+      captureController.onPhotoCaptured = { [weak self] image, timestampMs in
+        guard let self else { return }
+        Task {
+          await self.phoneVisionFrameUploader?.submitLatestFrame(image, captureTimestampMs: timestampMs)
         }
       }
+      phonePhotoCaptureController = captureController
+    }
 
-      await phoneVisionFrameUploader?.start()
-      await phonePhotoCaptureController?.start(photoFps: controller.config.photoFps)
-    #endif
+    let sessionID = controllerStatus.sessionID
+    guard !sessionID.isEmpty, sessionID != "-" else { return }
+
+    if phoneVisionFrameUploader == nil {
+      let uploader = VisionFrameUploader(
+        endpointURL: controller.config.visionFrameURL,
+        defaultHeaders: controller.config.requestHeaders,
+        sessionID: sessionID,
+        uploadIntervalMs: Int64((1000.0 / max(0.1, controller.config.photoFps)).rounded())
+      )
+      await uploader.bindUploadResultHandler { [weak self] result in
+        self?.handlePhoneVisionUploadResult(result)
+      }
+      phoneVisionFrameUploader = uploader
+    } else {
+      await phoneVisionFrameUploader?.updateSessionID(sessionID)
+      await phoneVisionFrameUploader?.bindUploadResultHandler { [weak self] result in
+        self?.handlePhoneVisionUploadResult(result)
+      }
+    }
+
+    await phoneVisionFrameUploader?.start()
+    await phonePhotoCaptureController?.start(photoFps: controller.config.photoFps)
   }
 
   private func stopPhoneVisionCapture(resetState: Bool) async {
-    #if DEBUG
-      await phonePhotoCaptureController?.stop()
-      await phoneVisionFrameUploader?.stop()
-      phoneVisionFrameUploader = nil
+    await phonePhotoCaptureController?.stop()
+    await phoneVisionFrameUploader?.stop()
+    phoneVisionFrameUploader = nil
 
-      if resetState {
-        phoneVisionCaptureStateText = "inactive"
-        phoneVisionUploadCount = 0
-        phoneVisionUploadFailureCount = 0
-        phoneVisionLastErrorText = ""
-      }
-    #endif
+    if resetState {
+      phoneVisionCaptureStateText = "inactive"
+      phoneVisionUploadCount = 0
+      phoneVisionUploadFailureCount = 0
+      phoneVisionLastErrorText = ""
+    }
   }
 
   private func applyPhoneVisionSnapshot(_ snapshot: PhonePhotoCaptureController.Snapshot) {

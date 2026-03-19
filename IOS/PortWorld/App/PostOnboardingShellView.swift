@@ -8,6 +8,7 @@ private enum AppTab: Hashable {
 
 enum SettingsScrollTarget: Hashable {
   case backend
+  case phoneVision
   case glasses
   case help
 }
@@ -42,6 +43,7 @@ struct PostOnboardingShellView: View {
     )
     _viewModel = StateObject(
       wrappedValue: AssistantRuntimeViewModel(
+        appSettingsStore: appSettingsStore,
         wearablesRuntimeManager: wearablesRuntimeManager,
         config: config
       )
