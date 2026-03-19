@@ -16,6 +16,7 @@ final class AssistantRuntimeViewModel: ObservableObject {
   private let wearablesRuntimeManager: WearablesRuntimeManager
   private var controllerStatus: AssistantRuntimeStatus
   private var selectedRoute: AssistantRoute = .phone
+  private var hasResolvedInitialRouteSelection = false
   private var pendingGlassesActivation = false
   private var isStartingPhoneRuntimeForGlassesRoute = false
   private var isStoppingGlassesRoute = false
@@ -43,6 +44,7 @@ final class AssistantRuntimeViewModel: ObservableObject {
     #endif
     bindController()
     bindWearablesRuntimeManager()
+    resolveRouteSelectionIfNeeded()
     publishMergedStatus()
   }
 
@@ -106,6 +108,7 @@ final class AssistantRuntimeViewModel: ObservableObject {
     guard pendingGlassesActivation == false else { return }
     guard wearablesRuntimeManager.isGlassesSessionRequested == false else { return }
     guard selectedRoute != route else { return }
+    hasResolvedInitialRouteSelection = true
     selectedRoute = route
     if route == .phone {
       wearablesRuntimeManager.setGlassesAudioMode(.inactive)
@@ -141,6 +144,10 @@ final class AssistantRuntimeViewModel: ObservableObject {
     guard controllerStatus.assistantRuntimeState == .inactive else { return false }
     guard pendingGlassesActivation == false else { return false }
     guard wearablesRuntimeManager.isGlassesSessionRequested == false else { return false }
+    return canKeepGlassesRouteSelected
+  }
+
+  private var canKeepGlassesRouteSelected: Bool {
     guard wearablesRuntimeManager.configurationState == .ready else { return false }
     guard wearablesRuntimeManager.registrationState == .registered ||
       wearablesRuntimeManager.canActivateGlassesRouteForDebugMock else { return false }
@@ -240,10 +247,32 @@ final class AssistantRuntimeViewModel: ObservableObject {
 
   private func handleWearablesRuntimeManagerChange() {
     Task { @MainActor [weak self] in
+      self?.resolveRouteSelectionIfNeeded()
       await self?.synchronizeGlassesRouteIfNeeded()
       await self?.synchronizeVisionCaptureIfNeeded()
       self?.publishMergedStatus()
     }
+  }
+
+  private func resolveRouteSelectionIfNeeded() {
+    guard controllerStatus.assistantRuntimeState == .inactive else { return }
+    guard pendingGlassesActivation == false else { return }
+    guard wearablesRuntimeManager.isGlassesSessionRequested == false else { return }
+
+    if hasResolvedInitialRouteSelection == false {
+      selectedRoute = canKeepGlassesRouteSelected ? .glasses : .phone
+      hasResolvedInitialRouteSelection = true
+      if selectedRoute == .phone {
+        wearablesRuntimeManager.setGlassesAudioMode(.inactive)
+      }
+      return
+    }
+
+    guard selectedRoute == .glasses else { return }
+    guard canKeepGlassesRouteSelected == false else { return }
+
+    selectedRoute = .phone
+    wearablesRuntimeManager.setGlassesAudioMode(.inactive)
   }
 
   private func synchronizeVisionCaptureIfNeeded() async {

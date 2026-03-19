@@ -48,11 +48,11 @@ struct HomeReadinessState {
     self.backendStatus = backendStatus
     self.glassesStatus = glassesStatus
 
-    let isBackendReady = settings.validationState == .valid
-    let areGlassesReady = HomeReadinessState.areGlassesReady(
+    self.canActivateAssistant = HomeReadinessState.canActivateSelectedRoute(
+      settings: settings,
+      runtimeStatus: runtimeStatus,
       wearablesRuntimeManager: wearablesRuntimeManager
     )
-    self.canActivateAssistant = isBackendReady && areGlassesReady
 
     let hero = HomeReadinessState.makeHeroState(
       runtimeStatus: runtimeStatus,
@@ -66,13 +66,30 @@ struct HomeReadinessState {
 }
 
 private extension HomeReadinessState {
+  static func canActivateSelectedRoute(
+    settings: AppSettingsStore.Settings,
+    runtimeStatus: AssistantRuntimeStatus,
+    wearablesRuntimeManager: WearablesRuntimeManager
+  ) -> Bool {
+    guard settings.validationState == .valid else { return false }
+
+    switch runtimeStatus.selectedRoute {
+    case .phone:
+      return true
+    case .glasses:
+      return areGlassesReady(wearablesRuntimeManager: wearablesRuntimeManager)
+    }
+  }
+
   static func areGlassesReady(
     wearablesRuntimeManager: WearablesRuntimeManager
   ) -> Bool {
     guard wearablesRuntimeManager.configurationState == .ready else { return false }
-    guard wearablesRuntimeManager.registrationState == .registered else { return false }
+    guard wearablesRuntimeManager.registrationState == .registered ||
+      wearablesRuntimeManager.canActivateGlassesRouteForDebugMock else { return false }
     guard wearablesRuntimeManager.devices.isEmpty == false else { return false }
     guard wearablesRuntimeManager.activeCompatibilityMessage == nil else { return false }
+    guard wearablesRuntimeManager.glassesSessionPhase != .failed else { return false }
     return true
   }
 
@@ -289,18 +306,26 @@ private extension HomeReadinessState {
   ) -> (summary: String, detail: String) {
     switch runtimeStatus.assistantRuntimeState {
     case .inactive:
-      if canActivateAssistant == false {
-        if backendStatus.label != "Ready" {
-          return ("Backend needs attention", backendStatus.detail)
-        }
+      if backendStatus.label != "Ready" {
+        return ("Backend needs attention", backendStatus.detail)
+      }
 
+      if runtimeStatus.selectedRoute == .glasses && canActivateAssistant == false {
         return ("Glasses aren’t ready", glassesStatus.detail)
       }
 
-      return (
-        "Ready when you are",
-        "Your backend and glasses are ready. Activate the assistant to begin."
-      )
+      switch runtimeStatus.selectedRoute {
+      case .phone:
+        return (
+          "Ready on your phone",
+          "Your backend is ready. Activate the assistant to begin testing from your iPhone."
+        )
+      case .glasses:
+        return (
+          "Ready when you are",
+          "Your backend and glasses are ready. Activate the assistant to begin."
+        )
+      }
 
     case .armedListening:
       return (
@@ -309,12 +334,24 @@ private extension HomeReadinessState {
       )
 
     case .connectingConversation:
+      if runtimeStatus.selectedRoute == .phone {
+        return (
+          "Mario is joining",
+          "Opening your live assistant session on your phone now."
+        )
+      }
       return (
         "Mario is joining",
-        "Opening your live assistant session now."
+        "Opening your live assistant session through your glasses now."
       )
 
     case .activeConversation:
+      if runtimeStatus.selectedRoute == .phone {
+        return (
+          "Conversation active",
+          "Mario is connected on your phone right now."
+        )
+      }
       return (
         "Conversation active",
         "Mario is connected through your glasses right now."

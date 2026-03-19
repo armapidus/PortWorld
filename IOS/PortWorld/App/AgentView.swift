@@ -26,6 +26,9 @@ struct AgentView: View {
       VStack(spacing: PWSpace.section) {
         Spacer(minLength: 0)
 
+        routeSelector
+          .frame(maxWidth: 320)
+
         AgentPlaceholderView(isAwake: isAwake)
 
         VStack(spacing: PWSpace.md) {
@@ -34,7 +37,7 @@ struct AgentView: View {
             .foregroundStyle(PWColor.textPrimary)
             .multilineTextAlignment(.center)
 
-          Text(isAwake ? "Mario is active." : "Mario is resting.")
+          Text(detailLine(readiness: readiness))
             .font(PWTypography.body)
             .foregroundStyle(PWColor.textSecondary)
             .multilineTextAlignment(.center)
@@ -47,9 +50,6 @@ struct AgentView: View {
         Spacer(minLength: 0)
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-    .onAppear {
-      viewModel.selectRoute(.glasses)
     }
   }
 }
@@ -64,6 +64,27 @@ private extension AgentView {
     }
   }
 
+  var routeSelector: some View {
+    VStack(alignment: .leading, spacing: PWSpace.sm) {
+      Text("Assistant route")
+        .font(PWTypography.headline)
+        .foregroundStyle(PWColor.textPrimary)
+
+      Picker(
+        "Assistant route",
+        selection: Binding(
+          get: { viewModel.status.selectedRoute },
+          set: { viewModel.selectRoute($0) }
+        )
+      ) {
+        Text("Phone").tag(AssistantRoute.phone)
+        Text("Glasses").tag(AssistantRoute.glasses)
+      }
+      .pickerStyle(.segmented)
+      .disabled(viewModel.status.canChangeRoute == false)
+    }
+  }
+
   @ViewBuilder
   func primaryButton(readiness: HomeReadinessState) -> some View {
     if viewModel.status.canDeactivate {
@@ -74,10 +95,9 @@ private extension AgentView {
       }
     } else {
       PWPrimaryButton(
-        title: buttonTitle,
-        isDisabled: readiness.canActivateAssistant == false || isStopping
+        title: viewModel.status.activationButtonTitle,
+        isDisabled: readiness.canActivateAssistant == false || viewModel.status.canActivateSelectedRoute == false || isStopping
       ) {
-        viewModel.selectRoute(.glasses)
         Task {
           await viewModel.activateAssistant()
         }
@@ -89,39 +109,72 @@ private extension AgentView {
     viewModel.status.assistantRuntimeState == .deactivating
   }
 
-  var buttonTitle: String {
-    isStopping ? "Stopping…" : "Activate Assistant"
-  }
-
   func statusLine(readiness: HomeReadinessState) -> String {
     let runtimeState = viewModel.status.assistantRuntimeState
 
     switch runtimeState {
     case .inactive:
-      if readiness.canActivateAssistant == false {
-        if readiness.backendStatus.action == .openBackendSettings {
-          return "Backend needs attention"
-        }
-
+      if readiness.backendStatus.action == .openBackendSettings {
+        return "Backend needs attention"
+      }
+      if viewModel.status.selectedRoute == .glasses && readiness.canActivateAssistant == false {
         return "Glasses aren’t ready"
       }
-
-      return "Ready to wake Mario"
+      return viewModel.status.selectedRoute == .phone ? "Ready on your phone" : "Ready to wake Mario"
 
     case .connectingConversation:
-      return "Mario is joining"
+      return viewModel.status.selectedRoute == .phone ? "Mario is joining on your phone" : "Mario is joining"
 
     case .armedListening:
       return "Listening for \"\(viewModel.status.wakePhraseText)\""
 
     case .activeConversation:
-      return "Mario is awake"
+      return viewModel.status.selectedRoute == .phone ? "Mario is awake on your phone" : "Mario is awake"
 
     case .pausedByHardware:
       return "Mario is waiting for your glasses"
 
     case .deactivating:
       return "Mario is going back to sleep"
+    }
+  }
+
+  func detailLine(readiness: HomeReadinessState) -> String {
+    let runtimeState = viewModel.status.assistantRuntimeState
+
+    switch runtimeState {
+    case .inactive:
+      if readiness.backendStatus.action == .openBackendSettings {
+        return readiness.backendStatus.detail
+      }
+      if viewModel.status.selectedRoute == .phone {
+        return "Use your iPhone microphone and speaker to test the assistant."
+      }
+      if readiness.canActivateAssistant == false {
+        return readiness.glassesStatus.detail
+      }
+      return "Mario will start through your connected glasses."
+
+    case .connectingConversation:
+      return viewModel.status.selectedRoute == .phone
+        ? "Phone route is opening a live backend session."
+        : "Glasses route is opening a live backend session."
+
+    case .armedListening:
+      return viewModel.status.selectedRoute == .phone
+        ? "Mario is listening through your iPhone."
+        : "Mario is listening through your glasses."
+
+    case .activeConversation:
+      return viewModel.status.selectedRoute == .phone
+        ? "Phone route is active."
+        : "Glasses route is active."
+
+    case .pausedByHardware:
+      return "Reconnect your glasses or deactivate the assistant."
+
+    case .deactivating:
+      return "Mario is closing the current session."
     }
   }
 }

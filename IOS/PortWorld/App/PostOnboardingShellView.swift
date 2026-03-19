@@ -93,9 +93,6 @@ struct PostOnboardingShellView: View {
     .tint(PWColor.textPrimary)
     .toolbarBackground(PWColor.background, for: .tabBar)
     .toolbarBackground(.visible, for: .tabBar)
-    .onAppear {
-      viewModel.selectRoute(.glasses)
-    }
   }
 }
 
