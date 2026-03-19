@@ -25,6 +25,7 @@ from backend.vision.providers.shared import (
     build_user_prompt,
     coalesce_text_content,
     extract_provider_content_excerpt_from_chat_choices,
+    is_max_completion_tokens_compatibility_error,
     is_response_format_compatibility_error,
     normalize_observation,
     post_json_with_vision_errors,
@@ -35,27 +36,6 @@ from backend.vision.providers.shared import (
 DEFAULT_GROQ_BASE_URL = "https://api.groq.com"
 
 logger = logging.getLogger(__name__)
-
-
-def _is_max_completion_tokens_compatibility_error(error: VisionProviderError) -> bool:
-    if error.status_code != 400:
-        return False
-    message = " ".join(
-        [
-            (error.provider_message or "").strip().lower(),
-            (error.payload_excerpt or "").strip().lower(),
-        ]
-    ).strip()
-    if "max_completion_tokens" not in message and "max completion tokens" not in message:
-        return False
-    code = (error.provider_error_code or "").strip().lower()
-    if not code:
-        return True
-    return (
-        "unknown_parameter" in code
-        or "invalid_parameter" in code
-        or "unsupported" in code
-    )
 
 
 def validate_groq_vision_settings(settings: Settings) -> None:
@@ -131,7 +111,7 @@ class GroqVisionAnalyzer:
                 ] or None
                 if (
                     not self._uses_legacy_max_tokens
-                    and _is_max_completion_tokens_compatibility_error(exc)
+                    and is_max_completion_tokens_compatibility_error(exc)
                 ):
                     self._uses_legacy_max_tokens = True
                     logger.warning(

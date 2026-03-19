@@ -27,6 +27,7 @@ from backend.vision.providers.shared import (
     build_user_prompt,
     coalesce_text_content,
     extract_provider_content_excerpt_from_chat_choices,
+    is_max_completion_tokens_compatibility_error,
     is_response_format_compatibility_error,
     normalize_observation,
     post_json_with_vision_errors,
@@ -167,6 +168,7 @@ class AzureOpenAIVisionAnalyzer:
     provider_name: str = field(default="azure_openai", init=False)
     _client: httpx.AsyncClient | None = field(default=None, init=False, repr=False)
     _supports_response_format: bool = field(default=True, init=False, repr=False)
+    _uses_legacy_max_tokens: bool = field(default=False, init=False, repr=False)
 
     async def startup(self) -> None:
         if self._client is None:
@@ -203,30 +205,55 @@ class AzureOpenAIVisionAnalyzer:
             frame_context=frame_context,
             image_media_type=image_media_type,
             include_response_format=self._supports_response_format,
+            use_legacy_max_tokens=self._uses_legacy_max_tokens,
         )
-        try:
-            response = await self._post_completion(client=client, request_body=request_body)
-        except VisionProviderError as exc:
-            if self._supports_response_format and is_response_format_compatibility_error(exc):
-                self._supports_response_format = False
+
+        while True:
+            try:
+                response = await self._post_completion(client=client, request_body=request_body)
+                break
+            except VisionProviderError as exc:
                 endpoint_for_log = sanitize_url_for_logging(self.endpoint.rstrip("/"))
-                logger.warning(
-                    "Vision provider rejected response_format; retrying without structured output provider=%s deployment=%s endpoint=%s provider_message=%s",
-                    self.provider_name,
-                    self.deployment,
-                    endpoint_for_log,
-                    (sanitize_sensitive_text(exc.provider_message) or "")[:220] or None,
-                )
-                response = await self._post_completion(
-                    client=client,
-                    request_body=self._build_request_body(
+                provider_message_excerpt = (sanitize_sensitive_text(exc.provider_message) or "")[
+                    :220
+                ] or None
+                if (
+                    not self._uses_legacy_max_tokens
+                    and is_max_completion_tokens_compatibility_error(exc)
+                ):
+                    self._uses_legacy_max_tokens = True
+                    logger.warning(
+                        "Vision provider rejected max_completion_tokens; retrying with legacy max_tokens provider=%s deployment=%s endpoint=%s provider_message=%s",
+                        self.provider_name,
+                        self.deployment,
+                        endpoint_for_log,
+                        provider_message_excerpt,
+                    )
+                    request_body = self._build_request_body(
+                        image_bytes=image_bytes,
+                        frame_context=frame_context,
+                        image_media_type=image_media_type,
+                        include_response_format=self._supports_response_format,
+                        use_legacy_max_tokens=True,
+                    )
+                    continue
+                if self._supports_response_format and is_response_format_compatibility_error(exc):
+                    self._supports_response_format = False
+                    logger.warning(
+                        "Vision provider rejected response_format; retrying without structured output provider=%s deployment=%s endpoint=%s provider_message=%s",
+                        self.provider_name,
+                        self.deployment,
+                        endpoint_for_log,
+                        provider_message_excerpt,
+                    )
+                    request_body = self._build_request_body(
                         image_bytes=image_bytes,
                         frame_context=frame_context,
                         image_media_type=image_media_type,
                         include_response_format=False,
-                    ),
-                )
-            else:
+                        use_legacy_max_tokens=self._uses_legacy_max_tokens,
+                    )
+                    continue
                 raise
 
         try:
@@ -278,12 +305,12 @@ class AzureOpenAIVisionAnalyzer:
         frame_context: VisionFrameContext,
         image_media_type: str,
         include_response_format: bool,
+        use_legacy_max_tokens: bool,
     ) -> dict[str, Any]:
         data_url = build_data_url(image_bytes=image_bytes, image_media_type=image_media_type)
         payload: dict[str, Any] = {
             "temperature": DEFAULT_VISION_TEMPERATURE,
             "top_p": DEFAULT_VISION_TOP_P,
-            "max_tokens": DEFAULT_VISION_MAX_TOKENS,
             "messages": [
                 {"role": "system", "content": VISION_SYSTEM_PROMPT},
                 {
@@ -295,6 +322,8 @@ class AzureOpenAIVisionAnalyzer:
                 },
             ],
         }
+        token_field_name = "max_tokens" if use_legacy_max_tokens else "max_completion_tokens"
+        payload[token_field_name] = DEFAULT_VISION_MAX_TOKENS
         if include_response_format:
             payload["response_format"] = {"type": "json_object"}
         return payload

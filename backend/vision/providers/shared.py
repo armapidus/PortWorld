@@ -315,6 +315,27 @@ def is_response_format_compatibility_error(error: VisionProviderError) -> bool:
     return any(marker in message for marker in structured_output_markers)
 
 
+def is_max_completion_tokens_compatibility_error(error: VisionProviderError) -> bool:
+    if error.status_code != 400:
+        return False
+    message = " ".join(
+        [
+            (error.provider_message or "").strip().lower(),
+            (error.payload_excerpt or "").strip().lower(),
+        ]
+    ).strip()
+    if "max_completion_tokens" not in message and "max completion tokens" not in message:
+        return False
+    code = (error.provider_error_code or "").strip().lower()
+    if not code:
+        return True
+    return (
+        "unknown_parameter" in code
+        or "invalid_parameter" in code
+        or "unsupported" in code
+    )
+
+
 def provider_error_from_exception(
     *,
     message: str,
