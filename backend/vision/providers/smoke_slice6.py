@@ -178,7 +178,7 @@ def main() -> None:
         "mistral",
         {
             "VISION_MISTRAL_API_KEY": "mistral-key",
-            "VISION_MEMORY_MODEL": "ministral-3b-2512",
+            "VISION_MISTRAL_MODEL": "ministral-3b-2512",
         },
     )
     _assert_validation_fails(
@@ -194,7 +194,7 @@ def main() -> None:
         "openai",
         {
             "VISION_OPENAI_API_KEY": "openai-key",
-            "VISION_MEMORY_MODEL": "gpt-4.1-mini",
+            "VISION_OPENAI_MODEL": "gpt-4.1-mini",
         },
     )
     _assert_validation_fails(
@@ -202,7 +202,7 @@ def main() -> None:
         {
             "VISION_OPENAI_API_KEY": None,
             "VISION_PROVIDER_API_KEY": None,
-            "VISION_MEMORY_MODEL": "gpt-4.1-mini",
+            "VISION_OPENAI_MODEL": "gpt-4.1-mini",
         },
     )
 
@@ -228,7 +228,7 @@ def main() -> None:
         "gemini",
         {
             "VISION_GEMINI_API_KEY": "gemini-key",
-            "VISION_MEMORY_MODEL": "gemini-2.0-flash",
+            "VISION_GEMINI_MODEL": "gemini-2.0-flash",
         },
     )
     _assert_validation_fails(
@@ -236,7 +236,7 @@ def main() -> None:
         {
             "VISION_GEMINI_API_KEY": None,
             "VISION_PROVIDER_API_KEY": None,
-            "VISION_MEMORY_MODEL": "gemini-2.0-flash",
+            "VISION_GEMINI_MODEL": "gemini-2.0-flash",
         },
     )
 
@@ -244,7 +244,7 @@ def main() -> None:
         "claude",
         {
             "VISION_CLAUDE_API_KEY": "claude-key",
-            "VISION_MEMORY_MODEL": "claude-3-5-sonnet-latest",
+            "VISION_CLAUDE_MODEL": "claude-3-5-sonnet-latest",
         },
     )
     _assert_validation_fails(
@@ -252,7 +252,7 @@ def main() -> None:
         {
             "VISION_CLAUDE_API_KEY": None,
             "VISION_PROVIDER_API_KEY": None,
-            "VISION_MEMORY_MODEL": "claude-3-5-sonnet-latest",
+            "VISION_CLAUDE_MODEL": "claude-3-5-sonnet-latest",
         },
     )
 
@@ -260,7 +260,7 @@ def main() -> None:
         "bedrock",
         {
             "VISION_BEDROCK_REGION": "us-east-1",
-            "VISION_MEMORY_MODEL": "anthropic.claude-3-5-sonnet-20240620-v1:0",
+            "VISION_BEDROCK_MODEL": "anthropic.claude-3-5-sonnet-20240620-v1:0",
         },
     )
     _assert_validation_fails(
@@ -268,7 +268,7 @@ def main() -> None:
         {
             "VISION_BEDROCK_REGION": None,
             "AWS_REGION": None,
-            "VISION_MEMORY_MODEL": "anthropic.claude-3-5-sonnet-20240620-v1:0",
+            "VISION_BEDROCK_MODEL": "anthropic.claude-3-5-sonnet-20240620-v1:0",
         },
     )
 
@@ -276,7 +276,7 @@ def main() -> None:
         "groq",
         {
             "VISION_GROQ_API_KEY": "groq-key",
-            "VISION_MEMORY_MODEL": "llama-3.2-90b-vision-preview",
+            "VISION_GROQ_MODEL": "llama-3.2-90b-vision-preview",
         },
     )
     _assert_validation_fails(
@@ -284,7 +284,7 @@ def main() -> None:
         {
             "VISION_GROQ_API_KEY": None,
             "VISION_PROVIDER_API_KEY": None,
-            "VISION_MEMORY_MODEL": "llama-3.2-90b-vision-preview",
+            "VISION_GROQ_MODEL": "llama-3.2-90b-vision-preview",
         },
     )
 

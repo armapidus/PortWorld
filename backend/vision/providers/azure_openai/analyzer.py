@@ -70,7 +70,9 @@ def _normalize_azure_deployment(deployment: str) -> str:
     candidate = deployment.strip()
     if not candidate:
         raise RuntimeError(
-            "VISION_AZURE_OPENAI_DEPLOYMENT or VISION_MEMORY_MODEL is required when VISION_MEMORY_PROVIDER=azure_openai"
+            "VISION_AZURE_OPENAI_DEPLOYMENT or VISION_AZURE_OPENAI_MODEL is required "
+            "when VISION_MEMORY_PROVIDER=azure_openai "
+            "(legacy fallback: VISION_MEMORY_MODEL)"
         )
     if any(character.isspace() for character in candidate):
         raise RuntimeError("VISION_AZURE_OPENAI_DEPLOYMENT must not contain whitespace")
@@ -117,7 +119,9 @@ def validate_azure_openai_vision_settings(settings: Settings) -> None:
     deployment = settings.resolve_vision_provider_deployment(provider="azure_openai")
     if not deployment:
         raise RuntimeError(
-            "VISION_AZURE_OPENAI_DEPLOYMENT or VISION_MEMORY_MODEL is required when VISION_MEMORY_PROVIDER=azure_openai"
+            "VISION_AZURE_OPENAI_DEPLOYMENT or VISION_AZURE_OPENAI_MODEL is required "
+            "when VISION_MEMORY_PROVIDER=azure_openai "
+            "(legacy fallback: VISION_MEMORY_MODEL)"
         )
     _normalize_azure_deployment(deployment)
 
@@ -136,7 +140,9 @@ def build_azure_openai_vision_analyzer(*, settings: Settings) -> "AzureOpenAIVis
     deployment = settings.resolve_vision_provider_deployment(provider="azure_openai")
     if deployment is None:
         raise RuntimeError(
-            "VISION_AZURE_OPENAI_DEPLOYMENT or VISION_MEMORY_MODEL is required when VISION_MEMORY_PROVIDER=azure_openai"
+            "VISION_AZURE_OPENAI_DEPLOYMENT or VISION_AZURE_OPENAI_MODEL is required "
+            "when VISION_MEMORY_PROVIDER=azure_openai "
+            "(legacy fallback: VISION_MEMORY_MODEL)"
         )
 
     api_version = settings.resolve_vision_provider_api_version(provider="azure_openai")

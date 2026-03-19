@@ -39,31 +39,36 @@ def _normalize_gemini_model_name(model_name: str) -> str:
         normalized = normalized.split("/", 1)[1].strip()
 
     if not normalized:
-        raise RuntimeError("VISION_MEMORY_MODEL is required when VISION_MEMORY_PROVIDER=gemini")
+        raise RuntimeError(
+            "VISION_GEMINI_MODEL is required when VISION_MEMORY_PROVIDER=gemini "
+            "(legacy fallback: VISION_MEMORY_MODEL)"
+        )
     if any(character.isspace() for character in normalized):
         raise RuntimeError(
-            "VISION_MEMORY_MODEL must not contain whitespace when VISION_MEMORY_PROVIDER=gemini"
+            "VISION_GEMINI_MODEL must not contain whitespace when VISION_MEMORY_PROVIDER=gemini"
         )
     if any(character in normalized for character in ["/", "\\", "?", "#", "&", "="]):
         raise RuntimeError(
-            "VISION_MEMORY_MODEL contains unsupported delimiter characters for VISION_MEMORY_PROVIDER=gemini"
+            "VISION_GEMINI_MODEL contains unsupported delimiter characters for VISION_MEMORY_PROVIDER=gemini"
         )
     if not _GEMINI_MODEL_PATTERN.fullmatch(normalized):
         raise RuntimeError(
-            "VISION_MEMORY_MODEL contains unsupported characters for VISION_MEMORY_PROVIDER=gemini"
+            "VISION_GEMINI_MODEL contains unsupported characters for VISION_MEMORY_PROVIDER=gemini"
         )
     return normalized
 
 
 def validate_gemini_vision_settings(settings: Settings) -> None:
     settings.validate_vision_provider_credentials(provider="gemini")
-    _normalize_gemini_model_name(settings.vision_memory_model)
+    _normalize_gemini_model_name(settings.resolve_vision_provider_model(provider="gemini") or "")
 
 
 def build_gemini_vision_analyzer(*, settings: Settings) -> "GeminiVisionAnalyzer":
     return GeminiVisionAnalyzer(
         api_key=settings.require_vision_provider_api_key(provider="gemini"),
-        model_name=_normalize_gemini_model_name(settings.vision_memory_model),
+        model_name=_normalize_gemini_model_name(
+            settings.resolve_vision_provider_model(provider="gemini") or ""
+        ),
         base_url=settings.resolve_vision_provider_base_url(provider="gemini"),
     )
 

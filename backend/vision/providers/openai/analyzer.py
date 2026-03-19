@@ -39,17 +39,18 @@ logger = logging.getLogger(__name__)
 
 def validate_openai_vision_settings(settings: Settings) -> None:
     settings.validate_vision_provider_credentials(provider="openai")
-    model_name = settings.vision_memory_model.strip()
+    model_name = (settings.resolve_vision_provider_model(provider="openai") or "").strip()
     if not model_name:
         raise RuntimeError(
-            "VISION_MEMORY_MODEL is required when VISION_MEMORY_PROVIDER=openai"
+            "VISION_OPENAI_MODEL is required when VISION_MEMORY_PROVIDER=openai "
+            "(legacy fallback: VISION_MEMORY_MODEL)"
         )
 
 
 def build_openai_vision_analyzer(*, settings: Settings) -> "OpenAIVisionAnalyzer":
     return OpenAIVisionAnalyzer(
         api_key=settings.require_vision_provider_api_key(provider="openai"),
-        model_name=settings.vision_memory_model,
+        model_name=settings.resolve_vision_provider_model(provider="openai") or "",
         base_url=settings.resolve_vision_provider_base_url(provider="openai"),
     )
 

@@ -32,17 +32,18 @@ DEFAULT_ANTHROPIC_VERSION = "2023-06-01"
 
 def validate_claude_vision_settings(settings: Settings) -> None:
     settings.validate_vision_provider_credentials(provider="claude")
-    model_name = settings.vision_memory_model.strip()
+    model_name = (settings.resolve_vision_provider_model(provider="claude") or "").strip()
     if not model_name:
         raise RuntimeError(
-            "VISION_MEMORY_MODEL is required when VISION_MEMORY_PROVIDER=claude"
+            "VISION_CLAUDE_MODEL is required when VISION_MEMORY_PROVIDER=claude "
+            "(legacy fallback: VISION_MEMORY_MODEL)"
         )
 
 
 def build_claude_vision_analyzer(*, settings: Settings) -> "ClaudeVisionAnalyzer":
     return ClaudeVisionAnalyzer(
         api_key=settings.require_vision_provider_api_key(provider="claude"),
-        model_name=settings.vision_memory_model,
+        model_name=settings.resolve_vision_provider_model(provider="claude") or "",
         base_url=settings.resolve_vision_provider_base_url(provider="claude"),
     )
 

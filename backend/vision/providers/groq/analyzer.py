@@ -60,17 +60,18 @@ def _is_max_completion_tokens_compatibility_error(error: VisionProviderError) ->
 
 def validate_groq_vision_settings(settings: Settings) -> None:
     settings.validate_vision_provider_credentials(provider="groq")
-    model_name = settings.vision_memory_model.strip()
+    model_name = (settings.resolve_vision_provider_model(provider="groq") or "").strip()
     if not model_name:
         raise RuntimeError(
-            "VISION_MEMORY_MODEL is required when VISION_MEMORY_PROVIDER=groq"
+            "VISION_GROQ_MODEL is required when VISION_MEMORY_PROVIDER=groq "
+            "(legacy fallback: VISION_MEMORY_MODEL)"
         )
 
 
 def build_groq_vision_analyzer(*, settings: Settings) -> "GroqVisionAnalyzer":
     return GroqVisionAnalyzer(
         api_key=settings.require_vision_provider_api_key(provider="groq"),
-        model_name=settings.vision_memory_model,
+        model_name=settings.resolve_vision_provider_model(provider="groq") or "",
         base_url=settings.resolve_vision_provider_base_url(provider="groq"),
     )
 

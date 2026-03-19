@@ -38,10 +38,11 @@ def validate_bedrock_vision_settings(settings: Settings) -> None:
             "VISION_BEDROCK_REGION is required when VISION_MEMORY_PROVIDER=bedrock"
         )
 
-    model_name = settings.vision_memory_model.strip()
+    model_name = (settings.resolve_vision_provider_model(provider="bedrock") or "").strip()
     if not model_name:
         raise RuntimeError(
-            "VISION_MEMORY_MODEL is required when VISION_MEMORY_PROVIDER=bedrock"
+            "VISION_BEDROCK_MODEL is required when VISION_MEMORY_PROVIDER=bedrock "
+            "(legacy fallback: VISION_MEMORY_MODEL)"
         )
 
 
@@ -53,7 +54,7 @@ def build_bedrock_vision_analyzer(*, settings: Settings) -> "BedrockVisionAnalyz
         )
 
     return BedrockVisionAnalyzer(
-        model_name=settings.vision_memory_model,
+        model_name=settings.resolve_vision_provider_model(provider="bedrock") or "",
         region_name=region,
         aws_access_key_id=settings.resolve_vision_provider_aws_access_key_id(provider="bedrock"),
         aws_secret_access_key=settings.resolve_vision_provider_aws_secret_access_key(
