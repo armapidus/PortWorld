@@ -32,6 +32,7 @@ from portworld_cli.services.config.edit_service import confirm_apply
 from portworld_cli.services.config.messages import (
     build_init_review_lines,
     build_init_success_message,
+    default_managed_deploy_command,
 )
 from portworld_cli.services.config.persistence import (
     preview_secret_readiness,
@@ -215,7 +216,7 @@ def _run_source_init(cli_context: CLIContext, options: InitOptions) -> CommandRe
                 "next: portworld doctor --target local",
                 "next: docker compose up --build",
                 "next: portworld config show",
-                "next: portworld deploy gcp-cloud-run",
+                f"next: {default_managed_deploy_command(write_outcome.project_config)}",
             ),
         ),
         data={
@@ -376,7 +377,7 @@ def _run_published_init(
                         "next: docker compose up -d",
                         "next: portworld doctor --target local",
                         "next: portworld status",
-                        "next: portworld deploy gcp-cloud-run",
+                        f"next: {default_managed_deploy_command(project_config)}",
                     ),
                 ),
             )

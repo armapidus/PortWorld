@@ -84,16 +84,56 @@ def deploy_gcp_cloud_run_command(
     )
 
 
+def _run_aws_deploy(
+    cli_context: CLIContext,
+    *,
+    region: str | None,
+    cluster: str | None,
+    service: str | None,
+    vpc_id: str | None,
+    subnet_ids: str | None,
+    certificate_arn: str | None,
+    database_url: str | None,
+    bucket: str | None,
+    alb_url: str | None,
+    ecr_repo: str | None,
+    tag: str | None,
+    cors_origins: str | None,
+    allowed_hosts: str | None,
+) -> None:
+    exit_with_result(
+        cli_context,
+        run_deploy_aws_ecs_fargate(
+            cli_context,
+            DeployAWSECSFargateOptions(
+                region=region,
+                cluster=cluster,
+                service=service,
+                vpc_id=vpc_id,
+                subnet_ids=subnet_ids,
+                certificate_arn=certificate_arn,
+                database_url=database_url,
+                bucket=bucket,
+                alb_url=alb_url,
+                ecr_repo=ecr_repo,
+                tag=tag,
+                cors_origins=cors_origins,
+                allowed_hosts=allowed_hosts,
+            ),
+        ),
+    )
+
+
 @deploy_group.command("aws-ecs-fargate")
 @click.option("--region", default=None, help="Target AWS region.")
-@click.option("--cluster", default=None, help="ECS cluster name.")
 @click.option("--service", default=None, help="ECS service name.")
-@click.option("--vpc-id", default=None, help="VPC id.")
-@click.option("--subnet-ids", default=None, help="Subnet ids (comma-separated).")
-@click.option("--certificate-arn", default=None, help="ACM certificate ARN for HTTPS listener.")
+@click.option("--cluster", default=None, help="Legacy AWS service alias.", hidden=True)
+@click.option("--vpc-id", default=None, help="VPC id.", hidden=True)
+@click.option("--subnet-ids", default=None, help="Subnet ids (comma-separated).", hidden=True)
+@click.option("--certificate-arn", default=None, help="Legacy unused AWS certificate option.", hidden=True)
 @click.option("--database-url", default=None, help="Existing managed PostgreSQL URL.")
-@click.option("--bucket", default=None, help="S3 bucket name for managed artifacts.")
-@click.option("--alb-url", default=None, help="HTTPS ALB endpoint URL.")
+@click.option("--bucket", default=None, help="S3 bucket name for managed memory objects.")
+@click.option("--alb-url", default=None, help="Legacy unused ALB URL option.", hidden=True)
 @click.option("--ecr-repo", default=None, help="ECR repository name.")
 @click.option("--tag", default=None, help="Container image tag.")
 @click.option("--cors-origins", default=None, help="Explicit production CORS origins (comma-separated).")
@@ -115,27 +155,58 @@ def deploy_aws_ecs_fargate_command(
     cors_origins: str | None,
     allowed_hosts: str | None,
 ) -> None:
-    """Deploy PortWorld backend to AWS ECS/Fargate."""
-    exit_with_result(
+    """Deploy PortWorld backend to AWS ECS/Fargate with ALB and CloudFront."""
+    _run_aws_deploy(
         cli_context,
-        run_deploy_aws_ecs_fargate(
-            cli_context,
-            DeployAWSECSFargateOptions(
-                region=region,
-                cluster=cluster,
-                service=service,
-                vpc_id=vpc_id,
-                subnet_ids=subnet_ids,
-                certificate_arn=certificate_arn,
-                database_url=database_url,
-                bucket=bucket,
-                alb_url=alb_url,
-                ecr_repo=ecr_repo,
-                tag=tag,
-                cors_origins=cors_origins,
-                allowed_hosts=allowed_hosts,
-            ),
-        ),
+        region=region,
+        cluster=cluster,
+        service=service,
+        vpc_id=vpc_id,
+        subnet_ids=subnet_ids,
+        certificate_arn=certificate_arn,
+        database_url=database_url,
+        bucket=bucket,
+        alb_url=alb_url,
+        ecr_repo=ecr_repo,
+        tag=tag,
+        cors_origins=cors_origins,
+        allowed_hosts=allowed_hosts,
+    )
+
+
+@deploy_group.command("aws-app-runner", hidden=True)
+@click.option("--region", default=None, help="Target AWS region.")
+@click.option("--cluster", default=None, help="Legacy AWS service alias.")
+@click.option("--service", default=None, help="Legacy AWS service name.")
+@click.option("--vpc-id", default=None, help="VPC id.")
+@click.option("--subnet-ids", default=None, help="Subnet ids (comma-separated).")
+@click.option("--certificate-arn", default=None, help="Legacy unused AWS certificate option.")
+@click.option("--database-url", default=None, help="Existing managed PostgreSQL URL.")
+@click.option("--bucket", default=None, help="S3 bucket name for managed artifacts.")
+@click.option("--alb-url", default=None, help="Legacy unused ALB URL option.")
+@click.option("--ecr-repo", default=None, help="ECR repository name.")
+@click.option("--tag", default=None, help="Container image tag.")
+@click.option("--cors-origins", default=None, help="Explicit production CORS origins (comma-separated).")
+@click.option("--allowed-hosts", default=None, help="Explicit production allowed hosts (comma-separated).")
+@click.pass_obj
+def deploy_aws_app_runner_deprecated_command(
+    cli_context: CLIContext,
+    region: str | None,
+    cluster: str | None,
+    service: str | None,
+    vpc_id: str | None,
+    subnet_ids: str | None,
+    certificate_arn: str | None,
+    database_url: str | None,
+    bucket: str | None,
+    alb_url: str | None,
+    ecr_repo: str | None,
+    tag: str | None,
+    cors_origins: str | None,
+    allowed_hosts: str | None,
+) -> None:
+    raise click.UsageError(
+        "AWS App Runner is no longer supported for the realtime backend. Use `portworld deploy aws-ecs-fargate`."
     )
 
 

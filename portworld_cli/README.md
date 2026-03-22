@@ -67,14 +67,30 @@ Use this path when you are developing PortWorld itself or need repo-backed runti
 
 ## Managed Deploy
 
-For Cloud Run deploys:
+Managed targets (MVP): `gcp-cloud-run`, `aws-ecs-fargate`, `azure-container-apps`.
+
+Managed deploy examples:
 
 ```bash
 portworld doctor --target gcp-cloud-run --project <project> --region <region>
 portworld deploy gcp-cloud-run --project <project> --region <region> --cors-origins https://app.example.com
+
+portworld doctor --target aws-ecs-fargate --aws-region <region>
+portworld deploy aws-ecs-fargate --region <region> --cors-origins https://app.example.com
+
+portworld doctor --target azure-container-apps --azure-subscription <subscription> --azure-resource-group <resource-group> --azure-region <region>
+portworld deploy azure-container-apps --subscription <subscription> --resource-group <resource-group> --region <region> --cors-origins https://app.example.com
 ```
 
-Published workspaces can also drive managed deploys once configured.
+Published workspaces can drive any managed target after initial target configuration.
+
+Managed storage shape for these targets:
+
+- object storage is the source of truth for memory files
+- Postgres remains for operational metadata (session/frame indexes) in the current MVP backend
+- `gcp-cloud-run`: Cloud Run + GCS + Cloud SQL Postgres
+- `aws-ecs-fargate`: ECS/Fargate + CloudFront + ALB + S3 + Postgres operational metadata
+- `azure-container-apps`: Container Apps + Blob Storage + Postgres operational metadata
 
 ## Main Commands
 
@@ -82,11 +98,27 @@ Published workspaces can also drive managed deploys once configured.
 - `portworld doctor` validates local or managed readiness
 - `portworld deploy` deploys PortWorld to a managed target
 - `portworld status` shows current workspace and deploy state
-- `portworld logs` reads managed deployment logs
+- `portworld logs` reads managed deployment logs for GCP, AWS, and Azure
 - `portworld config` inspects or edits project configuration
 - `portworld providers` lists supported provider integrations
-- `portworld update` updates the CLI or redeploys the active managed target
+- `portworld update` updates the CLI or redeploys the active managed target across GCP, AWS, and Azure
 - `portworld ops` runs lower-level backend operator tasks
+
+Managed target log commands:
+
+```bash
+portworld logs gcp-cloud-run --since 24h --limit 50
+portworld logs aws-ecs-fargate --since 24h --limit 50
+portworld logs azure-container-apps --since 24h --limit 50
+```
+
+`portworld update deploy` redeploys whichever managed target is currently active in workspace state/config.
+
+Current MVP hardening note:
+
+- AWS one-click currently provisions RDS with public accessibility and broad ingress
+- Azure one-click currently provisions PostgreSQL with public access
+- keep these defaults for MVP validation only; tighten them before production use
 
 ## Updates
 

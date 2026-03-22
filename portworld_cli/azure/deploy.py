@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
+import secrets
 import socket
 import ssl
 from time import monotonic, sleep
 from time import time_ns
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import click
 import httpx
@@ -33,6 +35,12 @@ from portworld_cli.targets import TARGET_AZURE_CONTAINER_APPS
 from portworld_cli.workspace.project_config import RUNTIME_SOURCE_PUBLISHED
 
 COMMAND_NAME = "portworld deploy azure-container-apps"
+DEFAULT_AZURE_REGION = "eastus"
+DEFAULT_RESOURCE_GROUP = "portworld-rg"
+DEFAULT_APP_NAME = "portworld-backend"
+DEFAULT_BLOB_CONTAINER = "portworld-memory"
+DEFAULT_POSTGRES_DATABASE = "portworld"
+DEFAULT_POSTGRES_ADMIN_USERNAME = "pwadmin"
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,12 +71,16 @@ class _ResolvedAzureDeployConfig:
     region: str
     environment_name: str
     app_name: str
-    database_url: str
+    database_url: str | None
     storage_account: str
     blob_container: str
     blob_endpoint: str
+    acr_name: str
     acr_server: str
     acr_repo: str
+    postgres_server_name: str
+    postgres_database_name: str
+    postgres_admin_username: str
     image_tag: str
     image_uri: str
     cors_origins: str
@@ -112,16 +124,21 @@ def run_deploy_azure_container_apps(
                 "region": config.region,
                 "environment_name": config.environment_name,
                 "app_name": config.app_name,
+                "acr_name": config.acr_name,
                 "image_uri": config.image_uri,
+                "storage_account": config.storage_account,
                 "blob_container": config.blob_container,
+                "postgres_server_name": config.postgres_server_name,
+                "postgres_database_name": config.postgres_database_name,
             }
         )
 
-        fqdn = _run_azure_deploy_mutations(
+        deploy_result = _run_azure_deploy_mutations(
             config=config,
             env_values=env_values,
             stage_records=stage_records,
         )
+        fqdn = deploy_result.fqdn
         if fqdn is None:
             raise DeployStageError(
                 stage="post_deploy_validation",
@@ -156,9 +173,9 @@ def run_deploy_azure_container_apps(
                 artifact_repository=config.acr_repo,
                 artifact_repository_base=config.acr_repo,
                 cloud_sql_instance=None,
-                database_name="external",
+                database_name=config.postgres_database_name,
                 bucket_name=config.blob_container,
-                image=config.image_uri,
+                image=deploy_result.image_uri,
                 published_release_tag=config.published_release_tag,
                 published_image_ref=config.published_image_ref,
                 service_url=service_url,
@@ -175,7 +192,7 @@ def run_deploy_azure_container_apps(
                 "environment_name": config.environment_name,
                 "app_name": config.app_name,
                 "service_url": service_url,
-                "image_uri": config.image_uri,
+                "image_uri": deploy_result.image_uri,
                 "blob_container": config.blob_container,
             }
         )
@@ -193,7 +210,7 @@ def run_deploy_azure_container_apps(
                     f"app_name: {config.app_name}",
                     f"service_url: {service_url}",
                     f"image_source_mode: {config.image_source_mode}",
-                    f"image_uri: {config.image_uri}",
+                    f"image_uri: {deploy_result.image_uri}",
                     "next_steps:",
                     f"- curl {service_url.rstrip('/')}/livez",
                     f"- portworld doctor --target azure-container-apps --azure-subscription {config.subscription_id}",
@@ -208,7 +225,13 @@ def run_deploy_azure_container_apps(
                 "published_image_ref": config.published_image_ref,
                 "resources": resources,
                 "stages": stage_records,
-                "runtime_env": _sanitize_runtime_env_for_output(_build_runtime_env_vars(env_values, config)),
+                "runtime_env": _sanitize_runtime_env_for_output(
+                    _build_runtime_env_vars(
+                        env_values,
+                        config,
+                        database_url=deploy_result.database_url,
+                    )
+                ),
             },
             exit_code=0,
         )
@@ -265,43 +288,40 @@ def _resolve_azure_deploy_config(
         prompt="Azure subscription id",
         error="Azure subscription id is required.",
     )
+    app_name = _require_value(
+        cli_context,
+        value=_first_non_empty(options.app, defaults.app_name, DEFAULT_APP_NAME),
+        prompt="Container App name",
+        error="Container App name is required.",
+    )
     resource_group = _require_value(
         cli_context,
-        value=_first_non_empty(options.resource_group, defaults.resource_group),
+        value=_first_non_empty(options.resource_group, defaults.resource_group, DEFAULT_RESOURCE_GROUP),
         prompt="Azure resource group",
         error="Azure resource group is required.",
     )
     region = _require_value(
         cli_context,
-        value=_first_non_empty(options.region, defaults.region),
+        value=_first_non_empty(options.region, defaults.region, DEFAULT_AZURE_REGION),
         prompt="Azure region",
         error="Azure region is required.",
     )
     environment_name = _require_value(
         cli_context,
-        value=_first_non_empty(options.environment, defaults.environment_name),
+        value=_first_non_empty(options.environment, defaults.environment_name, f"{app_name}-env"),
         prompt="Container Apps environment name",
         error="Container Apps environment name is required.",
     )
-    app_name = _require_value(
-        cli_context,
-        value=_first_non_empty(options.app, defaults.app_name),
-        prompt="Container App name",
-        error="Container App name is required.",
-    )
-
-    database_url = _require_value(
-        cli_context,
-        value=_first_non_empty(options.database_url, env_values.get("BACKEND_DATABASE_URL")),
-        prompt="Managed PostgreSQL URL",
-        error="BACKEND_DATABASE_URL is required.",
-    )
-    if not is_postgres_url(database_url):
+    database_url = _first_non_empty(options.database_url, env_values.get("BACKEND_DATABASE_URL"))
+    if database_url and not is_postgres_url(database_url):
         raise DeployUsageError("BACKEND_DATABASE_URL must use postgres:// or postgresql://.")
+
+    hash_seed = f"{subscription_id}:{resource_group}:{app_name}"
+    unique_suffix = _stable_suffix(hash_seed, length=6)
 
     storage_account = _require_value(
         cli_context,
-        value=_first_non_empty(options.storage_account, defaults.storage_account),
+        value=_first_non_empty(options.storage_account, _build_storage_account_name(app_name, unique_suffix)),
         prompt="Azure storage account name",
         error="Azure storage account name is required.",
     )
@@ -311,7 +331,12 @@ def _resolve_azure_deploy_config(
 
     blob_container = _require_value(
         cli_context,
-        value=_first_non_empty(options.blob_container, env_values.get("BACKEND_OBJECT_STORE_NAME"), env_values.get("BACKEND_OBJECT_STORE_BUCKET")),
+        value=_first_non_empty(
+            options.blob_container,
+            env_values.get("BACKEND_OBJECT_STORE_NAME"),
+            env_values.get("BACKEND_OBJECT_STORE_BUCKET"),
+            DEFAULT_BLOB_CONTAINER,
+        ),
         prompt="Azure blob container name",
         error="Azure blob container name is required.",
     )
@@ -333,18 +358,18 @@ def _resolve_azure_deploy_config(
     if endpoint_error:
         raise DeployUsageError(endpoint_error)
 
-    acr_server = _require_value(
-        cli_context,
-        value=options.acr_server,
-        prompt="ACR login server",
-        error="ACR login server is required.",
-    )
+    acr_name = _build_acr_name(app_name, unique_suffix)
+    acr_server = _first_non_empty(options.acr_server, f"{acr_name}.azurecr.io")
+    if acr_server is None:
+        raise DeployUsageError("ACR login server could not be derived.")
     acr_repo = _require_value(
         cli_context,
         value=_first_non_empty(options.acr_repo, f"{app_name}-backend"),
         prompt="ACR repository name",
         error="ACR repository is required.",
     )
+    postgres_server_name = _build_postgres_server_name(app_name, unique_suffix)
+    postgres_database_name = DEFAULT_POSTGRES_DATABASE
 
     image_source_mode = IMAGE_SOURCE_MODE_SOURCE_BUILD
     published_release_tag: str | None = None
@@ -384,8 +409,12 @@ def _resolve_azure_deploy_config(
         storage_account=storage_account,
         blob_container=blob_container,
         blob_endpoint=blob_endpoint,
+        acr_name=acr_name,
         acr_server=acr_server,
         acr_repo=acr_repo,
+        postgres_server_name=postgres_server_name,
+        postgres_database_name=postgres_database_name,
+        postgres_admin_username=DEFAULT_POSTGRES_ADMIN_USERNAME,
         image_tag=image_tag,
         image_uri=image_uri,
         cors_origins=cors_origins or "*",
@@ -393,6 +422,38 @@ def _resolve_azure_deploy_config(
         published_release_tag=published_release_tag,
         published_image_ref=published_image_ref,
     )
+
+
+def _stable_suffix(seed: str, *, length: int) -> str:
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+    return digest[:length]
+
+
+def _sanitize_name_token(value: str) -> str:
+    lowered = value.strip().lower()
+    return "".join(char for char in lowered if char.isalnum())
+
+
+def _build_storage_account_name(app_name: str, suffix: str) -> str:
+    token = _sanitize_name_token(app_name) or "portworld"
+    candidate = f"pw{token}{suffix}"
+    return candidate[:24]
+
+
+def _build_acr_name(app_name: str, suffix: str) -> str:
+    token = _sanitize_name_token(app_name) or "portworld"
+    candidate = f"pw{token}{suffix}"
+    if len(candidate) < 5:
+        candidate = f"{candidate}acr"
+    return candidate[:50]
+
+
+def _build_postgres_server_name(app_name: str, suffix: str) -> str:
+    token = _sanitize_name_token(app_name) or "portworld"
+    candidate = f"pwpg{token}{suffix}"
+    if len(candidate) < 3:
+        candidate = f"pwpg{suffix}"
+    return candidate[:63]
 
 
 def _resolve_container_app_fqdn(config: _ResolvedAzureDeployConfig) -> str | None:
@@ -427,12 +488,19 @@ def _resolve_container_app_fqdn(config: _ResolvedAzureDeployConfig) -> str | Non
     return normalized or None
 
 
+@dataclass(frozen=True, slots=True)
+class _DeployMutationResult:
+    fqdn: str | None
+    database_url: str
+    image_uri: str
+
+
 def _run_azure_deploy_mutations(
     *,
     config: _ResolvedAzureDeployConfig,
     env_values: OrderedDict[str, str],
     stage_records: list[dict[str, object]],
-) -> str | None:
+) -> _DeployMutationResult:
     set_subscription = run_az_json(["account", "set", "--subscription", config.subscription_id])
     if not set_subscription.ok:
         raise DeployStageError(
@@ -441,6 +509,18 @@ def _run_azure_deploy_mutations(
             action="Verify subscription id and az login context.",
         )
     stage_records.append(_stage_ok("subscription_set", f"Using subscription `{config.subscription_id}`."))
+
+    _ensure_resource_group(config, stage_records)
+    _ensure_resource_provider(config, stage_records, namespace="Microsoft.App")
+    _ensure_resource_provider(config, stage_records, namespace="Microsoft.ContainerRegistry")
+    _ensure_resource_provider(config, stage_records, namespace="Microsoft.Storage")
+    _ensure_resource_provider(config, stage_records, namespace="Microsoft.DBforPostgreSQL")
+
+    acr_server, acr_username, acr_password = _ensure_acr(config, stage_records)
+    image_uri = f"{acr_server}/{config.acr_repo}:{config.image_tag}"
+    _ensure_storage(config, stage_records)
+    _ensure_container_apps_environment(config, stage_records)
+    database_url = _ensure_postgres_and_database_url(config, stage_records)
 
     current_app = run_az_json(
         [
@@ -454,50 +534,100 @@ def _run_azure_deploy_mutations(
             config.app_name,
         ]
     )
-    if not current_app.ok or not isinstance(current_app.value, dict):
-        raise DeployStageError(
-            stage="container_app_lookup",
-            message=current_app.message or "Unable to inspect Azure Container App.",
-            action="Create the app and ensure az permissions for containerapp show/update.",
-        )
-    stage_records.append(_stage_ok("container_app_lookup", f"Found Container App `{config.app_name}`."))
+    app_exists = current_app.ok and isinstance(current_app.value, dict)
+    if app_exists:
+        stage_records.append(_stage_ok("container_app_lookup", f"Found Container App `{config.app_name}`."))
+    else:
+        stage_records.append(_stage_ok("container_app_lookup", f"Container App `{config.app_name}` will be created."))
 
-    runtime_env = _build_runtime_env_vars(env_values, config)
+    runtime_env = _build_runtime_env_vars(env_values, config, database_url=database_url)
     plain_env, secret_env = _split_runtime_env_for_azure(runtime_env)
     env_args = [f"{key}={value}" for key, value in plain_env.items()]
     env_args.extend(f"{key}=secretref:{secret_name}" for key, secret_name in secret_env.items())
-    update_args = [
-        "containerapp",
-        "update",
-        "--subscription",
-        config.subscription_id,
-        "--resource-group",
-        config.resource_group,
-        "--name",
-        config.app_name,
-        "--image",
-        config.image_uri,
-    ]
-    if secret_env:
-        update_args.extend(
-            [
-                "--secrets",
-                *[
-                    f"{secret_name}={runtime_env[key]}"
-                    for key, secret_name in secret_env.items()
-                ],
-            ]
+    if app_exists:
+        _set_container_app_registry_credentials(
+            config=config,
+            acr_server=acr_server,
+            acr_username=acr_username,
+            acr_password=acr_password,
         )
-    if env_args:
-        update_args.extend(["--set-env-vars", *env_args])
-    update_response = run_az_json(update_args)
-    if not update_response.ok:
-        raise DeployStageError(
-            stage="container_app_update",
-            message=update_response.message or "Unable to update Azure Container App.",
-            action="Verify app permissions and containerapp update arguments.",
-        )
-    stage_records.append(_stage_ok("container_app_update", f"Updated image to `{config.image_uri}`."))
+        update_args = [
+            "containerapp",
+            "update",
+            "--subscription",
+            config.subscription_id,
+            "--resource-group",
+            config.resource_group,
+            "--name",
+            config.app_name,
+            "--image",
+            image_uri,
+        ]
+        if secret_env:
+            update_args.extend(
+                [
+                    "--secrets",
+                    *[
+                        f"{secret_name}={runtime_env[key]}"
+                        for key, secret_name in secret_env.items()
+                    ],
+                ]
+            )
+        if env_args:
+            update_args.extend(["--set-env-vars", *env_args])
+        update_response = run_az_json(update_args)
+        if not update_response.ok:
+            raise DeployStageError(
+                stage="container_app_update",
+                message=update_response.message or "Unable to update Azure Container App.",
+                action="Verify app permissions and containerapp update arguments.",
+            )
+        stage_records.append(_stage_ok("container_app_update", f"Updated image to `{image_uri}`."))
+    else:
+        create_args = [
+            "containerapp",
+            "create",
+            "--subscription",
+            config.subscription_id,
+            "--resource-group",
+            config.resource_group,
+            "--name",
+            config.app_name,
+            "--environment",
+            config.environment_name,
+            "--image",
+            image_uri,
+            "--ingress",
+            "external",
+            "--target-port",
+            "8080",
+            "--registry-server",
+            acr_server,
+            "--registry-username",
+            acr_username,
+            "--registry-password",
+            acr_password,
+        ]
+        if secret_env:
+            create_args.extend(
+                [
+                    "--secrets",
+                    *[
+                        f"{secret_name}={runtime_env[key]}"
+                        for key, secret_name in secret_env.items()
+                    ],
+                ]
+            )
+        if env_args:
+            create_args.extend(["--env-vars", *env_args])
+        create_response = run_az_json(create_args)
+        if not create_response.ok:
+            raise DeployStageError(
+                stage="container_app_create",
+                message=create_response.message or "Unable to create Azure Container App.",
+                action="Verify Container Apps permissions, image accessibility, and environment setup.",
+            )
+        stage_records.append(_stage_ok("container_app_create", f"Created Container App `{config.app_name}`."))
 
     fqdn = _wait_for_container_app_readiness(config=config)
     if fqdn is None:
@@ -507,7 +637,579 @@ def _run_azure_deploy_mutations(
             action="Inspect Container App revisions and ingress settings.",
         )
     stage_records.append(_stage_ok("container_app_wait_ready", f"Container App is ready at `{fqdn}`."))
-    return fqdn
+    return _DeployMutationResult(fqdn=fqdn, database_url=database_url, image_uri=image_uri)
+
+
+def _ensure_resource_group(config: _ResolvedAzureDeployConfig, stage_records: list[dict[str, object]]) -> None:
+    current = run_az_json(
+        [
+            "group",
+            "show",
+            "--subscription",
+            config.subscription_id,
+            "--name",
+            config.resource_group,
+        ]
+    )
+    if current.ok and isinstance(current.value, dict):
+        stage_records.append(_stage_ok("resource_group", f"Using resource group `{config.resource_group}`."))
+        return
+    created = run_az_json(
+        [
+            "group",
+            "create",
+            "--subscription",
+            config.subscription_id,
+            "--name",
+            config.resource_group,
+            "--location",
+            config.region,
+        ]
+    )
+    if not created.ok:
+        raise DeployStageError(
+            stage="resource_group",
+            message=created.message or "Unable to create resource group.",
+            action="Verify resource group permissions and target region.",
+        )
+    stage_records.append(_stage_ok("resource_group", f"Created resource group `{config.resource_group}`."))
+
+
+def _ensure_resource_provider(
+    config: _ResolvedAzureDeployConfig,
+    stage_records: list[dict[str, object]],
+    *,
+    namespace: str,
+) -> None:
+    provider = run_az_json(
+        [
+            "provider",
+            "show",
+            "--subscription",
+            config.subscription_id,
+            "--namespace",
+            namespace,
+        ]
+    )
+    state = None
+    if provider.ok and isinstance(provider.value, dict):
+        state = read_dict_string(provider.value, "registrationState")
+    if state == "Registered":
+        stage_records.append(_stage_ok("provider_registration", f"{namespace} is registered."))
+        return
+    register = run_az_json(
+        [
+            "provider",
+            "register",
+            "--subscription",
+            config.subscription_id,
+            "--namespace",
+            namespace,
+        ]
+    )
+    if not register.ok:
+        raise DeployStageError(
+            stage="provider_registration",
+            message=register.message or f"Unable to register Azure provider {namespace}.",
+            action=f"Register provider manually: az provider register --namespace {namespace}",
+        )
+    stage_records.append(_stage_ok("provider_registration", f"Requested registration for {namespace}."))
+
+
+def _ensure_acr(
+    config: _ResolvedAzureDeployConfig,
+    stage_records: list[dict[str, object]],
+) -> tuple[str, str, str]:
+    acr = run_az_json(
+        [
+            "acr",
+            "show",
+            "--subscription",
+            config.subscription_id,
+            "--resource-group",
+            config.resource_group,
+            "--name",
+            config.acr_name,
+        ]
+    )
+    created = False
+    if not acr.ok or not isinstance(acr.value, dict):
+        create = run_az_json(
+            [
+                "acr",
+                "create",
+                "--subscription",
+                config.subscription_id,
+                "--resource-group",
+                config.resource_group,
+                "--name",
+                config.acr_name,
+                "--location",
+                config.region,
+                "--sku",
+                "Basic",
+                "--admin-enabled",
+                "true",
+            ]
+        )
+        if not create.ok or not isinstance(create.value, dict):
+            raise DeployStageError(
+                stage="acr_provision",
+                message=create.message or "Unable to create Azure Container Registry.",
+                action="Verify ACR naming constraints and subscription permissions.",
+            )
+        acr = create
+        created = True
+    login_server = read_dict_string(acr.value, "loginServer") if isinstance(acr.value, dict) else None
+    if login_server is None:
+        raise DeployStageError(
+            stage="acr_provision",
+            message="ACR login server is missing after provisioning.",
+            action="Inspect the Azure Container Registry resource in Azure CLI.",
+        )
+    admin_enabled = False
+    if isinstance(acr.value, dict):
+        admin_enabled = bool(acr.value.get("adminUserEnabled"))
+    if not admin_enabled:
+        update = run_az_json(
+            [
+                "acr",
+                "update",
+                "--subscription",
+                config.subscription_id,
+                "--resource-group",
+                config.resource_group,
+                "--name",
+                config.acr_name,
+                "--admin-enabled",
+                "true",
+            ]
+        )
+        if not update.ok:
+            raise DeployStageError(
+                stage="acr_provision",
+                message=update.message or "Unable to enable ACR admin user.",
+                action="Enable the ACR admin user and retry deploy.",
+            )
+    creds = run_az_json(
+        [
+            "acr",
+            "credential",
+            "show",
+            "--subscription",
+            config.subscription_id,
+            "--resource-group",
+            config.resource_group,
+            "--name",
+            config.acr_name,
+        ]
+    )
+    if not creds.ok or not isinstance(creds.value, dict):
+        raise DeployStageError(
+            stage="acr_credentials",
+            message=creds.message or "Unable to read ACR credentials.",
+            action="Verify ACR admin user is enabled and credentials are accessible.",
+        )
+    username = read_dict_string(creds.value, "username")
+    password = _extract_acr_password(creds.value)
+    if username is None or password is None:
+        raise DeployStageError(
+            stage="acr_credentials",
+            message="ACR credentials are incomplete.",
+            action="Regenerate ACR credentials and retry deploy.",
+        )
+    message = "Created ACR" if created else "Using existing ACR"
+    stage_records.append(_stage_ok("acr_provision", f"{message} `{config.acr_name}` ({login_server})."))
+    return login_server, username, password
+
+
+def _extract_acr_password(payload: dict[str, object]) -> str | None:
+    passwords = payload.get("passwords")
+    if not isinstance(passwords, list):
+        return None
+    for item in passwords:
+        if not isinstance(item, dict):
+            continue
+        value = read_dict_string(item, "value")
+        if value is not None:
+            return value
+    return None
+
+
+def _ensure_storage(config: _ResolvedAzureDeployConfig, stage_records: list[dict[str, object]]) -> None:
+    account = run_az_json(
+        [
+            "storage",
+            "account",
+            "show",
+            "--subscription",
+            config.subscription_id,
+            "--resource-group",
+            config.resource_group,
+            "--name",
+            config.storage_account,
+        ]
+    )
+    created = False
+    if not account.ok or not isinstance(account.value, dict):
+        create = run_az_json(
+            [
+                "storage",
+                "account",
+                "create",
+                "--subscription",
+                config.subscription_id,
+                "--resource-group",
+                config.resource_group,
+                "--name",
+                config.storage_account,
+                "--location",
+                config.region,
+                "--sku",
+                "Standard_LRS",
+                "--kind",
+                "StorageV2",
+                "--allow-blob-public-access",
+                "false",
+                "--min-tls-version",
+                "TLS1_2",
+            ]
+        )
+        if not create.ok:
+            raise DeployStageError(
+                stage="storage_provision",
+                message=create.message or "Unable to create Azure Storage account.",
+                action="Verify storage naming constraints and permissions.",
+            )
+        created = True
+    keys = run_az_json(
+        [
+            "storage",
+            "account",
+            "keys",
+            "list",
+            "--subscription",
+            config.subscription_id,
+            "--resource-group",
+            config.resource_group,
+            "--account-name",
+            config.storage_account,
+        ]
+    )
+    account_key = _extract_storage_account_key(keys.value) if keys.ok else None
+    if account_key is None:
+        raise DeployStageError(
+            stage="storage_provision",
+            message=keys.message or "Unable to resolve storage account key.",
+            action="Verify storage account key permissions.",
+        )
+    exists = run_az_json(
+        [
+            "storage",
+            "container",
+            "exists",
+            "--name",
+            config.blob_container,
+            "--account-name",
+            config.storage_account,
+            "--account-key",
+            account_key,
+        ]
+    )
+    container_exists = False
+    if exists.ok and isinstance(exists.value, dict):
+        container_exists = bool(exists.value.get("exists"))
+    if not container_exists:
+        create_container = run_az_json(
+            [
+                "storage",
+                "container",
+                "create",
+                "--name",
+                config.blob_container,
+                "--account-name",
+                config.storage_account,
+                "--account-key",
+                account_key,
+            ]
+        )
+        if not create_container.ok:
+            raise DeployStageError(
+                stage="storage_provision",
+                message=create_container.message or "Unable to create blob container.",
+                action="Verify storage credentials and container naming.",
+            )
+    message = "Created storage account" if created else "Using existing storage account"
+    stage_records.append(_stage_ok("storage_provision", f"{message} `{config.storage_account}` and validated container `{config.blob_container}`."))
+
+
+def _extract_storage_account_key(value: object) -> str | None:
+    if not isinstance(value, list):
+        return None
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        key = read_dict_string(item, "value")
+        if key is not None:
+            return key
+    return None
+
+
+def _ensure_container_apps_environment(
+    config: _ResolvedAzureDeployConfig,
+    stage_records: list[dict[str, object]],
+) -> None:
+    env = run_az_json(
+        [
+            "containerapp",
+            "env",
+            "show",
+            "--subscription",
+            config.subscription_id,
+            "--resource-group",
+            config.resource_group,
+            "--name",
+            config.environment_name,
+        ]
+    )
+    if env.ok and isinstance(env.value, dict):
+        stage_records.append(_stage_ok("container_apps_environment", f"Using environment `{config.environment_name}`."))
+        return
+    create = run_az_json(
+        [
+            "containerapp",
+            "env",
+            "create",
+            "--subscription",
+            config.subscription_id,
+            "--resource-group",
+            config.resource_group,
+            "--name",
+            config.environment_name,
+            "--location",
+            config.region,
+        ]
+    )
+    if not create.ok:
+        raise DeployStageError(
+            stage="container_apps_environment",
+            message=create.message or "Unable to create Container Apps environment.",
+            action="Verify Container Apps provider registration and region availability.",
+        )
+    stage_records.append(_stage_ok("container_apps_environment", f"Created environment `{config.environment_name}`."))
+
+
+def _ensure_postgres_and_database_url(
+    config: _ResolvedAzureDeployConfig,
+    stage_records: list[dict[str, object]],
+) -> str:
+    if config.database_url is not None:
+        stage_records.append(_stage_ok("postgres_provision", "Using explicit BACKEND_DATABASE_URL value."))
+        return config.database_url
+
+    existing_secret_url = _resolve_database_url_from_container_app_secret(config)
+    if existing_secret_url is not None:
+        stage_records.append(_stage_ok("postgres_provision", "Using existing database URL from Container App secret."))
+        return existing_secret_url
+
+    admin_password = _generate_database_password()
+    server = run_az_json(
+        [
+            "postgres",
+            "flexible-server",
+            "show",
+            "--subscription",
+            config.subscription_id,
+            "--resource-group",
+            config.resource_group,
+            "--name",
+            config.postgres_server_name,
+        ]
+    )
+    fqdn: str | None = None
+    if server.ok and isinstance(server.value, dict):
+        fqdn = read_dict_string(server.value, "fullyQualifiedDomainName")
+        update_password = run_az_json(
+            [
+                "postgres",
+                "flexible-server",
+                "update",
+                "--subscription",
+                config.subscription_id,
+                "--resource-group",
+                config.resource_group,
+                "--name",
+                config.postgres_server_name,
+                "--admin-password",
+                admin_password,
+            ]
+        )
+        if not update_password.ok:
+            raise DeployStageError(
+                stage="postgres_provision",
+                message=update_password.message or "Unable to rotate PostgreSQL admin password.",
+                action="Provide --database-url or grant permissions to update postgres server credentials.",
+            )
+    else:
+        create = run_az_json(
+            [
+                "postgres",
+                "flexible-server",
+                "create",
+                "--subscription",
+                config.subscription_id,
+                "--resource-group",
+                config.resource_group,
+                "--name",
+                config.postgres_server_name,
+                "--location",
+                config.region,
+                "--tier",
+                "Burstable",
+                "--sku-name",
+                "Standard_B1ms",
+                "--storage-size",
+                "32",
+                "--version",
+                "16",
+                "--admin-user",
+                config.postgres_admin_username,
+                "--admin-password",
+                admin_password,
+                "--public-access",
+                "0.0.0.0",
+            ]
+        )
+        if not create.ok or not isinstance(create.value, dict):
+            raise DeployStageError(
+                stage="postgres_provision",
+                message=create.message or "Unable to create Azure Database for PostgreSQL flexible server.",
+                action="Verify postgres provider registration, region availability, and permissions.",
+            )
+        fqdn = read_dict_string(create.value, "fullyQualifiedDomainName")
+
+    if fqdn is None:
+        raise DeployStageError(
+            stage="postgres_provision",
+            message="Unable to resolve PostgreSQL server FQDN.",
+            action="Inspect flexible server status and retry deploy.",
+        )
+
+    db = run_az_json(
+        [
+            "postgres",
+            "flexible-server",
+            "db",
+            "show",
+            "--subscription",
+            config.subscription_id,
+            "--resource-group",
+            config.resource_group,
+            "--server-name",
+            config.postgres_server_name,
+            "--database-name",
+            config.postgres_database_name,
+        ]
+    )
+    if not db.ok:
+        create_db = run_az_json(
+            [
+                "postgres",
+                "flexible-server",
+                "db",
+                "create",
+                "--subscription",
+                config.subscription_id,
+                "--resource-group",
+                config.resource_group,
+                "--server-name",
+                config.postgres_server_name,
+                "--database-name",
+                config.postgres_database_name,
+            ]
+        )
+        if not create_db.ok:
+            raise DeployStageError(
+                stage="postgres_provision",
+                message=create_db.message or "Unable to create PostgreSQL database.",
+                action="Verify database name constraints and postgres server health.",
+            )
+
+    encoded_password = quote(admin_password, safe="")
+    database_url = (
+        f"postgresql://{config.postgres_admin_username}:{encoded_password}@{fqdn}:5432/"
+        f"{config.postgres_database_name}?sslmode=require"
+    )
+    stage_records.append(
+        _stage_ok(
+            "postgres_provision",
+            f"Provisioned PostgreSQL `{config.postgres_server_name}` and database `{config.postgres_database_name}`.",
+        )
+    )
+    return database_url
+
+
+def _resolve_database_url_from_container_app_secret(config: _ResolvedAzureDeployConfig) -> str | None:
+    secret_name = _to_azure_secret_name("BACKEND_DATABASE_URL")
+    secret = run_az_json(
+        [
+            "containerapp",
+            "secret",
+            "show",
+            "--subscription",
+            config.subscription_id,
+            "--resource-group",
+            config.resource_group,
+            "--name",
+            config.app_name,
+            "--secret-name",
+            secret_name,
+        ]
+    )
+    if not secret.ok or not isinstance(secret.value, dict):
+        return None
+    value = read_dict_string(secret.value, "value")
+    if value is None or not is_postgres_url(value):
+        return None
+    return value
+
+
+def _set_container_app_registry_credentials(
+    *,
+    config: _ResolvedAzureDeployConfig,
+    acr_server: str,
+    acr_username: str,
+    acr_password: str,
+) -> None:
+    response = run_az_json(
+        [
+            "containerapp",
+            "registry",
+            "set",
+            "--subscription",
+            config.subscription_id,
+            "--resource-group",
+            config.resource_group,
+            "--name",
+            config.app_name,
+            "--server",
+            acr_server,
+            "--username",
+            acr_username,
+            "--password",
+            acr_password,
+        ]
+    )
+    if not response.ok:
+        raise DeployStageError(
+            stage="container_app_registry_credentials",
+            message=response.message or "Unable to set Container App registry credentials.",
+            action="Verify ACR permissions and retry deploy.",
+        )
+
+
+def _generate_database_password() -> str:
+    return f"Pw-{secrets.token_urlsafe(24)}!"
 
 
 def _wait_for_container_app_readiness(
@@ -579,6 +1281,8 @@ def _extract_fqdn_and_external(payload: dict[str, object]) -> str | None:
 def _build_runtime_env_vars(
     env_values: OrderedDict[str, str],
     config: _ResolvedAzureDeployConfig,
+    *,
+    database_url: str,
 ) -> OrderedDict[str, str]:
     final_env: OrderedDict[str, str] = OrderedDict()
     excluded = {
@@ -605,7 +1309,7 @@ def _build_runtime_env_vars(
     final_env["BACKEND_OBJECT_STORE_BUCKET"] = config.blob_container
     final_env["BACKEND_OBJECT_STORE_ENDPOINT"] = config.blob_endpoint
     final_env["BACKEND_OBJECT_STORE_PREFIX"] = config.app_name
-    final_env["BACKEND_DATABASE_URL"] = config.database_url
+    final_env["BACKEND_DATABASE_URL"] = database_url
     final_env["CORS_ORIGINS"] = config.cors_origins
     final_env["BACKEND_ALLOWED_HOSTS"] = config.allowed_hosts
     return final_env
@@ -750,6 +1454,9 @@ def _confirm_mutations(cli_context: CLIContext, config: _ResolvedAzureDeployConf
                 f"resource_group: {config.resource_group}",
                 f"environment: {config.environment_name}",
                 f"app: {config.app_name}",
+                f"acr: {config.acr_name}",
+                f"storage_account: {config.storage_account}",
+                f"postgres_server: {config.postgres_server_name}",
                 f"image_uri: {config.image_uri}",
             ]
         ),

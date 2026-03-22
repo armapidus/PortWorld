@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import sys
 from pathlib import Path
@@ -8,6 +9,11 @@ import subprocess
 from urllib.error import URLError
 
 from backend import __version__
+from portworld_cli.aws.deploy import DeployAWSECSFargateOptions, run_deploy_aws_ecs_fargate
+from portworld_cli.azure.deploy import (
+    DeployAzureContainerAppsOptions,
+    run_deploy_azure_container_apps,
+)
 from portworld_cli.context import CLIContext
 from portworld_cli.deploy.config import DeployGCPCloudRunOptions
 from portworld_cli.deploy.service import run_deploy_gcp_cloud_run
@@ -24,6 +30,11 @@ from portworld_cli.release.lookup import (
     extract_latest_release_tag,
     fetch_latest_release_payload,
     normalize_numeric_package_version,
+)
+from portworld_cli.targets import (
+    TARGET_AWS_ECS_FARGATE,
+    TARGET_AZURE_CONTAINER_APPS,
+    TARGET_GCP_CLOUD_RUN,
 )
 from portworld_cli.workspace.project_config import GCP_CLOUD_RUN_TARGET
 from portworld_cli.services.common import ErrorMappingPolicy, map_command_exception
@@ -42,12 +53,49 @@ UV_TOOL_UPGRADE_COMMAND = "uv tool upgrade {package_name}"
 LEGACY_PIPX_UPGRADE_COMMAND = "python3 -m pipx upgrade {package_name}"
 UPDATE_CLI_COMMAND_NAME = "portworld update cli"
 UPDATE_DEPLOY_COMMAND_NAME = "portworld update deploy"
-WRAPPED_DEPLOY_COMMAND = "portworld deploy gcp-cloud-run"
 SELF_HOST_DOCS_HINT = "See backend/README.md and docs/BACKEND_SELF_HOSTING.md."
 
 
 class UpdateUsageError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class UpdateDeployOptions:
+    project: str | None
+    region: str | None
+    service: str | None
+    artifact_repo: str | None
+    sql_instance: str | None
+    database: str | None
+    bucket: str | None
+    cors_origins: str | None
+    allowed_hosts: str | None
+    tag: str | None
+    min_instances: int | None
+    max_instances: int | None
+    concurrency: int | None
+    cpu: str | None
+    memory: str | None
+    aws_region: str | None
+    aws_service: str | None
+    aws_cluster: str | None
+    aws_vpc_id: str | None
+    aws_subnet_ids: str | None
+    aws_database_url: str | None
+    aws_s3_bucket: str | None
+    aws_ecr_repo: str | None
+    azure_subscription: str | None
+    azure_resource_group: str | None
+    azure_region: str | None
+    azure_environment: str | None
+    azure_app: str | None
+    azure_database_url: str | None
+    azure_storage_account: str | None
+    azure_blob_container: str | None
+    azure_blob_endpoint: str | None
+    azure_acr_server: str | None
+    azure_acr_repo: str | None
 
 
 def run_update_cli(cli_context: CLIContext) -> CommandResult:
@@ -101,7 +149,7 @@ def run_update_cli(cli_context: CLIContext) -> CommandResult:
 
 def run_update_deploy(
     cli_context: CLIContext,
-    options: DeployGCPCloudRunOptions,
+    options: UpdateDeployOptions,
 ) -> CommandResult:
     try:
         session = load_inspection_session(cli_context)
@@ -109,22 +157,19 @@ def run_update_deploy(
         active_target = session.active_target()
         if active_target is None:
             raise UpdateUsageError(
-                "No managed deploy target is configured. Use `portworld deploy gcp-cloud-run` first "
+                "No managed deploy target is configured. Use `portworld deploy <target>` first "
                 "or configure managed cloud defaults with `portworld config edit cloud`."
             )
-        if active_target != GCP_CLOUD_RUN_TARGET:
-            raise UpdateUsageError(f"Managed deploy target '{active_target}' is not supported yet.")
-
-        result = run_deploy_gcp_cloud_run(cli_context, options)
+        result = _dispatch_update_deploy(cli_context, active_target=active_target, options=options)
         wrapped_message = result.message
-        prefix = "Managed redeploy target: gcp-cloud-run"
+        prefix = f"Managed redeploy target: {active_target}"
         if wrapped_message:
             wrapped_message = f"{prefix}\n\n{wrapped_message}"
         else:
             wrapped_message = prefix
         wrapped_data = dict(result.data)
-        wrapped_data["target"] = GCP_CLOUD_RUN_TARGET
-        wrapped_data["wrapped_command"] = WRAPPED_DEPLOY_COMMAND
+        wrapped_data["target"] = active_target
+        wrapped_data["wrapped_command"] = f"portworld deploy {active_target}"
         return CommandResult(
             ok=result.ok,
             command=UPDATE_DEPLOY_COMMAND_NAME,
@@ -139,6 +184,154 @@ def run_update_deploy(
             policy=ErrorMappingPolicy(command_name=UPDATE_DEPLOY_COMMAND_NAME),
             usage_error_types=(UpdateUsageError,),
         )
+
+
+def _dispatch_update_deploy(
+    cli_context: CLIContext,
+    *,
+    active_target: str,
+    options: UpdateDeployOptions,
+) -> CommandResult:
+    if active_target == TARGET_GCP_CLOUD_RUN:
+        _ensure_gcp_only_flags(options)
+        return run_deploy_gcp_cloud_run(
+            cli_context,
+            DeployGCPCloudRunOptions(
+                project=options.project,
+                region=options.region,
+                service=options.service,
+                artifact_repo=options.artifact_repo,
+                sql_instance=options.sql_instance,
+                database=options.database,
+                bucket=options.bucket,
+                cors_origins=options.cors_origins,
+                allowed_hosts=options.allowed_hosts,
+                tag=options.tag,
+                min_instances=options.min_instances,
+                max_instances=options.max_instances,
+                concurrency=options.concurrency,
+                cpu=options.cpu,
+                memory=options.memory,
+            ),
+        )
+    if active_target == TARGET_AWS_ECS_FARGATE:
+        _ensure_aws_only_flags(options)
+        return run_deploy_aws_ecs_fargate(
+            cli_context,
+            DeployAWSECSFargateOptions(
+                region=options.aws_region,
+                cluster=options.aws_cluster,
+                service=options.aws_service,
+                vpc_id=options.aws_vpc_id,
+                subnet_ids=options.aws_subnet_ids,
+                certificate_arn=None,
+                database_url=options.aws_database_url,
+                bucket=options.aws_s3_bucket,
+                alb_url=None,
+                ecr_repo=options.aws_ecr_repo,
+                tag=options.tag,
+                cors_origins=options.cors_origins,
+                allowed_hosts=options.allowed_hosts,
+            ),
+        )
+    if active_target == TARGET_AZURE_CONTAINER_APPS:
+        _ensure_azure_only_flags(options)
+        return run_deploy_azure_container_apps(
+            cli_context,
+            DeployAzureContainerAppsOptions(
+                subscription=options.azure_subscription,
+                resource_group=options.azure_resource_group,
+                region=options.azure_region,
+                environment=options.azure_environment,
+                app=options.azure_app,
+                database_url=options.azure_database_url,
+                storage_account=options.azure_storage_account,
+                blob_container=options.azure_blob_container,
+                blob_endpoint=options.azure_blob_endpoint,
+                acr_server=options.azure_acr_server,
+                acr_repo=options.azure_acr_repo,
+                tag=options.tag,
+                cors_origins=options.cors_origins,
+                allowed_hosts=options.allowed_hosts,
+            ),
+        )
+    raise UpdateUsageError(f"Managed deploy target '{active_target}' is not supported.")
+
+
+def _ensure_gcp_only_flags(options: UpdateDeployOptions) -> None:
+    if _has_aws_flags(options) or _has_azure_flags(options):
+        raise UpdateUsageError(
+            "AWS/Azure flags are not supported when the active managed target is gcp-cloud-run."
+        )
+
+
+def _ensure_aws_only_flags(options: UpdateDeployOptions) -> None:
+    if _has_gcp_flags(options) or _has_azure_flags(options):
+        raise UpdateUsageError(
+            "GCP/Azure flags are not supported when the active managed target is aws-ecs-fargate."
+        )
+
+
+def _ensure_azure_only_flags(options: UpdateDeployOptions) -> None:
+    if _has_gcp_flags(options) or _has_aws_flags(options):
+        raise UpdateUsageError(
+            "GCP/AWS flags are not supported when the active managed target is azure-container-apps."
+        )
+
+
+def _has_gcp_flags(options: UpdateDeployOptions) -> bool:
+    return any(
+        value is not None
+        for value in (
+            options.project,
+            options.region,
+            options.service,
+            options.artifact_repo,
+            options.sql_instance,
+            options.database,
+            options.bucket,
+            options.min_instances,
+            options.max_instances,
+            options.concurrency,
+            options.cpu,
+            options.memory,
+        )
+    )
+
+
+def _has_aws_flags(options: UpdateDeployOptions) -> bool:
+    return any(
+        value is not None
+        for value in (
+            options.aws_region,
+            options.aws_service,
+            options.aws_cluster,
+            options.aws_vpc_id,
+            options.aws_subnet_ids,
+            options.aws_database_url,
+            options.aws_s3_bucket,
+            options.aws_ecr_repo,
+        )
+    )
+
+
+def _has_azure_flags(options: UpdateDeployOptions) -> bool:
+    return any(
+        value is not None
+        for value in (
+            options.azure_subscription,
+            options.azure_resource_group,
+            options.azure_region,
+            options.azure_environment,
+            options.azure_app,
+            options.azure_database_url,
+            options.azure_storage_account,
+            options.azure_blob_container,
+            options.azure_blob_endpoint,
+            options.azure_acr_server,
+            options.azure_acr_repo,
+        )
+    )
 
 
 def _try_resolve_repo_paths(cli_context: CLIContext) -> ProjectPaths | None:

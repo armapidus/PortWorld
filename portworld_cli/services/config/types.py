@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from portworld_cli.envfile import EnvWriteResult
 from portworld_cli.workspace.project_config import (
-    AWSECSFargateConfig,
+    AWSAppRunnerConfig,
     AzureContainerAppsConfig,
     GCPCloudRunConfig,
     ProjectConfig,
@@ -66,7 +66,7 @@ class CloudSectionResult:
     cloud_provider: str | None
     preferred_target: str | None
     gcp_cloud_run: GCPCloudRunConfig
-    aws_ecs_fargate: AWSECSFargateConfig
+    aws_app_runner: AWSAppRunnerConfig
     azure_container_apps: AzureContainerAppsConfig
 
 

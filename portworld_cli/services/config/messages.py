@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from portworld_cli.output import format_key_value_lines
+from portworld_cli.targets import TARGET_GCP_CLOUD_RUN
 from portworld_cli.workspace.project_config import ProjectConfig, RUNTIME_SOURCE_PUBLISHED
 from portworld_cli.services.config.prompts import (
     normalize_backend_profile,
@@ -65,9 +66,14 @@ def build_init_review_lines(
         f"preferred_target: {project_config.deploy.preferred_target or 'none'}",
         f"gcp_project_id: {project_config.deploy.gcp_cloud_run.project_id or 'unset'}",
         f"gcp_region: {project_config.deploy.gcp_cloud_run.region or 'unset'}",
-        f"service_name: {project_config.deploy.gcp_cloud_run.service_name}",
-        f"aws_region: {project_config.deploy.aws_ecs_fargate.region or 'unset'}",
+        f"gcp_service_name: {project_config.deploy.gcp_cloud_run.service_name}",
+        f"aws_region: {project_config.deploy.aws_app_runner.region or 'unset'}",
+        f"aws_ecs_service: {project_config.deploy.aws_app_runner.service_name or 'unset'}",
+        f"azure_subscription_id: {project_config.deploy.azure_container_apps.subscription_id or 'unset'}",
+        f"azure_resource_group: {project_config.deploy.azure_container_apps.resource_group or 'unset'}",
         f"azure_region: {project_config.deploy.azure_container_apps.region or 'unset'}",
+        f"azure_environment_name: {project_config.deploy.azure_container_apps.environment_name or 'unset'}",
+        f"azure_app_name: {project_config.deploy.azure_container_apps.app_name or 'unset'}",
         "managed_target_execution: target-aware deploy/doctor support active",
         f"required_provider_secrets: {_required_secret_status(secret_readiness)}",
         f"missing_provider_secrets: {','.join(secret_readiness.missing_required_secret_keys) or 'none'}",
@@ -85,12 +91,14 @@ def build_init_success_message(
     project_config_path: Path,
     backup_path: Path | None,
     extra_lines: tuple[str, ...] = (),
-    next_steps: tuple[str, ...] = (
-        "next: portworld doctor --target local",
-        "next: portworld config show",
-        "next: portworld deploy gcp-cloud-run",
-    ),
+    next_steps: tuple[str, ...] | None = None,
 ) -> str:
+    if next_steps is None:
+        next_steps = (
+            "next: portworld doctor --target local",
+            "next: portworld config show",
+            f"next: {default_managed_deploy_command(project_config)}",
+        )
     lines = list(
         build_init_review_lines(
             project_config=project_config,
@@ -105,6 +113,14 @@ def build_init_success_message(
     lines.extend(line for line in extra_lines if line)
     lines.extend(next_steps)
     return "\n".join(lines)
+
+
+def default_managed_target(project_config: ProjectConfig) -> str:
+    return project_config.deploy.preferred_target or TARGET_GCP_CLOUD_RUN
+
+
+def default_managed_deploy_command(project_config: ProjectConfig) -> str:
+    return f"portworld deploy {default_managed_target(project_config)}"
 
 
 def build_config_show_message(
@@ -144,11 +160,8 @@ def build_config_show_message(
         ("gcp_project_id", project_config.deploy.gcp_cloud_run.project_id or "unset"),
         ("gcp_region", project_config.deploy.gcp_cloud_run.region or "unset"),
         ("gcp_service_name", project_config.deploy.gcp_cloud_run.service_name),
-        ("aws_region", project_config.deploy.aws_ecs_fargate.region or "unset"),
-        ("aws_cluster_name", project_config.deploy.aws_ecs_fargate.cluster_name or "unset"),
-        ("aws_service_name", project_config.deploy.aws_ecs_fargate.service_name or "unset"),
-        ("aws_vpc_id", project_config.deploy.aws_ecs_fargate.vpc_id or "unset"),
-        ("aws_subnet_ids", ",".join(project_config.deploy.aws_ecs_fargate.subnet_ids) or "unset"),
+        ("aws_region", project_config.deploy.aws_app_runner.region or "unset"),
+        ("aws_ecs_service", project_config.deploy.aws_app_runner.service_name or "unset"),
         (
             "azure_subscription_id",
             project_config.deploy.azure_container_apps.subscription_id or "unset",

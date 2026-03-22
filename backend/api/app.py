@@ -12,7 +12,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from backend.api.routes.health import router as health_router
 from backend.api.routes.memory_admin import router as memory_admin_router
-from backend.api.routes.profile import router as profile_router
+from backend.api.routes.profile import router as user_memory_router
 from backend.api.routes.session_ws import router as session_ws_router
 from backend.api.routes.vision import router as vision_router
 from backend.core.constants import SERVICE_NAME
@@ -80,6 +80,21 @@ class VisionPayloadLimitMiddleware:
         await self._app(scope, receive, send)
 
 
+class HealthAwareTrustedHostMiddleware:
+    def __init__(self, app: ASGIApp, *, allowed_hosts: list[str]) -> None:
+        self._app = app
+        self._trusted = TrustedHostMiddleware(app, allowed_hosts=allowed_hosts)
+        self._health_paths = {"/healthz", "/livez", "/readyz"}
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        # ALB health checks may use an IP-based Host header; bypass host checks
+        # only for explicit health endpoints and keep validation for all other paths.
+        if scope["type"] == "http" and scope["path"] in self._health_paths:
+            await self._app(scope, receive, send)
+            return
+        await self._trusted(scope, receive, send)
+
+
 async def _vision_payload_too_large_response(
     *,
     scope: Scope,
@@ -126,7 +141,7 @@ def create_app_from_settings(settings: Settings) -> FastAPI:
 
     allow_all = settings.cors_origins == ["*"]
     app.add_middleware(
-        TrustedHostMiddleware,
+        HealthAwareTrustedHostMiddleware,
         allowed_hosts=settings.backend_allowed_hosts,
     )
     app.add_middleware(
@@ -143,7 +158,7 @@ def create_app_from_settings(settings: Settings) -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(memory_admin_router)
-    app.include_router(profile_router)
+    app.include_router(user_memory_router)
     app.include_router(vision_router)
     app.include_router(session_ws_router)
     return app

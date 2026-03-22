@@ -24,7 +24,11 @@ from portworld_cli.workspace.project_config import (
     ProjectConfig,
     build_env_overrides_from_project_config,
 )
-from portworld_cli.targets import MANAGED_TARGETS
+from portworld_cli.targets import (
+    MANAGED_TARGETS,
+    TARGET_AWS_ECS_FARGATE,
+    TARGET_AZURE_CONTAINER_APPS,
+)
 from portworld_cli.workspace.discovery.locator import ResolvedWorkspace, resolve_workspace
 from portworld_cli.workspace.store import WorkspaceStoreSnapshot, load_workspace_store
 from portworld_cli.workspace.state.state_store import read_json_state
@@ -246,6 +250,25 @@ class ResolvedGCPInspectionTarget:
         return bool(self.project_id and self.region and self.service_name)
 
 
+@dataclass(frozen=True, slots=True)
+class ResolvedAWSInspectionTarget:
+    region: str | None
+    service_name: str | None
+
+    def is_complete(self) -> bool:
+        return bool(self.region and self.service_name)
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedAzureInspectionTarget:
+    subscription_id: str | None
+    resource_group: str | None
+    app_name: str | None
+
+    def is_complete(self) -> bool:
+        return bool(self.subscription_id and self.resource_group and self.app_name)
+
+
 def load_workspace_session(cli_context: CLIContext) -> WorkspaceSession:
     resolved_workspace = resolve_workspace(
         explicit_root=cli_context.project_root_override,
@@ -342,6 +365,42 @@ def resolve_gcp_inspection_target(
         service_name=_strip(service_name)
         or session.deploy_state.service_name
         or _strip(gcp_config.service_name),
+    )
+
+
+def resolve_aws_inspection_target(
+    session: InspectionSession,
+    *,
+    region: str | None = None,
+    service_name: str | None = None,
+) -> ResolvedAWSInspectionTarget:
+    aws_config = session.project_config.deploy.aws_ecs_fargate
+    aws_state = session.deploy_states_by_target.get(TARGET_AWS_ECS_FARGATE, DeployState.from_payload({}))
+    return ResolvedAWSInspectionTarget(
+        region=_strip(region) or aws_state.region or _strip(aws_config.region),
+        service_name=_strip(service_name)
+        or aws_state.service_name
+        or _strip(aws_config.service_name)
+        or _strip(aws_config.cluster_name),
+    )
+
+
+def resolve_azure_inspection_target(
+    session: InspectionSession,
+    *,
+    subscription_id: str | None = None,
+    resource_group: str | None = None,
+    app_name: str | None = None,
+) -> ResolvedAzureInspectionTarget:
+    azure_config = session.project_config.deploy.azure_container_apps
+    azure_state = session.deploy_states_by_target.get(
+        TARGET_AZURE_CONTAINER_APPS,
+        DeployState.from_payload({}),
+    )
+    return ResolvedAzureInspectionTarget(
+        subscription_id=_strip(subscription_id) or azure_state.project_id or _strip(azure_config.subscription_id),
+        resource_group=_strip(resource_group) or _strip(azure_config.resource_group),
+        app_name=_strip(app_name) or azure_state.service_name or _strip(azure_config.app_name),
     )
 
 

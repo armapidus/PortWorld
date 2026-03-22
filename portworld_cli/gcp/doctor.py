@@ -556,6 +556,60 @@ def _build_runtime_validation_checks(settings: Settings) -> tuple[DiagnosticChec
                 action="Fix the backend provider or feature settings in backend/.env.",
             )
         )
+    checks.extend(_build_managed_storage_architecture_checks(settings))
+    return tuple(checks)
+
+
+def _build_managed_storage_architecture_checks(settings: Settings) -> tuple[DiagnosticCheck, ...]:
+    checks: list[DiagnosticCheck] = []
+    checks.append(
+        DiagnosticCheck(
+            id="managed_memory_architecture",
+            status="pass",
+            message=(
+                "Recommended managed GCP architecture uses object-store files as memory source of truth; "
+                "Cloud SQL is reserved for operational runtime metadata."
+            ),
+        )
+    )
+    checks.append(
+        DiagnosticCheck(
+            id="managed_storage_backend_shape",
+            status="pass" if settings.backend_storage_backend == "managed" else "warn",
+            message=(
+                "BACKEND_STORAGE_BACKEND is already managed."
+                if settings.backend_storage_backend == "managed"
+                else (
+                    f"BACKEND_STORAGE_BACKEND is '{settings.backend_storage_backend}'; "
+                    "deploy will override it to managed."
+                )
+            ),
+            action=(
+                None
+                if settings.backend_storage_backend == "managed"
+                else "No local change is required; deploy will set BACKEND_STORAGE_BACKEND=managed."
+            ),
+        )
+    )
+    checks.append(
+        DiagnosticCheck(
+            id="managed_object_store_provider_shape",
+            status="pass" if settings.backend_object_store_provider == "gcs" else "warn",
+            message=(
+                "BACKEND_OBJECT_STORE_PROVIDER is already gcs."
+                if settings.backend_object_store_provider == "gcs"
+                else (
+                    f"BACKEND_OBJECT_STORE_PROVIDER is '{settings.backend_object_store_provider}'; "
+                    "deploy will override it to gcs."
+                )
+            ),
+            action=(
+                None
+                if settings.backend_object_store_provider == "gcs"
+                else "No local change is required; deploy will set BACKEND_OBJECT_STORE_PROVIDER=gcs."
+            ),
+        )
+    )
     return tuple(checks)
 
 

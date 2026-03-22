@@ -206,6 +206,14 @@ def validate_final_settings(
         settings = Settings.from_env()
         settings.validate_production_posture()
         settings.validate_storage_contract()
+        if settings.backend_storage_backend != "managed":
+            raise RuntimeError(
+                "Managed Cloud Run deploy requires BACKEND_STORAGE_BACKEND=managed."
+            )
+        if settings.backend_object_store_provider != "gcs":
+            raise RuntimeError(
+                "Managed Cloud Run deploy requires BACKEND_OBJECT_STORE_PROVIDER=gcs."
+            )
 
 
 def deploy_cloud_run_service(

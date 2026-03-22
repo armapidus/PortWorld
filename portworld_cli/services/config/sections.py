@@ -9,9 +9,10 @@ from portworld_cli.targets import (
     TARGET_AWS_ECS_FARGATE,
     TARGET_AZURE_CONTAINER_APPS,
     TARGET_GCP_CLOUD_RUN,
+    normalize_managed_target,
 )
 from portworld_cli.workspace.project_config import (
-    AWSECSFargateConfig,
+    AWSAppRunnerConfig,
     AzureContainerAppsConfig,
     GCP_CLOUD_RUN_TARGET,
     PROJECT_MODE_LOCAL,
@@ -110,7 +111,8 @@ def collect_cloud_section(
     )
     current_cloud_provider = session.project_config.cloud_provider or CLOUD_PROVIDER_GCP
     current_preferred_target = (
-        session.project_config.deploy.preferred_target or _target_for_provider(current_cloud_provider)
+        normalize_managed_target(session.project_config.deploy.preferred_target)
+        or _target_for_provider(current_cloud_provider)
     )
     cloud_provider = resolve_choice_value(
         session.cli_context,
@@ -124,7 +126,7 @@ def collect_cloud_section(
         session.cli_context,
         prompt="Managed target",
         current_value=current_preferred_target,
-        explicit_value=options.target,
+        explicit_value=normalize_managed_target(options.target) or options.target,
         choices=(TARGET_GCP_CLOUD_RUN, TARGET_AWS_ECS_FARGATE, TARGET_AZURE_CONTAINER_APPS),
     )
     if project_mode == PROJECT_MODE_MANAGED and preferred_target != default_target:
@@ -133,7 +135,7 @@ def collect_cloud_section(
         )
 
     current_gcp = session.project_config.deploy.gcp_cloud_run
-    current_aws = session.project_config.deploy.aws_ecs_fargate
+    current_aws = session.project_config.deploy.aws_app_runner
     current_azure = session.project_config.deploy.azure_container_apps
     explicit_cloud_change = any(
         value is not None
@@ -169,7 +171,7 @@ def collect_cloud_section(
     )
 
     gcp_cloud_run = current_gcp
-    aws_ecs_fargate = current_aws
+    aws_app_runner = current_aws
     azure_container_apps = current_azure
     if collect_defaults and cloud_provider == CLOUD_PROVIDER_GCP:
         project_id = resolve_optional_text_value(
@@ -267,24 +269,27 @@ def collect_cloud_section(
             memory=memory,
         )
     if collect_defaults and cloud_provider == CLOUD_PROVIDER_AWS:
-        aws_subnet_ids = _resolve_optional_csv(
-            cli_context=session.cli_context,
-            prompt="AWS subnet ids (comma-separated)",
-            current_values=current_aws.subnet_ids,
-            explicit_value=options.aws_subnet_ids,
+        aws_subnet_ids = (
+            _parse_csv_text(options.aws_subnet_ids)
+            if options.aws_subnet_ids is not None
+            else current_aws.subnet_ids
         )
-        aws_ecs_fargate = AWSECSFargateConfig(
+        aws_app_runner = AWSAppRunnerConfig(
             region=resolve_optional_text_value(
                 session.cli_context,
                 prompt="AWS region",
                 current_value=current_aws.region,
                 explicit_value=options.aws_region,
             ),
-            cluster_name=resolve_optional_text_value(
-                session.cli_context,
-                prompt="AWS ECS cluster name",
-                current_value=current_aws.cluster_name,
-                explicit_value=options.aws_cluster,
+            cluster_name=(
+                resolve_optional_text_value(
+                    session.cli_context,
+                    prompt="Legacy AWS service alias",
+                    current_value=current_aws.cluster_name,
+                    explicit_value=options.aws_cluster,
+                )
+                if options.aws_cluster is not None
+                else current_aws.cluster_name
             ),
             service_name=resolve_optional_text_value(
                 session.cli_context,
@@ -292,11 +297,15 @@ def collect_cloud_section(
                 current_value=current_aws.service_name,
                 explicit_value=options.aws_service,
             ),
-            vpc_id=resolve_optional_text_value(
-                session.cli_context,
-                prompt="AWS VPC id",
-                current_value=current_aws.vpc_id,
-                explicit_value=options.aws_vpc_id,
+            vpc_id=(
+                resolve_optional_text_value(
+                    session.cli_context,
+                    prompt="AWS VPC id",
+                    current_value=current_aws.vpc_id,
+                    explicit_value=options.aws_vpc_id,
+                )
+                if options.aws_vpc_id is not None
+                else current_aws.vpc_id
             ),
             subnet_ids=aws_subnet_ids,
         )
@@ -344,7 +353,7 @@ def collect_cloud_section(
         cloud_provider=cloud_provider,
         preferred_target=preferred_target,
         gcp_cloud_run=gcp_cloud_run,
-        aws_ecs_fargate=aws_ecs_fargate,
+        aws_app_runner=aws_app_runner,
         azure_container_apps=azure_container_apps,
     )
 
@@ -383,7 +392,7 @@ def apply_cloud_section(
         deploy=type(project_config.deploy)(
             preferred_target=result.preferred_target,
             gcp_cloud_run=result.gcp_cloud_run,
-            aws_ecs_fargate=result.aws_ecs_fargate,
+            aws_app_runner=result.aws_app_runner,
             azure_container_apps=result.azure_container_apps,
             published_runtime=project_config.deploy.published_runtime,
         ),
