@@ -8,6 +8,8 @@ from typing import Protocol
 
 from backend.core.settings import Settings
 from backend.core.storage import BackendStorage, RealtimeReadOnlyStorageView
+from backend.extensions.models import ExtensionHealthSummary
+from backend.extensions.runtime import ExtensionRuntime
 from backend.memory.lifecycle import PROFILE_ALLOWLISTED_FIELDS
 from backend.tools.contracts import ToolCall, ToolDefinition, ToolResult
 from backend.tools.memory import MemoryToolExecutor
@@ -268,6 +270,7 @@ class RealtimeToolingRuntime:
     tool_timeout_ms: int
     web_search_max_results: int
     registry: RealtimeToolRegistry
+    extension_runtime: ExtensionRuntime = field(repr=False, compare=False)
     search_provider_factory: SearchProviderFactory = field(repr=False, compare=False)
 
     @classmethod
@@ -281,14 +284,20 @@ class RealtimeToolingRuntime:
         search_provider_factory = SearchProviderFactory(settings=settings)
         web_search_provider, search_provider = search_provider_factory.build_if_enabled()
         web_search_enabled = search_provider is not None
+        context = ToolCatalogContext(
+            storage=read_only_storage,
+            profile_storage=storage,
+            search_provider=search_provider,
+            web_search_provider=web_search_provider,
+            web_search_max_results=settings.realtime_web_search_max_results,
+        )
+        extension_runtime = ExtensionRuntime.from_settings(
+            settings=settings,
+            context=context,
+        )
         registry = cls._build_registry(
-            context=ToolCatalogContext(
-                storage=read_only_storage,
-                profile_storage=storage,
-                search_provider=search_provider,
-                web_search_provider=web_search_provider,
-                web_search_max_results=settings.realtime_web_search_max_results,
-            )
+            context=context,
+            extension_runtime=extension_runtime,
         )
         return cls(
             settings=settings,
@@ -299,6 +308,7 @@ class RealtimeToolingRuntime:
             tool_timeout_ms=settings.realtime_tool_timeout_ms,
             web_search_max_results=settings.realtime_web_search_max_results,
             registry=registry,
+            extension_runtime=extension_runtime,
             search_provider_factory=search_provider_factory,
         )
 
@@ -306,9 +316,12 @@ class RealtimeToolingRuntime:
     def _build_registry(
         *,
         context: ToolCatalogContext,
+        extension_runtime: ExtensionRuntime,
     ) -> RealtimeToolRegistry:
         registry = RealtimeToolRegistry()
         for contributor in DEFAULT_TOOL_CATALOG_CONTRIBUTORS:
+            contributor(registry=registry, context=context)
+        for contributor in extension_runtime.contributors:
             contributor(registry=registry, context=context)
         return registry
 
@@ -332,8 +345,13 @@ class RealtimeToolingRuntime:
             tool_timeout_ms=self.tool_timeout_ms,
             web_search_max_results=self.web_search_max_results,
             registry=filtered_registry,
+            extension_runtime=self.extension_runtime,
             search_provider_factory=self.search_provider_factory,
         )
+
+    @property
+    def extension_health(self) -> ExtensionHealthSummary:
+        return self.extension_runtime.summary()
 
     async def execute(self, call: ToolCall) -> ToolResult:
         try:
@@ -505,7 +523,9 @@ class RealtimeToolingRuntime:
     async def startup(self) -> None:
         if self.search_provider is not None:
             await self.search_provider.startup()
+        await self.extension_runtime.startup(registry=self.registry)
 
     async def shutdown(self) -> None:
+        await self.extension_runtime.shutdown()
         if self.search_provider is not None:
             await self.search_provider.shutdown()
