@@ -49,8 +49,8 @@ portworld status
 
 Example extension manifests for the filesystem MCP server:
 
-- local/source runtime: [mcp-filesystem-local.extensions.json](/Users/pierrehaas/.codex/worktrees/30fa/PortWorld/docs/operations/examples/mcp-filesystem-local.extensions.json)
-- published/container runtime: [mcp-filesystem-published.extensions.json](/Users/pierrehaas/.codex/worktrees/30fa/PortWorld/docs/operations/examples/mcp-filesystem-published.extensions.json)
+- local/source runtime: `docs/operations/examples/mcp-filesystem-local.extensions.json`
+- published/container runtime: `docs/operations/examples/mcp-filesystem-published.extensions.json`
 
 Manual install fallback for a pinned release version:
 
@@ -130,8 +130,8 @@ Data is persisted in a named Docker volume (`portworld_backend_var`).
 ### Bare Uvicorn
 
 ```bash
+pip install .
 cd backend
-pip install -r requirements.txt
 cp .env.example .env
 # Open .env and set the credentials required by your selected providers
 python -m backend.cli serve
@@ -144,7 +144,7 @@ curl http://127.0.0.1:8080/livez
 # → {"status":"ok","service":"portworld-backend"}
 ```
 
-Use `/livez` for public and Cloud Run liveness checks. `/healthz` remains available as a compatibility alias for older local tooling.
+Use `/livez` for public and Cloud Run liveness checks.
 
 ## Configuration
 
@@ -204,7 +204,6 @@ Set `BACKEND_PROFILE=production` to enforce the following at startup:
 
 - `local` for SQLite + filesystem (default)
 - `managed` for Postgres + object store
-- `postgres_gcs` as a compatibility alias that is normalized to `managed`
 
 Managed storage uses these canonical object-store variables:
 
@@ -214,10 +213,6 @@ Managed storage uses these canonical object-store variables:
 | `BACKEND_OBJECT_STORE_NAME` | Bucket/container name for the managed object store |
 | `BACKEND_OBJECT_STORE_ENDPOINT` | Optional custom endpoint (required for `azure_blob`) |
 | `BACKEND_OBJECT_STORE_PREFIX` | Prefix used for artifact paths |
-
-Compatibility alias:
-
-- `BACKEND_OBJECT_STORE_BUCKET` is still accepted when `BACKEND_OBJECT_STORE_NAME` is unset.
 
 **Rate limiting**
 
@@ -238,7 +233,6 @@ openssl rand -hex 32
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/livez` | None | Public liveness probe |
-| `GET` | `/healthz` | None | Compatibility liveness alias |
 | `GET` | `/readyz` | Bearer | Readiness probe — checks storage and provider config |
 | `WS` | `/ws/session` | Bearer | Realtime voice session |
 | `POST` | `/vision/frame` | Bearer | Ingest a base64-encoded JPEG frame |

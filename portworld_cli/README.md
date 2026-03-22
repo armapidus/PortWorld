@@ -59,8 +59,8 @@ This flow:
 
 Example extension manifests for the filesystem MCP server:
 
-- local/source runtime: [mcp-filesystem-local.extensions.json](/Users/pierrehaas/.codex/worktrees/30fa/PortWorld/docs/operations/examples/mcp-filesystem-local.extensions.json)
-- published/container runtime: [mcp-filesystem-published.extensions.json](/Users/pierrehaas/.codex/worktrees/30fa/PortWorld/docs/operations/examples/mcp-filesystem-published.extensions.json)
+- local/source runtime: `docs/operations/examples/mcp-filesystem-local.extensions.json`
+- published/container runtime: `docs/operations/examples/mcp-filesystem-published.extensions.json`
 
 ## Contributor Path
 

@@ -66,7 +66,7 @@ cd PortWorld
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
-pip install -r backend/requirements.txt
+pip install .
 ```
 
 ### 2) Configure Backend Environment
@@ -93,7 +93,6 @@ python -m backend.cli serve
 
 ```bash
 curl -sS http://127.0.0.1:8080/livez | jq
-curl -sS http://127.0.0.1:8080/healthz | jq
 ```
 
 ## iOS Setup (Simulator + Real iPhone)
@@ -155,7 +154,6 @@ Backend should log a `POST /v1/pipeline/tts-stream` request.
 
 ## Backend API Surface
 
-- `GET /healthz`
 - `GET /v1/debug/endpoints`
 - `GET /v1/agents`
 - `GET /v1/config/quickstart-template`
