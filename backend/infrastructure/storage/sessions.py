@@ -8,6 +8,7 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
 
+from backend.infrastructure.storage.common.memory_markdown import parse_csv_list as common_parse_csv_list
 from backend.infrastructure.storage.errors import SessionNotFoundError
 from backend.infrastructure.storage.types import SessionMemoryResetResult, SessionStorageResult, now_ms
 from backend.memory.candidates import MemoryCandidate, coerce_memory_candidate
@@ -689,13 +690,7 @@ class SessionStorageMixin:
 
 
 def _parse_csv_list(raw_value: str) -> list[str]:
-    values: list[str] = []
-    for item in raw_value.split(","):
-        candidate = item.strip()
-        if not candidate:
-            continue
-        values.append(candidate)
-    return values
+    return common_parse_csv_list(raw_value)
 
 
 def _parse_section_key_value_bullets(markdown: str, *, section_name: str) -> dict[str, Any]:
