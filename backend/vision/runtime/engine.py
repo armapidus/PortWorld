@@ -7,6 +7,10 @@ from typing import Any
 
 from backend.core.settings import Settings
 from backend.core.storage import BackendStorage, now_ms
+from backend.memory.materializer import (
+    coerce_session_memory_payload,
+    coerce_short_term_memory_payload,
+)
 from backend.vision.contracts import (
     VisionAnalyzer,
     VisionFrameContext,
@@ -15,6 +19,7 @@ from backend.vision.contracts import (
 from backend.vision.policy.gating import (
     VisionGateError,
     VisionProviderBudgetState,
+    VisionRouteDecision,
     VisionSignalSnapshot,
     decide_vision_route,
 )
@@ -54,9 +59,12 @@ class VisionMemoryRuntime(
     )
     _workers_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
     _shutdown_requested: bool = field(default=False, init=False, repr=False)
+    _storage_supports_short_term_payload: bool | None = field(default=None, init=False, repr=False)
+    _storage_supports_session_payload: bool | None = field(default=None, init=False, repr=False)
 
     async def startup(self) -> None:
         await self.analyzer.startup()
+        self._initialize_storage_writer_capabilities()
         self._shutdown_requested = False
         self.started = True
 
@@ -102,6 +110,8 @@ class VisionMemoryRuntime(
         routing_score: float | None = None,
         routing_metadata: dict[str, Any] | None = None,
     ) -> None:
+        resolved_provider = provider if provider is not None else self.provider_name
+        resolved_model = model if model is not None else self.model_name
         await self._run_storage(
             self.storage.update_vision_frame_processing,
             session_id=session_id,
@@ -110,8 +120,8 @@ class VisionMemoryRuntime(
             gate_status=gate_status,
             gate_reason=gate_reason,
             phash=phash,
-            provider=provider,
-            model=model,
+            provider=resolved_provider,
+            model=resolved_model,
             analyzed_at_ms=analyzed_at_ms,
             next_retry_at_ms=next_retry_at_ms,
             attempt_count=attempt_count,
@@ -361,10 +371,12 @@ class VisionMemoryRuntime(
             self.storage.read_short_term_memory,
             session_id=session_id,
         )
-        session_updated_at_ms = coerce_optional_int(previous_session_memory.get("updated_at_ms"))
+        session_payload = coerce_session_memory_payload(previous_session_memory)
+        short_term_payload = coerce_short_term_memory_payload(previous_short_term_memory)
+        session_updated_at_ms = coerce_optional_int(session_payload.get("updated_at_ms"))
         accepted_event_count = len(accepted_events)
         short_term_updated_at_ms = (
-            coerce_positive_optional_int(previous_short_term_memory.get("window_end_ts_ms"))
+            coerce_positive_optional_int(short_term_payload.get("window_end_ts_ms"))
             if accepted_event_count > 0
             else None
         )
@@ -519,11 +531,12 @@ class VisionMemoryRuntime(
                 provider_budget_state=budget_state,
             )
             return
-        await self._analyze_now(
+        await self._execute_non_deferred_route_action(
             worker=worker,
             pending_frame=pending_frame,
             signal=signal,
             route=route,
+            provider_budget_state=budget_state,
         )
 
     async def _process_deferred_candidate(
@@ -612,27 +625,44 @@ class VisionMemoryRuntime(
             )
             return
         worker.best_deferred_candidate = None
+        await self._execute_non_deferred_route_action(
+            worker=worker,
+            pending_frame=deferred.pending_frame,
+            signal=signal,
+            route=route,
+            provider_budget_state=budget_state,
+        )
+
+    async def _execute_non_deferred_route_action(
+        self,
+        *,
+        worker: SessionVisionWorker,
+        pending_frame: PendingVisionFrame,
+        signal: VisionSignalSnapshot,
+        route: VisionRouteDecision,
+        provider_budget_state: VisionProviderBudgetState,
+    ) -> None:
         if route.action == "drop_redundant":
             await self._mark_drop_redundant(
-                pending_frame=deferred.pending_frame,
+                pending_frame=pending_frame,
                 signal=signal,
                 route=route,
-                provider_budget_state=budget_state,
+                provider_budget_state=provider_budget_state,
                 reason=route.reason,
             )
             return
         if route.action == "store_only":
             await self._mark_store_only(
-                pending_frame=deferred.pending_frame,
+                pending_frame=pending_frame,
                 signal=signal,
                 route=route,
-                provider_budget_state=budget_state,
+                provider_budget_state=provider_budget_state,
                 reason=route.reason,
             )
             return
         await self._analyze_now(
             worker=worker,
-            pending_frame=deferred.pending_frame,
+            pending_frame=pending_frame,
             signal=signal,
             route=route,
         )

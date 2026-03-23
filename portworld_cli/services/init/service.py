@@ -32,6 +32,7 @@ from portworld_cli.services.config.edit_service import confirm_apply
 from portworld_cli.services.config.messages import (
     build_init_review_lines,
     build_init_success_message,
+    default_managed_deploy_command,
 )
 from portworld_cli.services.config.persistence import (
     preview_secret_readiness,
@@ -69,9 +70,6 @@ class InitOptions:
     realtime_api_key: str | None
     vision_api_key: str | None
     search_api_key: str | None
-    openai_api_key: str | None
-    vision_provider_api_key: str | None
-    tavily_api_key: str | None
     backend_profile: str | None
     cors_origins: str | None
     allowed_hosts: str | None
@@ -215,7 +213,7 @@ def _run_source_init(cli_context: CLIContext, options: InitOptions) -> CommandRe
                 "next: portworld doctor --target local",
                 "next: docker compose up --build",
                 "next: portworld config show",
-                "next: portworld deploy gcp-cloud-run",
+                f"next: {default_managed_deploy_command(write_outcome.project_config)}",
             ),
         ),
         data={
@@ -376,7 +374,7 @@ def _run_published_init(
                         "next: docker compose up -d",
                         "next: portworld doctor --target local",
                         "next: portworld status",
-                        "next: portworld deploy gcp-cloud-run",
+                        f"next: {default_managed_deploy_command(project_config)}",
                     ),
                 ),
             )
@@ -434,9 +432,6 @@ def _collect_init_sections(
             realtime_api_key=options.realtime_api_key,
             vision_api_key=options.vision_api_key,
             search_api_key=options.search_api_key,
-            openai_api_key=options.openai_api_key,
-            vision_provider_api_key=options.vision_provider_api_key,
-            tavily_api_key=options.tavily_api_key,
         ),
     )
     project_config, env_updates = apply_provider_section(

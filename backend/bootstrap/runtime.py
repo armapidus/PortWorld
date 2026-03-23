@@ -7,6 +7,7 @@ from backend.core.storage import BackendStorage, StorageInfo, StoragePaths
 from backend.infrastructure.storage.object_store import build_object_store
 from backend.infrastructure.storage.local import LocalBackendStorage
 from backend.infrastructure.storage.managed import ManagedBackendStorage
+from backend.memory.consolidation import DurableMemoryConsolidationRuntime
 from backend.realtime.factory import RealtimeProviderFactory
 from backend.tools.runtime import RealtimeToolingRuntime
 from backend.vision.factory import VisionAnalyzerFactory
@@ -20,6 +21,7 @@ class RuntimeDependencies:
     realtime_provider_factory: RealtimeProviderFactory
     vision_memory_runtime: VisionMemoryRuntime | None
     realtime_tooling_runtime: RealtimeToolingRuntime | None
+    durable_memory_runtime: DurableMemoryConsolidationRuntime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,7 +95,7 @@ def build_backend_storage(settings: Settings) -> tuple[StorageInfo, BackendStora
         database_url=settings.backend_database_url or "",
         object_store=build_object_store(
             provider=settings.backend_object_store_provider,
-            store_name=settings.backend_object_store_name or settings.backend_object_store_bucket or "",
+            store_name=settings.backend_object_store_name or "",
             endpoint=settings.backend_object_store_endpoint,
             key_prefix=settings.backend_object_store_prefix or "",
         ),
@@ -107,14 +109,19 @@ def build_storage_paths(settings: Settings) -> StoragePaths:
             "Local storage paths are only defined when "
             "BACKEND_STORAGE_BACKEND=local."
         )
+    memory_root = settings.backend_data_dir / "memory"
+    user_memory_path = memory_root / "USER.md"
+    cross_session_memory_path = memory_root / "CROSS_SESSION.md"
     return StoragePaths(
         data_root=settings.backend_data_dir,
-        user_root=settings.backend_data_dir / "user",
-        session_root=settings.backend_data_dir / "session",
+        memory_root=memory_root,
+        user_root=memory_root,
+        session_root=memory_root / "sessions",
         vision_frames_root=settings.backend_data_dir / "vision_frames",
         sqlite_path=settings.backend_sqlite_path,
-        user_profile_markdown_path=settings.backend_data_dir / "user" / "user_profile.md",
-        user_profile_json_path=settings.backend_data_dir / "user" / "user_profile.json",
+        user_memory_path=user_memory_path,
+        cross_session_memory_path=cross_session_memory_path,
+        user_profile_markdown_path=user_memory_path,
     )
 
 
@@ -126,9 +133,13 @@ def build_runtime_dependencies(settings: Settings) -> RuntimeDependencies:
     realtime_provider_factory.validate_startup_configuration()
 
     vision_memory_runtime = None
-    if settings.vision_memory_enabled:
+    analyzer_factory = None
+    if settings.vision_memory_enabled or settings.memory_consolidation_enabled:
         analyzer_factory = VisionAnalyzerFactory(settings=settings)
         analyzer_factory.validate_configuration()
+
+    if settings.vision_memory_enabled:
+        assert analyzer_factory is not None
         vision_memory_runtime = VisionMemoryRuntime(
             settings=settings,
             storage=storage,
@@ -147,12 +158,20 @@ def build_runtime_dependencies(settings: Settings) -> RuntimeDependencies:
             storage=storage,
         )
 
+    durable_memory_runtime = None
+    if settings.memory_consolidation_enabled:
+        durable_memory_runtime = DurableMemoryConsolidationRuntime(
+            settings=settings,
+            storage=storage,
+        )
+
     return RuntimeDependencies(
         storage_info=storage_info,
         storage=storage,
         realtime_provider_factory=realtime_provider_factory,
         vision_memory_runtime=vision_memory_runtime,
         realtime_tooling_runtime=realtime_tooling_runtime,
+        durable_memory_runtime=durable_memory_runtime,
     )
 
 
@@ -173,7 +192,7 @@ def check_runtime_configuration(
     dependencies.realtime_provider_factory.validate_configuration()
 
     vision_provider = None
-    if settings.vision_memory_enabled:
+    if settings.vision_memory_enabled or settings.memory_consolidation_enabled:
         vision_factory = VisionAnalyzerFactory(settings=settings)
         vision_factory.validate_configuration()
         vision_provider = vision_factory.provider_name

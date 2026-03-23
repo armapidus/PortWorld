@@ -5,8 +5,9 @@ FastAPI + Uvicorn backend that relays realtime voice sessions through selectable
 ## Features
 
 - **Realtime voice relay** — bridges a WebSocket audio session to the selected realtime provider; streams assistant audio back to the client
-- **Persistent memory** — SQLite + filesystem storage for session memory and a user profile, with configurable retention
+- **Persistent memory** — canonical markdown memory files (`USER.md`, `CROSS_SESSION.md`, per-session `SHORT_TERM.md` / `LONG_TERM.md`) with configurable retention
 - **Visual memory** *(opt-in)* — ingests JPEG frames via `POST /vision/frame`, routes them through adaptive scene-change gating, and builds semantic session memory using pluggable vision providers, including native Mistral and NVIDIA Integrate
+- **Durable-memory consolidation** *(opt-in)* — rewrites `USER.md` and `CROSS_SESSION.md` at session close using the same provider/model surface as visual memory
 - **Realtime tooling** *(opt-in)* — registers memory-recall tools with the active OpenAI session; optionally adds web search via Tavily
 - **Bearer token auth** — all non-health endpoints can require `Authorization: Bearer <token>`; production mode enforces this at startup
 - **Rate limiting** — sliding-window limits on WebSocket setup, session activation, vision ingest, and protected profile/memory-admin HTTP routes
@@ -73,14 +74,24 @@ portworld init
 
 Run the contributor/source path from the repo root. The operator path is the default public flow.
 
-For managed deploys, the public path is:
+For managed deploys in the current MVP, use one of the public managed targets:
 
 ```bash
 portworld doctor --target gcp-cloud-run --project <project> --region <region>
 portworld deploy gcp-cloud-run --project <project> --region <region> --cors-origins https://app.example.com
+
+portworld doctor --target aws-ecs-fargate --aws-region <region>
+portworld deploy aws-ecs-fargate --region <region> --cors-origins https://app.example.com
+
+portworld doctor --target azure-container-apps --azure-subscription <subscription> --azure-resource-group <resource-group> --azure-region <region>
+portworld deploy azure-container-apps --subscription <subscription> --resource-group <resource-group> --region <region> --cors-origins https://app.example.com
 ```
 
-Repeat Cloud Run deploys reuse `.portworld/state/gcp-cloud-run.json` after explicit flags and current `gcloud` config.
+Repeat deploys reuse the target state file under `.portworld/state/` after explicit flags and current cloud CLI auth/config:
+
+- `.portworld/state/gcp-cloud-run.json`
+- `.portworld/state/aws-ecs-fargate.json`
+- `.portworld/state/azure-container-apps.json`
 
 For CLI updates:
 
@@ -150,6 +161,7 @@ Legacy provider alias keys are not supported. Use canonical provider-scoped keys
 | `REALTIME_PROVIDER` | Realtime provider id (`openai` or `gemini_live`) |
 | `VISION_MEMORY_ENABLED` | Set `true` to enable the vision provider pipeline |
 | `VISION_MEMORY_PROVIDER` | Vision provider id when vision is enabled (`mistral`, `nvidia_integrate`, `openai`, `azure_openai`, `gemini`, `claude`, `bedrock`, or `groq`) |
+| `MEMORY_CONSOLIDATION_ENABLED` | Enables durable-memory rewrite at session close; reuses `VISION_MEMORY_PROVIDER` and that provider's credentials/model. Defaults to the current `VISION_MEMORY_ENABLED` value when unset |
 | `REALTIME_TOOLING_ENABLED` | Set `true` to enable realtime tooling |
 | `REALTIME_WEB_SEARCH_PROVIDER` | Search provider id when tooling is enabled (currently `tavily`) |
 
@@ -173,6 +185,8 @@ Legacy provider alias keys are not supported. Use canonical provider-scoped keys
 | `bedrock` | required config: `VISION_BEDROCK_REGION` (optional AWS credentials: `VISION_BEDROCK_AWS_ACCESS_KEY_ID`, `VISION_BEDROCK_AWS_SECRET_ACCESS_KEY`, `VISION_BEDROCK_AWS_SESSION_TOKEN`) |
 | `groq` | `VISION_GROQ_API_KEY` |
 
+When `MEMORY_CONSOLIDATION_ENABLED=true`, the same `VISION_MEMORY_PROVIDER` credentials and model are also used for durable-memory consolidation, even if `VISION_MEMORY_ENABLED=false`.
+
 **Search provider required keys (when `REALTIME_TOOLING_ENABLED=true`)**
 
 | Provider id | Required key(s) |
@@ -194,10 +208,9 @@ Set `BACKEND_PROFILE=production` to enforce the following at startup:
 `BACKEND_STORAGE_BACKEND` supports:
 
 - `local` for SQLite + filesystem (default)
-- `managed` for Postgres + object store
-- `postgres_gcs` as a compatibility alias that is normalized to `managed`
+- `managed` for object-store-backed memory plus Postgres operational metadata
 
-Managed storage uses these canonical object-store variables:
+Managed storage uses these canonical object-store variables for memory files:
 
 | Variable | Description |
 |---|---|
@@ -205,10 +218,6 @@ Managed storage uses these canonical object-store variables:
 | `BACKEND_OBJECT_STORE_NAME` | Bucket/container name for the managed object store |
 | `BACKEND_OBJECT_STORE_ENDPOINT` | Optional custom endpoint (required for `azure_blob`) |
 | `BACKEND_OBJECT_STORE_PREFIX` | Prefix used for artifact paths |
-
-Compatibility alias:
-
-- `BACKEND_OBJECT_STORE_BUCKET` is still accepted when `BACKEND_OBJECT_STORE_NAME` is unset.
 
 **Rate limiting**
 
@@ -233,12 +242,12 @@ openssl rand -hex 32
 | `GET` | `/readyz` | Bearer | Readiness probe — checks storage and provider config |
 | `WS` | `/ws/session` | Bearer | Realtime voice session |
 | `POST` | `/vision/frame` | Bearer | Ingest a base64-encoded JPEG frame |
-| `GET` | `/profile` | Bearer | Read user profile |
-| `PUT` | `/profile` | Bearer | Update user profile |
-| `POST` | `/profile/reset` | Bearer | Reset user profile to empty |
-| `GET` | `/memory/export` | Bearer | Download a ZIP of all session and profile memory |
-| `GET` | `/memory/session/{id}/status` | Bearer | Per-session memory status |
-| `POST` | `/memory/session/{id}/reset` | Bearer | Delete memory for a specific ended session |
+| `GET` | `/memory/user` | Bearer | Read user memory |
+| `PUT` | `/memory/user` | Bearer | Update user memory |
+| `POST` | `/memory/user/reset` | Bearer | Reset user memory to empty |
+| `GET` | `/memory/export` | Bearer | Download a ZIP of all session and user-memory artifacts |
+| `GET` | `/memory/sessions/{id}/status` | Bearer | Per-session memory status |
+| `POST` | `/memory/sessions/{id}/reset` | Bearer | Delete memory for a specific ended session |
 
 Protected profile and memory-admin HTTP routes are IP-rate-limited when `BACKEND_ENABLE_IP_RATE_LIMITS=true`.
 
@@ -246,7 +255,7 @@ Provider notes:
 
 - `mistral` is the native Mistral adapter and should use native model ids such as `ministral-14b-2512`.
 - `nvidia_integrate` is the NVIDIA Integrate/NIM OpenAI-compatible adapter and should use NVIDIA-style model ids such as `mistralai/ministral-14b-instruct-2512`.
-- `POST /vision/frame` acknowledges ingest, not completed analysis. Use `GET /memory/session/{id}/status` to inspect recent frame analysis state.
+- `POST /vision/frame` acknowledges ingest, not completed analysis. Use `GET /memory/sessions/{id}/status` to inspect recent frame analysis state.
 
 ## Operator CLI
 
@@ -257,12 +266,24 @@ curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/portworl
 # Initialize/update backend/.env through the public CLI
 portworld init
 
-# Validate local or Cloud Run readiness
+# Validate local or managed readiness
 portworld doctor --target local
 portworld doctor --target gcp-cloud-run --project <project> --region <region>
+portworld doctor --target aws-ecs-fargate --aws-region <region>
+portworld doctor --target azure-container-apps --azure-subscription <subscription> --azure-resource-group <resource-group> --azure-region <region>
 
-# Deploy to Cloud Run
+# Deploy to a managed target
 portworld deploy gcp-cloud-run --project <project> --region <region> --cors-origins https://app.example.com
+portworld deploy aws-ecs-fargate --region <region> --cors-origins https://app.example.com
+portworld deploy azure-container-apps --subscription <subscription> --resource-group <resource-group> --region <region> --cors-origins https://app.example.com
+
+# Read managed deployment logs
+portworld logs gcp-cloud-run --since 24h --limit 50
+portworld logs aws-ecs-fargate --since 24h --limit 50
+portworld logs azure-container-apps --since 24h --limit 50
+
+# Redeploy the active managed target
+portworld update deploy --tag <image-tag>
 
 # Wrap legacy operator actions through the public CLI
 portworld ops check-config
@@ -285,6 +306,26 @@ python -m backend.cli export-memory --output /tmp/portworld-memory-export.zip
 
 ## Storage
 
-All persistent data lives under `BACKEND_DATA_DIR` (default: `backend/var/`). SQLite tracks session metadata and artifact indexes; session memory, user profile, and vision event journals are stored as JSON and Markdown files on disk.
+All persistent data lives under `BACKEND_DATA_DIR` (default: `backend/var/`).
+
+Local storage:
+
+- SQLite tracks session metadata and artifact indexes
+- memory files live under `memory/`:
+  - `memory/USER.md`
+  - `memory/CROSS_SESSION.md`
+  - `memory/sessions/<session_storage_key>/SHORT_TERM.md`
+  - `memory/sessions/<session_storage_key>/LONG_TERM.md`
+  - optional debug journals such as `EVENTS.ndjson`
+
+Managed storage (managed targets):
+
+- object storage is the source of truth for memory files
+- Postgres is used for operational metadata in the current MVP backend
+- `gcp-cloud-run`: Cloud Run + GCS + Cloud SQL Postgres
+- `aws-ecs-fargate`: ECS/Fargate + CloudFront + ALB + S3 + Postgres operational metadata
+- `azure-container-apps`: Container Apps + Blob Storage + Postgres operational metadata
+- current MVP hardening note:
+  AWS one-click provisions public RDS ingress and Azure one-click provisions PostgreSQL public access; validate and tighten before production use
 
 Session memory is retained for `BACKEND_SESSION_MEMORY_RETENTION_DAYS` days (default: 30) after a session ends. The user profile is never removed by retention.

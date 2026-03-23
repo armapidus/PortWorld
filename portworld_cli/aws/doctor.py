@@ -26,8 +26,13 @@ class AWSDoctorDetails:
     service_name: str | None
     vpc_id: str | None
     subnet_ids: tuple[str, ...]
-    certificate_arn: str | None
     bucket_name: str | None
+    ecr_repository: str | None
+    rds_instance_identifier: str | None
+    alb_dns_name: str | None
+    cloudfront_distribution_id: str | None
+    cloudfront_domain_name: str | None
+    service_url: str | None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -38,8 +43,13 @@ class AWSDoctorDetails:
             "service_name": self.service_name,
             "vpc_id": self.vpc_id,
             "subnet_ids": list(self.subnet_ids),
-            "certificate_arn": self.certificate_arn,
             "bucket_name": self.bucket_name,
+            "ecr_repository": self.ecr_repository,
+            "rds_instance_identifier": self.rds_instance_identifier,
+            "alb_dns_name": self.alb_dns_name,
+            "cloudfront_distribution_id": self.cloudfront_distribution_id,
+            "cloudfront_domain_name": self.cloudfront_domain_name,
+            "service_url": self.service_url,
         }
 
 
@@ -57,14 +67,12 @@ def evaluate_aws_ecs_fargate_readiness(
     explicit_service: str | None,
     explicit_vpc_id: str | None,
     explicit_subnet_ids: str | None,
-    explicit_certificate_arn: str | None,
     explicit_database_url: str | None,
     explicit_s3_bucket: str | None,
     env_values: dict[str, str],
     project_config: ProjectConfig | None,
 ) -> AWSDoctorEvaluation:
     checks: list[DiagnosticCheck] = []
-
     aws_defaults = None if project_config is None else project_config.deploy.aws_ecs_fargate
 
     region = _first_non_empty(
@@ -73,15 +81,13 @@ def evaluate_aws_ecs_fargate_readiness(
         os.environ.get("AWS_REGION"),
         os.environ.get("AWS_DEFAULT_REGION"),
     )
-
-    cluster_name = _first_non_empty(
-        explicit_cluster,
-        None if aws_defaults is None else aws_defaults.cluster_name,
-    )
     service_name = _first_non_empty(
         explicit_service,
         None if aws_defaults is None else aws_defaults.service_name,
+        explicit_cluster,
+        None if aws_defaults is None else aws_defaults.cluster_name,
     )
+    cluster_name = None if service_name is None else f"{service_name}-cluster"
     vpc_id = _first_non_empty(
         explicit_vpc_id,
         None if aws_defaults is None else aws_defaults.vpc_id,
@@ -90,8 +96,6 @@ def evaluate_aws_ecs_fargate_readiness(
         explicit_value=explicit_subnet_ids,
         configured=(() if aws_defaults is None else aws_defaults.subnet_ids),
     )
-    certificate_arn = normalize_optional_text(explicit_certificate_arn)
-
     database_url = _first_non_empty(
         explicit_database_url,
         env_values.get("BACKEND_DATABASE_URL"),
@@ -99,8 +103,12 @@ def evaluate_aws_ecs_fargate_readiness(
     bucket_name = _first_non_empty(
         explicit_s3_bucket,
         env_values.get("BACKEND_OBJECT_STORE_NAME"),
-        env_values.get("BACKEND_OBJECT_STORE_BUCKET"),
+        None if service_name is None else f"{service_name}-memory",
     )
+    ecr_repository = None if service_name is None else f"{service_name}-backend"
+    rds_instance_identifier = None if service_name is None else _normalize_rds_identifier(f"{service_name}-pg")
+    alb_name = None if service_name is None else f"{service_name}-alb"[:32]
+    cloudfront_comment = None if service_name is None else f"PortWorld managed {service_name}"
 
     cli_ok = aws_cli_available()
     checks.append(
@@ -108,14 +116,14 @@ def evaluate_aws_ecs_fargate_readiness(
             id="aws_cli_installed",
             status="pass" if cli_ok else "fail",
             message="aws CLI is installed" if cli_ok else "aws CLI is not installed or not on PATH.",
-            action=None if cli_ok else "Install AWS CLI v2 and re-run doctor.",
+            action=None if cli_ok else "Install AWS CLI v2 and retry doctor.",
         )
     )
 
     account_id: str | None = None
     arn: str | None = None
     if cli_ok:
-        identity = run_aws_json(["sts", "get-caller-identity"])  # region not required
+        identity = run_aws_json(["sts", "get-caller-identity"])
         if identity.ok and isinstance(identity.value, dict):
             account_id = _read_dict_string(identity.value, "Account")
             arn = _read_dict_string(identity.value, "Arn")
@@ -145,51 +153,56 @@ def evaluate_aws_ecs_fargate_readiness(
         DiagnosticCheck(
             id="aws_region_selected",
             status="pass" if region else "fail",
-            message=(
-                f"Using AWS region '{region}'."
-                if region
-                else "No AWS region resolved for ECS/Fargate checks."
-            ),
+            message=f"Using AWS region '{region}'." if region else "No AWS region resolved.",
             action=None if region else "Pass --aws-region or set AWS_REGION/AWS_DEFAULT_REGION.",
         )
     )
-
-    checks.extend(
-        [
-            _required_value_check("aws_cluster_selected", cluster_name, "--aws-cluster is required."),
-            _required_value_check("aws_service_selected", service_name, "--aws-service is required."),
-            _required_value_check("aws_vpc_selected", vpc_id, "--aws-vpc-id is required."),
-            DiagnosticCheck(
-                id="aws_subnets_selected",
-                status="pass" if subnet_ids else "fail",
-                message=(
-                    f"Using subnet ids: {', '.join(subnet_ids)}"
-                    if subnet_ids
-                    else "No AWS subnets resolved."
-                ),
-                action=None if subnet_ids else "Pass --aws-subnet-ids (comma-separated).",
-            ),
-            _required_value_check(
-                "aws_certificate_selected",
-                certificate_arn,
-                "--aws-certificate-arn is required for ALB HTTPS listener validation.",
-            ),
-        ]
-    )
-
-    db_ok = bool(database_url and is_postgres_url(database_url))
     checks.append(
         DiagnosticCheck(
-            id="database_url_ready",
-            status="pass" if db_ok else "fail",
-            message=(
-                "BACKEND_DATABASE_URL is present and uses a PostgreSQL scheme."
-                if db_ok
-                else "BACKEND_DATABASE_URL is missing or not PostgreSQL-shaped."
-            ),
-            action=None if db_ok else "Set BACKEND_DATABASE_URL to an existing PostgreSQL connection URL.",
+            id="ecs_service_selected",
+            status="pass" if service_name else "fail",
+            message=f"Using AWS ECS service '{service_name}'." if service_name else "No AWS ECS service name resolved.",
+            action=None if service_name else "Pass --aws-service or configure the AWS managed target first.",
         )
     )
+    checks.append(
+        DiagnosticCheck(
+            id="ecs_cluster_selected",
+            status="pass" if cluster_name else "fail",
+            message=f"Using ECS cluster '{cluster_name}'." if cluster_name else "No ECS cluster name could be derived.",
+            action=None if cluster_name else "Pass --aws-service or configure the AWS managed target first.",
+        )
+    )
+
+    db_shape_ok = database_url is None or is_postgres_url(database_url)
+    checks.append(
+        DiagnosticCheck(
+            id="database_strategy_ready",
+            status="pass" if db_shape_ok else "fail",
+            message=(
+                "Using externally provided PostgreSQL database URL."
+                if database_url and db_shape_ok
+                else "No external database URL provided; doctor expects one-click RDS provisioning."
+                if database_url is None
+                else "BACKEND_DATABASE_URL is not PostgreSQL-shaped."
+            ),
+            action=None if db_shape_ok else "Use a postgres:// or postgresql:// URL.",
+        )
+    )
+    checks.extend(_build_runtime_contract_checks(env_values))
+    checks.extend(_build_production_posture_checks(env_values=env_values, project_config=project_config))
+    if database_url is None:
+        checks.append(
+            DiagnosticCheck(
+                id="managed_database_network_posture",
+                status="warn",
+                message=(
+                    "The current AWS one-click path provisions RDS with public accessibility and broad ingress "
+                    "for MVP simplicity."
+                ),
+                action="Validate and tighten database network posture before production use.",
+            )
+        )
 
     if bucket_name is None:
         checks.append(
@@ -197,12 +210,11 @@ def evaluate_aws_ecs_fargate_readiness(
                 id="s3_bucket_name_valid",
                 status="fail",
                 message="No managed object-store bucket name resolved.",
-                action="Set BACKEND_OBJECT_STORE_NAME or pass --aws-s3-bucket.",
+                action="Pass --aws-s3-bucket or configure the AWS target first.",
             )
         )
     else:
         bucket_validation_error = validate_s3_bucket_name(bucket_name)
-        bucket_tls_warning = s3_bucket_name_tls_warning(bucket_name)
         checks.append(
             DiagnosticCheck(
                 id="s3_bucket_name_valid",
@@ -215,289 +227,55 @@ def evaluate_aws_ecs_fargate_readiness(
                 action=None if bucket_validation_error is None else "Choose a valid S3 bucket name.",
             )
         )
+        bucket_tls_warning = s3_bucket_name_tls_warning(bucket_name)
         checks.append(
             DiagnosticCheck(
                 id="s3_bucket_name_tls_compatibility",
                 status="warn" if bucket_tls_warning else "pass",
                 message=bucket_tls_warning or "S3 bucket name is compatible with virtual-hosted HTTPS access.",
                 action=(
-                    "Use an S3 bucket name without periods if clients will use virtual-hosted HTTPS endpoints."
+                    "Prefer a bucket name without periods if clients will use virtual-hosted HTTPS endpoints."
                     if bucket_tls_warning
                     else None
                 ),
             )
         )
 
-    if cli_ok and region and subnet_ids:
-        subnet_result = run_aws_json(["ec2", "describe-subnets", "--subnet-ids", *subnet_ids, "--region", region])
-        if not subnet_result.ok or not isinstance(subnet_result.value, dict):
-            checks.append(
-                DiagnosticCheck(
-                    id="subnet_vpc_validation",
-                    status="fail",
-                    message=subnet_result.message or "Unable to describe subnets via AWS CLI.",
-                    action="Check subnet ids and IAM permissions for ec2:DescribeSubnets.",
-                )
-            )
-        else:
-            subnets = subnet_result.value.get("Subnets")
-            if not isinstance(subnets, list) or len(subnets) != len(subnet_ids):
-                checks.append(
-                    DiagnosticCheck(
-                        id="subnet_vpc_validation",
-                        status="fail",
-                        message="One or more provided subnets were not found.",
-                        action="Verify subnet ids in the selected AWS region.",
-                    )
-                )
-            else:
-                vpc_ids: set[str] = set()
-                azs: set[str] = set()
-                for subnet in subnets:
-                    if isinstance(subnet, dict):
-                        subnet_vpc = _read_dict_string(subnet, "VpcId")
-                        subnet_az = _read_dict_string(subnet, "AvailabilityZone")
-                        if subnet_vpc:
-                            vpc_ids.add(subnet_vpc)
-                        if subnet_az:
-                            azs.add(subnet_az)
-                subnet_vpc_ok = len(vpc_ids) == 1 and (vpc_id is None or vpc_id in vpc_ids)
-                multi_az_ok = len(azs) >= 2
-                checks.append(
-                    DiagnosticCheck(
-                        id="subnet_vpc_validation",
-                        status="pass" if subnet_vpc_ok and multi_az_ok else "fail",
-                        message=(
-                            "Subnets map to the selected VPC and span at least two availability zones."
-                            if subnet_vpc_ok and multi_az_ok
-                            else "Subnets must belong to the selected VPC and span at least two availability zones."
-                        ),
-                        action=(
-                            None
-                            if subnet_vpc_ok and multi_az_ok
-                            else "Provide subnet ids in the same VPC across at least two AZs."
-                        ),
-                    )
-                )
-
-    if cli_ok and region and certificate_arn:
-        cert_result = run_aws_json(
-            ["acm", "describe-certificate", "--certificate-arn", certificate_arn, "--region", region]
-        )
-        if not cert_result.ok or not isinstance(cert_result.value, dict):
-            checks.append(
-                DiagnosticCheck(
-                    id="acm_certificate_valid",
-                    status="fail",
-                    message=cert_result.message or "Unable to describe ACM certificate.",
-                    action="Verify certificate ARN, region, and IAM permissions for acm:DescribeCertificate.",
-                )
-            )
-        else:
-            certificate_payload = cert_result.value.get("Certificate")
-            status = None
-            if isinstance(certificate_payload, dict):
-                status = _read_dict_string(certificate_payload, "Status")
-            checks.append(
-                DiagnosticCheck(
-                    id="acm_certificate_valid",
-                    status="pass" if status == "ISSUED" else "fail",
-                    message=(
-                        f"ACM certificate status is {status}."
-                        if status
-                        else "ACM certificate status could not be read."
-                    ),
-                    action=(
-                        None if status == "ISSUED" else "Use an ACM certificate ARN in ISSUED state for HTTPS listener."
-                    ),
-                )
-            )
-
+    alb_dns_name: str | None = None
+    cloudfront_distribution_id: str | None = None
+    cloudfront_domain_name: str | None = None
+    service_url: str | None = None
+    if cli_ok and region and bucket_name:
+        checks.append(_s3_bucket_ready_check(region=region, bucket_name=bucket_name))
+    if cli_ok and region and ecr_repository:
+        checks.append(_ecr_repository_ready_check(region=region, repository_name=ecr_repository))
     if cli_ok and region and cluster_name and service_name:
-        service_result = run_aws_json(
-            [
-                "ecs",
-                "describe-services",
-                "--region",
-                region,
-                "--cluster",
-                cluster_name,
-                "--services",
-                service_name,
-            ]
+        ecs_check, service_url = _ecs_service_check(
+            region=region,
+            cluster_name=cluster_name,
+            service_name=service_name,
         )
-        if not service_result.ok or not isinstance(service_result.value, dict):
-            checks.append(
-                DiagnosticCheck(
-                    id="ecs_service_describe",
-                    status="fail",
-                    message=service_result.message or "Unable to describe ECS service.",
-                    action="Verify ECS cluster/service names and permissions for ecs:DescribeServices.",
-                )
+        checks.append(ecs_check)
+    if cli_ok and region and alb_name:
+        alb_check, alb_dns_name = _alb_check(region=region, alb_name=alb_name)
+        checks.append(alb_check)
+    if cli_ok and cloudfront_comment:
+        cloudfront_check, cloudfront_distribution_id, cloudfront_domain_name = _cloudfront_distribution_check(
+            comment=cloudfront_comment
+        )
+        checks.append(cloudfront_check)
+        if service_url is None and cloudfront_domain_name is not None:
+            service_url = _normalize_service_url(cloudfront_domain_name)
+
+    if cli_ok and region and database_url is None and rds_instance_identifier:
+        checks.extend(
+            _rds_provisioning_checks(
+                region=region,
+                explicit_vpc_id=vpc_id,
+                explicit_subnet_ids=subnet_ids,
+                rds_instance_identifier=rds_instance_identifier,
             )
-        else:
-            service_payload = _first_ecs_service(service_result.value)
-            if service_payload is None:
-                checks.append(
-                    DiagnosticCheck(
-                        id="ecs_service_describe",
-                        status="fail",
-                        message="ECS service was not found for the selected cluster.",
-                        action="Create the ECS service or correct --aws-cluster/--aws-service.",
-                    )
-                )
-            else:
-                service_status = _read_dict_string(service_payload, "status")
-                checks.append(
-                    DiagnosticCheck(
-                        id="ecs_service_active",
-                        status="pass" if service_status == "ACTIVE" else "fail",
-                        message=(
-                            f"ECS service status is {service_status}."
-                            if service_status
-                            else "ECS service status is unavailable."
-                        ),
-                        action=(
-                            None
-                            if service_status == "ACTIVE"
-                            else "Ensure the ECS service exists and is ACTIVE before deploy."
-                        ),
-                    )
-                )
-
-                network_ok = _service_network_alignment_ok(
-                    service_payload=service_payload,
-                    expected_subnets=subnet_ids,
-                )
-                checks.append(
-                    DiagnosticCheck(
-                        id="ecs_service_network_alignment",
-                        status="pass" if network_ok else "fail",
-                        message=(
-                            "ECS service awsvpc subnets align with configured subnets."
-                            if network_ok
-                            else "ECS service networking does not align with configured subnets."
-                        ),
-                        action=(
-                            None
-                            if network_ok
-                            else "Align ECS service awsvpc subnet configuration with --aws-subnet-ids."
-                        ),
-                    )
-                )
-
-                task_definition_arn = _read_dict_string(service_payload, "taskDefinition")
-                if task_definition_arn:
-                    task_definition_result = run_aws_json(
-                        [
-                            "ecs",
-                            "describe-task-definition",
-                            "--region",
-                            region,
-                            "--task-definition",
-                            task_definition_arn,
-                        ]
-                    )
-                    if not task_definition_result.ok or not isinstance(task_definition_result.value, dict):
-                        checks.append(
-                            DiagnosticCheck(
-                                id="ecs_task_definition_describe",
-                                status="fail",
-                                message=task_definition_result.message or "Unable to describe task definition.",
-                                action="Verify permissions for ecs:DescribeTaskDefinition.",
-                            )
-                        )
-                    else:
-                        task_definition_payload = task_definition_result.value.get("taskDefinition")
-                        if not isinstance(task_definition_payload, dict):
-                            checks.append(
-                                DiagnosticCheck(
-                                    id="ecs_task_definition_describe",
-                                    status="fail",
-                                    message="Task definition payload was missing.",
-                                    action="Verify ECS task definition configuration.",
-                                )
-                            )
-                        else:
-                            network_mode = _read_dict_string(task_definition_payload, "networkMode")
-                            compatibilities = task_definition_payload.get("requiresCompatibilities")
-                            is_fargate = isinstance(compatibilities, list) and "FARGATE" in compatibilities
-                            checks.append(
-                                DiagnosticCheck(
-                                    id="ecs_task_definition_fargate_compatible",
-                                    status="pass" if network_mode == "awsvpc" and is_fargate else "fail",
-                                    message=(
-                                        "Task definition is Fargate compatible (networkMode=awsvpc)."
-                                        if network_mode == "awsvpc" and is_fargate
-                                        else "Task definition must use networkMode=awsvpc and include requiresCompatibilities=FARGATE."
-                                    ),
-                                    action=(
-                                        None
-                                        if network_mode == "awsvpc" and is_fargate
-                                        else "Register a Fargate-compatible task definition and update the service."
-                                    ),
-                                )
-                            )
-                            execution_role = _read_dict_string(task_definition_payload, "executionRoleArn")
-                            task_role = _read_dict_string(task_definition_payload, "taskRoleArn")
-                            checks.append(
-                                DiagnosticCheck(
-                                    id="ecs_execution_role_present",
-                                    status="pass" if execution_role else "fail",
-                                    message=(
-                                        f"Execution role resolved: {execution_role}"
-                                        if execution_role
-                                        else "Execution role ARN is missing."
-                                    ),
-                                    action=(
-                                        None
-                                        if execution_role
-                                        else "Set executionRoleArn with ECR/CloudWatch/Secrets permissions."
-                                    ),
-                                )
-                            )
-                            checks.append(
-                                DiagnosticCheck(
-                                    id="ecs_task_role_present",
-                                    status="pass" if task_role else "warn",
-                                    message=(
-                                        f"Task role resolved: {task_role}"
-                                        if task_role
-                                        else "Task role ARN is missing."
-                                    ),
-                                    action=(
-                                        None
-                                        if task_role
-                                        else "Set taskRoleArn when runtime AWS API access is required."
-                                    ),
-                                )
-                            )
-                            has_secret_refs = _task_definition_has_secret_refs(task_definition_payload)
-                            checks.append(
-                                DiagnosticCheck(
-                                    id="ecs_secrets_model_ready",
-                                    status="pass" if has_secret_refs else "warn",
-                                    message=(
-                                        "ECS task definition includes secret references."
-                                        if has_secret_refs
-                                        else "No ECS secret references were detected in container definitions."
-                                    ),
-                                    action=(
-                                        None
-                                        if has_secret_refs
-                                        else "Use ECS secrets mappings (for example Secrets Manager references) for sensitive values."
-                                    ),
-                                )
-                            )
-                else:
-                    checks.append(
-                        DiagnosticCheck(
-                            id="ecs_task_definition_describe",
-                            status="fail",
-                            message="ECS service did not report a task definition ARN.",
-                            action="Ensure the ECS service references a valid task definition.",
-                        )
-                    )
+        )
 
     details = AWSDoctorDetails(
         account_id=account_id,
@@ -507,8 +285,13 @@ def evaluate_aws_ecs_fargate_readiness(
         service_name=service_name,
         vpc_id=vpc_id,
         subnet_ids=subnet_ids,
-        certificate_arn=certificate_arn,
         bucket_name=bucket_name,
+        ecr_repository=ecr_repository,
+        rds_instance_identifier=rds_instance_identifier,
+        alb_dns_name=alb_dns_name,
+        cloudfront_distribution_id=cloudfront_distribution_id,
+        cloudfront_domain_name=cloudfront_domain_name,
+        service_url=service_url,
     )
     return AWSDoctorEvaluation(
         ok=all(check.status != "fail" for check in checks),
@@ -517,13 +300,448 @@ def evaluate_aws_ecs_fargate_readiness(
     )
 
 
-def _required_value_check(check_id: str, value: str | None, action: str) -> DiagnosticCheck:
+def evaluate_aws_app_runner_readiness(**kwargs) -> AWSDoctorEvaluation:
+    return evaluate_aws_ecs_fargate_readiness(**kwargs)
+
+
+def _s3_bucket_ready_check(*, region: str, bucket_name: str) -> DiagnosticCheck:
+    result = run_aws_text(["s3api", "head-bucket", "--bucket", bucket_name, "--region", region])
+    if result.ok:
+        return DiagnosticCheck(
+            id="s3_bucket_ready",
+            status="pass",
+            message=f"S3 bucket '{bucket_name}' is accessible.",
+        )
+    lowered = _lower_message(result.message)
+    if _message_indicates_not_found(lowered):
+        return DiagnosticCheck(
+            id="s3_bucket_ready",
+            status="warn",
+            message=f"S3 bucket '{bucket_name}' does not exist yet and will be created on deploy.",
+            action="No action needed for first deploy if create permissions are available.",
+        )
     return DiagnosticCheck(
-        id=check_id,
-        status="pass" if value else "fail",
-        message=f"Resolved value: {value}" if value else "Required value is missing.",
-        action=None if value else action,
+        id="s3_bucket_ready",
+        status="fail",
+        message=result.message or "Unable to inspect S3 bucket.",
+        action="Verify S3 permissions and bucket ownership.",
     )
+
+
+def _ecr_repository_ready_check(*, region: str, repository_name: str) -> DiagnosticCheck:
+    result = run_aws_json(
+        [
+            "ecr",
+            "describe-repositories",
+            "--region",
+            region,
+            "--repository-names",
+            repository_name,
+        ]
+    )
+    if result.ok:
+        return DiagnosticCheck(
+            id="ecr_repository_ready",
+            status="pass",
+            message=f"ECR repository '{repository_name}' is ready.",
+        )
+    lowered = _lower_message(result.message)
+    if _message_indicates_not_found(lowered):
+        return DiagnosticCheck(
+            id="ecr_repository_ready",
+            status="warn",
+            message=f"ECR repository '{repository_name}' does not exist yet and will be created on deploy.",
+            action="No action needed for first deploy if ECR create permissions are available.",
+        )
+    return DiagnosticCheck(
+        id="ecr_repository_ready",
+        status="fail",
+        message=result.message or "Unable to inspect ECR repository.",
+        action="Verify ECR permissions.",
+    )
+
+
+def _ecs_service_check(
+    *,
+    region: str,
+    cluster_name: str,
+    service_name: str,
+) -> tuple[DiagnosticCheck, str | None]:
+    described_cluster = run_aws_json(
+        [
+            "ecs",
+            "describe-clusters",
+            "--region",
+            region,
+            "--clusters",
+            cluster_name,
+        ]
+    )
+    if not described_cluster.ok or not isinstance(described_cluster.value, dict):
+        return (
+            DiagnosticCheck(
+                id="ecs_service_ready",
+                status="fail",
+                message=described_cluster.message or "Unable to inspect ECS cluster.",
+                action="Verify ECS permissions and cluster visibility.",
+            ),
+            None,
+        )
+    clusters = described_cluster.value.get("clusters")
+    if not isinstance(clusters, list) or not clusters or not isinstance(clusters[0], dict):
+        return (
+            DiagnosticCheck(
+                id="ecs_service_ready",
+                status="warn",
+                message=f"ECS cluster '{cluster_name}' does not exist yet and will be created on deploy.",
+                action="No action needed for first deploy if ECS create permissions are available.",
+            ),
+            None,
+        )
+
+    described_service = run_aws_json(
+        [
+            "ecs",
+            "describe-services",
+            "--region",
+            region,
+            "--cluster",
+            cluster_name,
+            "--services",
+            service_name,
+        ]
+    )
+    if not described_service.ok or not isinstance(described_service.value, dict):
+        return (
+            DiagnosticCheck(
+                id="ecs_service_ready",
+                status="fail",
+                message=described_service.message or "Unable to inspect ECS service.",
+                action="Verify ECS permissions and service visibility.",
+            ),
+            None,
+        )
+    services = described_service.value.get("services")
+    if not isinstance(services, list) or not services or not isinstance(services[0], dict):
+        return (
+            DiagnosticCheck(
+                id="ecs_service_ready",
+                status="warn",
+                message=f"ECS service '{service_name}' does not exist yet and will be created on deploy.",
+                action="No action needed for first deploy if ECS create permissions are available.",
+            ),
+            None,
+        )
+    service = services[0]
+    status = (_read_dict_string(service, "status") or "UNKNOWN").upper()
+    running_count = service.get("runningCount")
+    desired_count = service.get("desiredCount")
+    if status == "ACTIVE" and isinstance(running_count, int) and isinstance(desired_count, int):
+        if desired_count == 0 or running_count >= desired_count:
+            return (
+                DiagnosticCheck(
+                    id="ecs_service_ready",
+                    status="pass",
+                    message=f"ECS service '{service_name}' is ACTIVE with {running_count}/{desired_count} running tasks.",
+                ),
+                None,
+            )
+        return (
+            DiagnosticCheck(
+                id="ecs_service_ready",
+                status="warn",
+                message=f"ECS service '{service_name}' is ACTIVE with {running_count}/{desired_count} running tasks.",
+                action="Deploy can continue, but the current ECS rollout is not fully healthy yet.",
+            ),
+            None,
+        )
+    if status == "INACTIVE":
+        return (
+            DiagnosticCheck(
+                id="ecs_service_ready",
+                status="warn",
+                message=f"ECS service '{service_name}' is inactive and will be recreated on deploy.",
+                action="No action needed if ECS create permissions are available.",
+            ),
+            None,
+        )
+    return (
+        DiagnosticCheck(
+            id="ecs_service_ready",
+            status="warn",
+            message=f"ECS service '{service_name}' exists with status {status}.",
+            action="Deploy can continue, but existing ECS operations may still be in progress.",
+        ),
+        None,
+    )
+
+
+def _alb_check(*, region: str, alb_name: str) -> tuple[DiagnosticCheck, str | None]:
+    described = run_aws_json(
+        [
+            "elbv2",
+            "describe-load-balancers",
+            "--region",
+            region,
+            "--names",
+            alb_name,
+        ]
+    )
+    if not described.ok or not isinstance(described.value, dict):
+        lowered = _lower_message(described.message)
+        if _message_indicates_not_found(lowered):
+            return (
+                DiagnosticCheck(
+                    id="alb_ready",
+                    status="warn",
+                    message=f"ALB '{alb_name}' does not exist yet and will be created on deploy.",
+                    action="No action needed for first deploy if ELB create permissions are available.",
+                ),
+                None,
+            )
+        return (
+            DiagnosticCheck(
+                id="alb_ready",
+                status="fail",
+                message=described.message or "Unable to inspect ALB state.",
+                action="Verify ELB permissions.",
+            ),
+            None,
+        )
+    load_balancers = described.value.get("LoadBalancers")
+    if not isinstance(load_balancers, list) or not load_balancers or not isinstance(load_balancers[0], dict):
+        return (
+            DiagnosticCheck(
+                id="alb_ready",
+                status="warn",
+                message=f"ALB '{alb_name}' does not exist yet and will be created on deploy.",
+                action="No action needed for first deploy if ELB create permissions are available.",
+            ),
+            None,
+        )
+    dns_name = _read_dict_string(load_balancers[0], "DNSName")
+    return (
+        DiagnosticCheck(
+            id="alb_ready",
+            status="pass",
+            message=f"ALB '{alb_name}' is ready.",
+        ),
+        dns_name,
+    )
+
+
+def _cloudfront_distribution_check(
+    *,
+    comment: str,
+) -> tuple[DiagnosticCheck, str | None, str | None]:
+    listed = run_aws_json(["cloudfront", "list-distributions"])
+    if not listed.ok or not isinstance(listed.value, dict):
+        return (
+            DiagnosticCheck(
+                id="cloudfront_ready",
+                status="fail",
+                message=listed.message or "Unable to inspect CloudFront distributions.",
+                action="Verify CloudFront permissions.",
+            ),
+            None,
+            None,
+        )
+    distribution_list = listed.value.get("DistributionList")
+    items = distribution_list.get("Items") if isinstance(distribution_list, dict) else None
+    if not isinstance(items, list):
+        items = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if _read_dict_string(item, "Comment") != comment:
+            continue
+        distribution_id = _read_dict_string(item, "Id")
+        domain_name = _read_dict_string(item, "DomainName")
+        status = (_read_dict_string(item, "Status") or "UNKNOWN").upper()
+        if status == "DEPLOYED":
+            return (
+                DiagnosticCheck(
+                    id="cloudfront_ready",
+                    status="pass",
+                    message=f"CloudFront distribution '{distribution_id}' is DEPLOYED.",
+                ),
+                distribution_id,
+                domain_name,
+            )
+        return (
+            DiagnosticCheck(
+                id="cloudfront_ready",
+                status="warn",
+                message=f"CloudFront distribution '{distribution_id}' exists with status {status}.",
+                action="Deploy can continue, but the existing CloudFront distribution is still updating.",
+            ),
+            distribution_id,
+            domain_name,
+        )
+    return (
+        DiagnosticCheck(
+            id="cloudfront_ready",
+            status="warn",
+            message="CloudFront distribution does not exist yet and will be created on deploy.",
+            action="No action needed for first deploy if CloudFront create permissions are available.",
+        ),
+        None,
+        None,
+    )
+
+
+def _rds_provisioning_checks(
+    *,
+    region: str,
+    explicit_vpc_id: str | None,
+    explicit_subnet_ids: tuple[str, ...],
+    rds_instance_identifier: str,
+) -> list[DiagnosticCheck]:
+    checks: list[DiagnosticCheck] = []
+    checks.append(
+        DiagnosticCheck(
+            id="rds_instance_name_ready",
+            status="pass",
+            message=f"RDS instance identifier '{rds_instance_identifier}' is ready for one-click provisioning.",
+        )
+    )
+    checks.extend(_vpc_and_subnet_checks(region=region, explicit_vpc_id=explicit_vpc_id, explicit_subnet_ids=explicit_subnet_ids))
+
+    described = run_aws_json(
+        [
+            "rds",
+            "describe-db-instances",
+            "--region",
+            region,
+            "--db-instance-identifier",
+            rds_instance_identifier,
+        ]
+    )
+    if described.ok and isinstance(described.value, dict):
+        status = _extract_db_status(described.value)
+        checks.append(
+            DiagnosticCheck(
+                id="rds_instance_ready",
+                status="pass" if status == "available" else "warn",
+                message=(
+                    f"RDS instance '{rds_instance_identifier}' exists with status {status}."
+                    if status
+                    else f"RDS instance '{rds_instance_identifier}' exists."
+                ),
+                action=None if status == "available" else "Deploy can continue, but the existing RDS instance is not yet available.",
+            )
+        )
+        return checks
+
+    lowered = _lower_message(described.message)
+    if _message_indicates_not_found(lowered):
+        checks.append(
+            DiagnosticCheck(
+                id="rds_instance_ready",
+                status="warn",
+                message=f"RDS instance '{rds_instance_identifier}' does not exist yet and will be created on deploy.",
+                action="No action needed for first deploy if RDS create permissions and quotas are available.",
+            )
+        )
+        return checks
+
+    checks.append(
+        DiagnosticCheck(
+            id="rds_instance_ready",
+            status="fail",
+            message=described.message or "Unable to inspect RDS instance.",
+            action="Verify RDS permissions.",
+        )
+    )
+    return checks
+
+
+def _vpc_and_subnet_checks(
+    *,
+    region: str,
+    explicit_vpc_id: str | None,
+    explicit_subnet_ids: tuple[str, ...],
+) -> list[DiagnosticCheck]:
+    checks: list[DiagnosticCheck] = []
+    resolved_vpc_id = explicit_vpc_id
+    if resolved_vpc_id is None:
+        vpcs = run_aws_json(
+            [
+                "ec2",
+                "describe-vpcs",
+                "--region",
+                region,
+                "--filters",
+                "Name=isDefault,Values=true",
+            ]
+        )
+        if not vpcs.ok or not isinstance(vpcs.value, dict):
+            return [
+                DiagnosticCheck(
+                    id="rds_network_ready",
+                    status="fail",
+                    message=vpcs.message or "Unable to resolve default VPC for RDS provisioning.",
+                    action="Verify EC2 permissions or pass --aws-vpc-id/--aws-subnet-ids.",
+                )
+            ]
+        items = vpcs.value.get("Vpcs")
+        if not isinstance(items, list) or not items or not isinstance(items[0], dict):
+            return [
+                DiagnosticCheck(
+                    id="rds_network_ready",
+                    status="fail",
+                    message="No default VPC was found for RDS provisioning.",
+                    action="Pass --aws-vpc-id and --aws-subnet-ids or create a default VPC.",
+                )
+            ]
+        resolved_vpc_id = _read_dict_string(items[0], "VpcId")
+
+    checks.append(
+        DiagnosticCheck(
+            id="rds_vpc_ready",
+            status="pass" if resolved_vpc_id else "fail",
+            message=f"Using VPC '{resolved_vpc_id}' for RDS provisioning." if resolved_vpc_id else "No VPC available for RDS provisioning.",
+            action=None if resolved_vpc_id else "Pass --aws-vpc-id or create a default VPC.",
+        )
+    )
+
+    subnet_ids = explicit_subnet_ids
+    if resolved_vpc_id and not subnet_ids:
+        subnets = run_aws_json(
+            [
+                "ec2",
+                "describe-subnets",
+                "--region",
+                region,
+                "--filters",
+                f"Name=vpc-id,Values={resolved_vpc_id}",
+                "Name=default-for-az,Values=true",
+            ]
+        )
+        if not subnets.ok or not isinstance(subnets.value, dict):
+            return checks + [
+                DiagnosticCheck(
+                    id="rds_subnets_ready",
+                    status="fail",
+                    message=subnets.message or "Unable to resolve default subnets for RDS provisioning.",
+                    action="Verify EC2 permissions or pass --aws-subnet-ids.",
+                )
+            ]
+        subnet_ids = _select_subnets_for_rds(subnets.value)
+
+    checks.append(
+        DiagnosticCheck(
+            id="rds_subnets_ready",
+            status="pass" if len(subnet_ids) >= 2 else "fail",
+            message=(
+                f"Using RDS subnets: {', '.join(subnet_ids)}"
+                if len(subnet_ids) >= 2
+                else "RDS provisioning requires at least two subnets in distinct availability zones."
+            ),
+            action=None if len(subnet_ids) >= 2 else "Pass --aws-subnet-ids with at least two subnets across different AZs.",
+        )
+    )
+    return checks
 
 
 def _resolve_subnets(*, explicit_value: str | None, configured: tuple[str, ...]) -> tuple[str, ...]:
@@ -531,6 +749,178 @@ def _resolve_subnets(*, explicit_value: str | None, configured: tuple[str, ...])
     if from_explicit:
         return from_explicit
     return tuple(value for value in configured if normalize_optional_text(value) is not None)
+
+
+def _select_subnets_for_rds(payload: dict[str, object]) -> tuple[str, ...]:
+    subnets = payload.get("Subnets")
+    if not isinstance(subnets, list):
+        return ()
+    selected: list[str] = []
+    seen_az: set[str] = set()
+    sortable: list[tuple[str, str]] = []
+    for subnet in subnets:
+        if not isinstance(subnet, dict):
+            continue
+        subnet_id = _read_dict_string(subnet, "SubnetId")
+        az = _read_dict_string(subnet, "AvailabilityZone")
+        if subnet_id and az:
+            sortable.append((az, subnet_id))
+    sortable.sort()
+    for az, subnet_id in sortable:
+        if az in seen_az:
+            continue
+        seen_az.add(az)
+        selected.append(subnet_id)
+        if len(selected) >= 3:
+            break
+    return tuple(selected)
+
+
+def _extract_db_status(payload: dict[str, object]) -> str | None:
+    instances = payload.get("DBInstances")
+    if not isinstance(instances, list) or not instances or not isinstance(instances[0], dict):
+        return None
+    return _read_dict_string(instances[0], "DBInstanceStatus")
+
+
+def _normalize_service_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.startswith("https://"):
+        return text
+    if text.startswith("http://"):
+        return "https://" + text[len("http://") :]
+    return f"https://{text}"
+
+
+def _normalize_rds_identifier(value: str) -> str:
+    lowered = "".join(ch.lower() if ch.isalnum() else "-" for ch in value)
+    compact: list[str] = []
+    for ch in lowered:
+        if ch == "-" and compact and compact[-1] == "-":
+            continue
+        compact.append(ch)
+    normalized = "".join(compact).strip("-")
+    if not normalized:
+        normalized = "portworld-pg"
+    if not normalized[0].isalpha():
+        normalized = "p" + normalized
+    return normalized[:63]
+
+
+def _message_indicates_not_found(lowered_message: str) -> bool:
+    return any(
+        token in lowered_message
+        for token in (
+            "not found",
+            "does not exist",
+            "dbinstancenotfound",
+            "repositorynotfoundexception",
+            "loadbalancernotfound",
+            "404",
+        )
+    )
+
+
+def _lower_message(message: str | None) -> str:
+    return (message or "").strip().lower()
+
+
+def _build_runtime_contract_checks(env_values: dict[str, str]) -> list[DiagnosticCheck]:
+    storage_backend = _first_non_empty(env_values.get("BACKEND_STORAGE_BACKEND"))
+    object_store_provider = _first_non_empty(env_values.get("BACKEND_OBJECT_STORE_PROVIDER"))
+    return [
+        DiagnosticCheck(
+            id="managed_storage_backend_contract",
+            status="pass" if storage_backend == "managed" else "warn",
+            message=(
+                "BACKEND_STORAGE_BACKEND is set to managed."
+                if storage_backend == "managed"
+                else "BACKEND_STORAGE_BACKEND is not set to managed in the current workspace config."
+            ),
+            action=(
+                None
+                if storage_backend == "managed"
+                else "The deploy path will override this to managed for AWS."
+            ),
+        ),
+        DiagnosticCheck(
+            id="managed_object_store_provider_contract",
+            status="pass" if object_store_provider == "s3" else "warn",
+            message=(
+                "BACKEND_OBJECT_STORE_PROVIDER is set to s3."
+                if object_store_provider == "s3"
+                else "BACKEND_OBJECT_STORE_PROVIDER is not set to s3 in the current workspace config."
+            ),
+            action=(
+                None
+                if object_store_provider == "s3"
+                else "The deploy path will override this to s3 for AWS."
+            ),
+        ),
+    ]
+
+
+def _build_production_posture_checks(
+    *,
+    env_values: dict[str, str],
+    project_config: ProjectConfig | None,
+) -> list[DiagnosticCheck]:
+    backend_profile = _first_non_empty(
+        env_values.get("BACKEND_PROFILE"),
+        None if project_config is None else project_config.security.backend_profile,
+    )
+    cors_origins = _first_non_empty(
+        env_values.get("CORS_ORIGINS"),
+        None if project_config is None else ",".join(project_config.security.cors_origins),
+    )
+    allowed_hosts = _first_non_empty(
+        env_values.get("BACKEND_ALLOWED_HOSTS"),
+        None if project_config is None else ",".join(project_config.security.allowed_hosts),
+    )
+    return [
+        DiagnosticCheck(
+            id="production_backend_profile",
+            status="pass" if backend_profile == "production" else "warn",
+            message=(
+                "BACKEND_PROFILE is production."
+                if backend_profile == "production"
+                else "BACKEND_PROFILE is not explicitly set to production."
+            ),
+            action=(
+                None
+                if backend_profile == "production"
+                else "The deploy path will force production settings, but recording them in config is recommended."
+            ),
+        ),
+        DiagnosticCheck(
+            id="production_cors_explicit",
+            status="pass" if _is_explicit_production_value(cors_origins) else "warn",
+            message=(
+                "CORS origins are explicitly configured."
+                if _is_explicit_production_value(cors_origins)
+                else "CORS origins are unset or still use a wildcard/default posture."
+            ),
+            action="Set explicit production CORS origins before deploy.",
+        ),
+        DiagnosticCheck(
+            id="production_allowed_hosts_explicit",
+            status="pass" if _is_explicit_production_value(allowed_hosts) else "warn",
+            message=(
+                "Allowed hosts are explicitly configured."
+                if _is_explicit_production_value(allowed_hosts)
+                else "Allowed hosts are unset or still use a wildcard/default posture."
+            ),
+            action="Set explicit production allowed hosts before deploy.",
+        ),
+    ]
+
+
+def _is_explicit_production_value(value: str | None) -> bool:
+    return bool(value and value.strip() and value.strip() != "*")
 
 
 def _read_dict_string(payload: dict[str, object], key: str) -> str | None:
@@ -547,42 +937,3 @@ def _first_non_empty(*values: str | None) -> str | None:
         if normalized is not None:
             return normalized
     return None
-
-
-def _first_ecs_service(payload: dict[str, object]) -> dict[str, object] | None:
-    services = payload.get("services")
-    if not isinstance(services, list) or not services:
-        return None
-    first = services[0]
-    if not isinstance(first, dict):
-        return None
-    return first
-
-
-def _service_network_alignment_ok(*, service_payload: dict[str, object], expected_subnets: tuple[str, ...]) -> bool:
-    if not expected_subnets:
-        return True
-    network_configuration = service_payload.get("networkConfiguration")
-    if not isinstance(network_configuration, dict):
-        return False
-    awsvpc_configuration = network_configuration.get("awsvpcConfiguration")
-    if not isinstance(awsvpc_configuration, dict):
-        return False
-    subnets = awsvpc_configuration.get("subnets")
-    if not isinstance(subnets, list):
-        return False
-    resolved_subnets = {value for value in subnets if isinstance(value, str)}
-    return set(expected_subnets).issubset(resolved_subnets)
-
-
-def _task_definition_has_secret_refs(task_definition_payload: dict[str, object]) -> bool:
-    container_definitions = task_definition_payload.get("containerDefinitions")
-    if not isinstance(container_definitions, list):
-        return False
-    for container in container_definitions:
-        if not isinstance(container, dict):
-            continue
-        secrets = container.get("secrets")
-        if isinstance(secrets, list) and len(secrets) > 0:
-            return True
-    return False

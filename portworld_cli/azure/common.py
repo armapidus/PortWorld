@@ -41,6 +41,22 @@ def run_az_json(args: list[str]) -> AzureCommandResult:
         return AzureCommandResult(ok=False, value=None, message="Azure CLI returned non-JSON output.")
 
 
+def run_az_text(args: list[str]) -> AzureCommandResult:
+    completed = subprocess.run(
+        ["az", *args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return AzureCommandResult(
+            ok=False,
+            value=None,
+            message=(completed.stderr or completed.stdout).strip() or "Azure CLI command failed.",
+        )
+    return AzureCommandResult(ok=True, value=(completed.stdout or "").strip())
+
+
 def normalize_optional_text(value: str | None) -> str | None:
     if value is None:
         return None

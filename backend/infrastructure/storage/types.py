@@ -17,22 +17,26 @@ def now_ms() -> int:
 @dataclass(frozen=True, slots=True)
 class StoragePaths:
     data_root: Path
+    memory_root: Path
     user_root: Path
     session_root: Path
     vision_frames_root: Path
     sqlite_path: Path
+    user_memory_path: Path
+    cross_session_memory_path: Path
     user_profile_markdown_path: Path
-    user_profile_json_path: Path
 
     def to_dict(self) -> dict[str, str]:
         return {
             "data_root": str(self.data_root),
+            "memory_root": str(self.memory_root),
             "user_root": str(self.user_root),
             "session_root": str(self.session_root),
             "vision_frames_root": str(self.vision_frames_root),
             "sqlite_path": str(self.sqlite_path),
+            "user_memory_path": str(self.user_memory_path),
+            "cross_session_memory_path": str(self.cross_session_memory_path),
             "user_profile_markdown_path": str(self.user_profile_markdown_path),
-            "user_profile_json_path": str(self.user_profile_json_path),
         }
 
 
@@ -53,7 +57,6 @@ class StorageBootstrapResult:
     storage_backend: str
     sqlite_path: Path | None
     user_profile_markdown_path: Path | None
-    user_profile_json_path: Path | None
     bootstrapped_at_ms: int
     storage_details: dict[str, str | bool]
 
@@ -67,8 +70,6 @@ class StorageBootstrapResult:
             payload["sqlite_path"] = str(self.sqlite_path)
         if self.user_profile_markdown_path is not None:
             payload["user_profile_markdown_path"] = str(self.user_profile_markdown_path)
-        if self.user_profile_json_path is not None:
-            payload["user_profile_json_path"] = str(self.user_profile_json_path)
         return payload
 
 
@@ -76,9 +77,9 @@ class StorageBootstrapResult:
 class SessionStorageResult:
     session_dir: Path
     short_term_memory_markdown_path: Path
-    short_term_memory_json_path: Path
     session_memory_markdown_path: Path
     session_memory_json_path: Path
+    memory_candidates_log_path: Path
     vision_events_log_path: Path
     vision_routing_events_log_path: Path
 
@@ -158,5 +159,20 @@ class RealtimeReadOnlyStorageView:
     def read_session_memory(self, *, session_id: str) -> dict[str, Any]:
         return self._storage.read_session_memory(session_id=session_id)
 
+    def read_short_term_memory_markdown(self, *, session_id: str) -> str:
+        return self._storage.read_short_term_memory_markdown(session_id=session_id)
+
+    def read_session_memory_markdown(self, *, session_id: str) -> str:
+        return self._storage.read_session_memory_markdown(session_id=session_id)
+
+    def read_user_memory_payload(self) -> dict[str, Any]:
+        return self._storage.read_user_memory_payload()
+
+    def read_user_memory(self) -> str:
+        return self._storage.read_user_memory()
+
     def read_user_profile(self) -> dict[str, Any]:
-        return self._storage.read_user_profile()
+        return self._storage.read_user_memory_payload()
+
+    def read_cross_session_memory(self) -> str:
+        return self._storage.read_cross_session_memory()

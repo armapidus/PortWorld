@@ -8,27 +8,10 @@ from backend.core.provider_requirements import (
     PROVIDER_KIND_VISION,
     supported_provider_ids,
 )
+from portworld_cli.commands.compat import reject_legacy_secret_flag
 from portworld_cli.context import CLIContext
 from portworld_cli.output import exit_with_result
 from portworld_cli.services.init import InitOptions, run_init
-
-
-def _reject_legacy_secret_flag(
-    _ctx: click.Context,
-    param: click.Parameter,
-    value: str | None,
-) -> None:
-    if value is None:
-        return None
-    migration_targets = {
-        "openai_api_key": "--realtime-api-key",
-        "vision_provider_api_key": "--vision-api-key",
-        "tavily_api_key": "--search-api-key",
-    }
-    replacement = migration_targets.get(param.name, "the canonical provider-scoped flag")
-    raise click.UsageError(
-        f"{param.opts[0]} has been removed. Use {replacement} instead."
-    )
 
 
 @click.command("init")
@@ -63,21 +46,21 @@ def _reject_legacy_secret_flag(
     default=None,
     hidden=True,
     expose_value=False,
-    callback=_reject_legacy_secret_flag,
+    callback=reject_legacy_secret_flag,
 )
 @click.option(
     "--vision-provider-api-key",
     default=None,
     hidden=True,
     expose_value=False,
-    callback=_reject_legacy_secret_flag,
+    callback=reject_legacy_secret_flag,
 )
 @click.option(
     "--tavily-api-key",
     default=None,
     hidden=True,
     expose_value=False,
-    callback=_reject_legacy_secret_flag,
+    callback=reject_legacy_secret_flag,
 )
 @click.option(
     "--backend-profile",
@@ -134,10 +117,10 @@ def _reject_legacy_secret_flag(
 @click.option("--cpu", default=None, help="Default Cloud Run CPU.")
 @click.option("--memory", default=None, help="Default Cloud Run memory.")
 @click.option("--aws-region", default=None, help="Default AWS region.")
-@click.option("--aws-cluster", default=None, help="Default ECS cluster name.")
-@click.option("--aws-service", default=None, help="Default ECS service name.")
-@click.option("--aws-vpc-id", default=None, help="Default VPC id.")
-@click.option("--aws-subnet-ids", default=None, help="Default subnet ids (comma-separated).")
+@click.option("--aws-service", default=None, help="Default AWS ECS service name.")
+@click.option("--aws-cluster", default=None, help="Legacy AWS service alias.", hidden=True)
+@click.option("--aws-vpc-id", default=None, help="Default VPC id.", hidden=True)
+@click.option("--aws-subnet-ids", default=None, help="Default subnet ids (comma-separated).", hidden=True)
 @click.option("--azure-subscription", default=None, help="Default Azure subscription id.")
 @click.option("--azure-resource-group", default=None, help="Default Azure resource group.")
 @click.option("--azure-region", default=None, help="Default Azure region.")
@@ -210,9 +193,6 @@ def init_command(
                 realtime_api_key=realtime_api_key,
                 vision_api_key=vision_api_key,
                 search_api_key=search_api_key,
-                openai_api_key=None,
-                vision_provider_api_key=None,
-                tavily_api_key=None,
                 backend_profile=backend_profile,
                 cors_origins=cors_origins,
                 allowed_hosts=allowed_hosts,

@@ -76,7 +76,9 @@ def build_success_message(
             ("artifact_repository", config.artifact_repository),
             ("cloud_sql_instance", config.sql_instance_name),
             ("database_name", config.database_name),
+            ("cloud_sql_role", "operational_metadata"),
             ("bucket_name", bucket_name),
+            ("memory_source_of_truth", "object_store_files"),
             ("service_account", service_account_email),
             ("vision_memory", features.get("vision_memory")),
             ("realtime_tooling", features.get("realtime_tooling")),
@@ -127,4 +129,3 @@ def build_failure_result(
 
 def _parse_bool_string(raw_value: str) -> bool:
     return raw_value.strip().lower() in {"1", "true", "yes", "y", "on"}
-

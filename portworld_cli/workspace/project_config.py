@@ -19,6 +19,7 @@ from portworld_cli.targets import (
     TARGET_AWS_ECS_FARGATE,
     TARGET_AZURE_CONTAINER_APPS,
     TARGET_GCP_CLOUD_RUN,
+    normalize_managed_target,
 )
 
 
@@ -41,9 +42,9 @@ DEFAULT_GCP_SERVICE_NAME = "portworld-backend"
 DEFAULT_GCP_ARTIFACT_REPOSITORY = "portworld"
 DEFAULT_GCP_SQL_INSTANCE_NAME = "portworld-pg"
 DEFAULT_GCP_DATABASE_NAME = "portworld"
-DEFAULT_GCP_MIN_INSTANCES = 1
-DEFAULT_GCP_MAX_INSTANCES = 10
-DEFAULT_GCP_CONCURRENCY = 10
+DEFAULT_GCP_MIN_INSTANCES = 0
+DEFAULT_GCP_MAX_INSTANCES = 5
+DEFAULT_GCP_CONCURRENCY = 20
 DEFAULT_GCP_CPU = "1"
 DEFAULT_GCP_MEMORY = "1Gi"
 DEFAULT_PUBLISHED_HOST_PORT = 8080
@@ -165,7 +166,7 @@ class GCPCloudRunConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class AWSECSFargateConfig:
+class AWSAppRunnerConfig:
     region: str | None = None
     cluster_name: str | None = None
     service_name: str | None = None
@@ -180,7 +181,6 @@ class AWSECSFargateConfig:
             "vpc_id": self.vpc_id,
             "subnet_ids": list(self.subnet_ids),
         }
-
 
 @dataclass(frozen=True, slots=True)
 class AzureContainerAppsConfig:
@@ -218,15 +218,21 @@ class PublishedRuntimeConfig:
 class DeployConfig:
     preferred_target: str | None = None
     gcp_cloud_run: GCPCloudRunConfig = field(default_factory=GCPCloudRunConfig)
-    aws_ecs_fargate: AWSECSFargateConfig = field(default_factory=AWSECSFargateConfig)
+    aws_app_runner: AWSAppRunnerConfig = field(default_factory=AWSAppRunnerConfig)
     azure_container_apps: AzureContainerAppsConfig = field(default_factory=AzureContainerAppsConfig)
     published_runtime: PublishedRuntimeConfig = field(default_factory=PublishedRuntimeConfig)
 
+    @property
+    def aws_ecs_fargate(self) -> AWSAppRunnerConfig:
+        return self.aws_app_runner
+
     def to_payload(self) -> dict[str, Any]:
+        aws_payload = self.aws_app_runner.to_payload()
         return {
             "preferred_target": self.preferred_target,
             "gcp_cloud_run": self.gcp_cloud_run.to_payload(),
-            "aws_ecs_fargate": self.aws_ecs_fargate.to_payload(),
+            "aws_app_runner": aws_payload,
+            "aws_ecs_fargate": aws_payload,
             "azure_container_apps": self.azure_container_apps.to_payload(),
             "published_runtime": self.published_runtime.to_payload(),
         }
@@ -276,7 +282,11 @@ class ProjectConfig:
         security_payload = _read_object(payload, "security", default={})
         deploy_payload = _read_object(payload, "deploy", default={})
         gcp_payload = _read_object(deploy_payload, "gcp_cloud_run", default={})
-        aws_payload = _read_object(deploy_payload, "aws_ecs_fargate", default={})
+        aws_payload = _read_object(
+            deploy_payload,
+            "aws_app_runner",
+            default=_read_object(deploy_payload, "aws_ecs_fargate", default={}),
+        )
         azure_payload = _read_object(deploy_payload, "azure_container_apps", default={})
         published_runtime_payload = _read_object(
             deploy_payload,
@@ -284,11 +294,12 @@ class ProjectConfig:
             default={},
         )
 
-        preferred_target = _read_optional_string(
+        preferred_target_raw = _read_optional_string(
             deploy_payload,
             "preferred_target",
-            allowed=set(MANAGED_TARGETS),
+            allowed=set(MANAGED_TARGETS) | {TARGET_AWS_ECS_FARGATE},
         )
+        preferred_target = normalize_managed_target(preferred_target_raw)
         cloud_provider = _read_optional_string(
             payload,
             "cloud_provider",
@@ -403,7 +414,7 @@ class ProjectConfig:
                         default=DEFAULT_GCP_MEMORY,
                     ),
                 ),
-                aws_ecs_fargate=AWSECSFargateConfig(
+                aws_app_runner=AWSAppRunnerConfig(
                     region=_read_optional_string(aws_payload, "region"),
                     cluster_name=_read_optional_string(aws_payload, "cluster_name"),
                     service_name=_read_optional_string(aws_payload, "service_name"),
@@ -805,10 +816,11 @@ def _normalize_cloud_selection(
 
 
 def _provider_for_target(target: str) -> str:
-    if target == TARGET_AWS_ECS_FARGATE:
+    normalized_target = normalize_managed_target(target)
+    if normalized_target == TARGET_AWS_ECS_FARGATE:
         return CLOUD_PROVIDER_AWS
-    if target == TARGET_AZURE_CONTAINER_APPS:
+    if normalized_target == TARGET_AZURE_CONTAINER_APPS:
         return CLOUD_PROVIDER_AZURE
-    if target == TARGET_GCP_CLOUD_RUN:
+    if normalized_target == TARGET_GCP_CLOUD_RUN:
         return CLOUD_PROVIDER_GCP
     raise ProjectConfigTypeError(f"Unsupported managed target: {target}.")

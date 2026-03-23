@@ -266,11 +266,12 @@ def run_deploy_gcp_cloud_run(
         record_stage(
             stage_records,
             stage="cloud_sql_setup",
-            message="Ensured Cloud SQL instance, database, user, and database URL secret.",
+            message="Ensured Cloud SQL instance, database, user, and database URL secret for operational runtime metadata.",
             details={
                 "instance_name": sql_instance_ref.instance_name,
                 "connection_name": sql_instance_ref.connection_name,
                 "database_url_secret_name": database_url_secret_name,
+                "cloud_sql_role": "operational_metadata",
             },
         )
 
@@ -284,8 +285,11 @@ def run_deploy_gcp_cloud_run(
         record_stage(
             stage_records,
             stage="gcs_bucket_setup",
-            message="Ensured artifact bucket and bucket IAM binding.",
-            details={"bucket_name": bucket_name},
+            message="Ensured managed object-store bucket and bucket IAM binding.",
+            details={
+                "bucket_name": bucket_name,
+                "memory_source_of_truth": "object_store_files",
+            },
         )
 
         env_vars = stage_build_runtime_env_vars(
@@ -314,6 +318,8 @@ def run_deploy_gcp_cloud_run(
             details={
                 "env_var_count": len(env_vars),
                 "secret_binding_count": len(secret_bindings),
+                "storage_backend": "managed",
+                "object_store_provider": "gcs",
             },
         )
 

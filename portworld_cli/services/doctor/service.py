@@ -12,6 +12,7 @@ from portworld_cli.workspace.project_config import ProjectConfigError
 from portworld_cli.runtime.published import run_local_doctor_published
 from portworld_cli.runtime.source import run_local_doctor_source
 from portworld_cli.services.config.errors import ConfigRuntimeError
+from portworld_cli.targets import TARGET_AWS_ECS_FARGATE, normalize_managed_target
 from portworld_cli.workspace.discovery.paths import ProjectRootResolutionError
 from portworld_cli.workspace.state.state_store import CLIStateDecodeError, CLIStateTypeError
 from portworld_cli.workspace.session import load_workspace_session
@@ -31,7 +32,6 @@ class DoctorOptions:
     aws_service: str | None
     aws_vpc_id: str | None
     aws_subnet_ids: str | None
-    aws_certificate_arn: str | None
     aws_database_url: str | None
     aws_s3_bucket: str | None
     azure_subscription: str | None
@@ -46,6 +46,7 @@ class DoctorOptions:
 
 
 def run_doctor(cli_context: CLIContext, options: DoctorOptions) -> CommandResult:
+    normalized_target = normalize_managed_target(options.target) or options.target
     if options.target == "gcp-cloud-run":
         if (
             options.aws_region is not None
@@ -53,7 +54,6 @@ def run_doctor(cli_context: CLIContext, options: DoctorOptions) -> CommandResult
             or options.aws_service is not None
             or options.aws_vpc_id is not None
             or options.aws_subnet_ids is not None
-            or options.aws_certificate_arn is not None
             or options.aws_database_url is not None
             or options.aws_s3_bucket is not None
             or options.azure_subscription is not None
@@ -70,7 +70,7 @@ def run_doctor(cli_context: CLIContext, options: DoctorOptions) -> CommandResult
                 "AWS/Azure flags are only supported with their matching cloud targets."
             )
         return _run_gcp_cloud_run_doctor(cli_context, options=options)
-    if options.target == "aws-ecs-fargate":
+    if normalized_target == TARGET_AWS_ECS_FARGATE:
         if (
             options.project is not None
             or options.region is not None
@@ -97,7 +97,6 @@ def run_doctor(cli_context: CLIContext, options: DoctorOptions) -> CommandResult
             or options.aws_service is not None
             or options.aws_vpc_id is not None
             or options.aws_subnet_ids is not None
-            or options.aws_certificate_arn is not None
             or options.aws_database_url is not None
             or options.aws_s3_bucket is not None
         ):
@@ -113,7 +112,6 @@ def run_doctor(cli_context: CLIContext, options: DoctorOptions) -> CommandResult
         or options.aws_service is not None
         or options.aws_vpc_id is not None
         or options.aws_subnet_ids is not None
-        or options.aws_certificate_arn is not None
         or options.aws_database_url is not None
         or options.aws_s3_bucket is not None
         or options.azure_subscription is not None
@@ -379,7 +377,6 @@ def _run_aws_ecs_fargate_doctor(
         explicit_service=options.aws_service,
         explicit_vpc_id=options.aws_vpc_id,
         explicit_subnet_ids=options.aws_subnet_ids,
-        explicit_certificate_arn=options.aws_certificate_arn,
         explicit_database_url=options.aws_database_url,
         explicit_s3_bucket=options.aws_s3_bucket,
         env_values=session.merged_env_values(),
@@ -401,12 +398,16 @@ def _run_aws_ecs_fargate_doctor(
                 None if session.project_paths is None else session.project_paths.project_root,
             ),
             ("aws_region", details.region),
-            ("aws_cluster", details.cluster_name),
-            ("aws_service", details.service_name),
+            ("aws_ecs_cluster", details.cluster_name),
+            ("aws_ecs_service", details.service_name),
             ("aws_vpc_id", details.vpc_id),
             ("aws_subnet_ids", ",".join(details.subnet_ids)),
-            ("aws_certificate_arn", details.certificate_arn),
             ("s3_bucket_name", details.bucket_name),
+            ("aws_ecr_repository", details.ecr_repository),
+            ("aws_rds_instance", details.rds_instance_identifier),
+            ("aws_alb_dns_name", details.alb_dns_name),
+            ("aws_cloudfront_domain", details.cloudfront_domain_name),
+            ("aws_service_url", details.service_url),
         ),
         data={
             "target": options.target,

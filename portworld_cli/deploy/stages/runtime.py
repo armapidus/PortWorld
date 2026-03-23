@@ -164,7 +164,6 @@ def build_runtime_env_vars(
     final_env["BACKEND_STORAGE_BACKEND"] = "managed"
     final_env["BACKEND_OBJECT_STORE_PROVIDER"] = "gcs"
     final_env["BACKEND_OBJECT_STORE_NAME"] = bucket_name
-    final_env["BACKEND_OBJECT_STORE_BUCKET"] = bucket_name
     final_env["BACKEND_OBJECT_STORE_PREFIX"] = config.service_name
     final_env["CORS_ORIGINS"] = config.cors_origins
     final_env["BACKEND_ALLOWED_HOSTS"] = config.allowed_hosts
@@ -206,6 +205,14 @@ def validate_final_settings(
         settings = Settings.from_env()
         settings.validate_production_posture()
         settings.validate_storage_contract()
+        if settings.backend_storage_backend != "managed":
+            raise RuntimeError(
+                "Managed Cloud Run deploy requires BACKEND_STORAGE_BACKEND=managed."
+            )
+        if settings.backend_object_store_provider != "gcs":
+            raise RuntimeError(
+                "Managed Cloud Run deploy requires BACKEND_OBJECT_STORE_PROVIDER=gcs."
+            )
 
 
 def deploy_cloud_run_service(

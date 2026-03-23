@@ -173,9 +173,11 @@ Compose mounts one named volume at `/app/backend/var`.
 Persisted backend state lives under `BACKEND_DATA_DIR` and includes:
 
 - `portworld.db`
-- `user/user_profile.md`
-- `user/user_profile.json`
-- `session/<session_storage_key>/...` derived memory artifacts
+- `memory/USER.md`
+- `memory/CROSS_SESSION.md`
+- `memory/sessions/<session_storage_key>/SHORT_TERM.md`
+- `memory/sessions/<session_storage_key>/LONG_TERM.md`
+- optional debug journals under `memory/sessions/<session_storage_key>/...`
 
 `session_storage_key` is a deterministic collision-safe path component derived from the logical session ID.
 
@@ -218,24 +220,24 @@ Route reference:
   - public liveness endpoint for local and Cloud Run probes
 - `GET /healthz`
   - compatibility liveness alias retained for older tooling
-- `GET /profile`
-  - read the current persistent profile scaffold or populated profile
+- `GET /memory/user`
+  - read the current persistent user-memory scaffold or populated memory
 - `GET /readyz`
   - internal readiness endpoint
   - when `BACKEND_BEARER_TOKEN` is set, requires bearer auth
   - in production profile, failed checks return redacted detail strings
-- `PUT /profile`
-  - write allowlisted profile fields:
+- `PUT /memory/user`
+  - write allowlisted user-memory fields:
     - `name`
     - `job`
     - `company`
     - `preferences`
     - `projects`
-- `POST /profile/reset`
-  - reset persistent profile memory only
+- `POST /memory/user/reset`
+  - reset persistent user memory only
 - `GET /memory/export`
-  - download one bounded zip archive containing profile artifacts, derived session-memory artifacts, and `manifest.json`
-- `POST /memory/session/{session_id}/reset`
+  - download one bounded zip archive containing user-memory and session-memory artifacts plus `manifest.json`
+- `POST /memory/sessions/{session_id}/reset`
   - delete one ended session’s persisted memory set
   - active sessions return `409`
 - `VISION_DEBUG_RETAIN_RAW_FRAMES`
@@ -246,22 +248,44 @@ Minimal examples:
 
 ```bash
 curl http://127.0.0.1:8080/livez
-curl http://127.0.0.1:8080/profile
-curl -X POST http://127.0.0.1:8080/profile/reset
+curl http://127.0.0.1:8080/memory/user
+curl -X POST http://127.0.0.1:8080/memory/user/reset
 curl -OJ http://127.0.0.1:8080/memory/export
-curl -X POST http://127.0.0.1:8080/memory/session/<session_id>/reset
+curl -X POST http://127.0.0.1:8080/memory/sessions/<session_id>/reset
 ```
 
-## Cloud Run Migration Notes
+## Managed Deploy Notes
 
-Use the public CLI for the managed deploy path:
+Use the public CLI for managed deploy targets:
 
 ```bash
 portworld doctor --target gcp-cloud-run --project <project> --region <region>
 portworld deploy gcp-cloud-run --project <project> --region <region> --cors-origins https://app.example.com
+
+portworld doctor --target aws-ecs-fargate --aws-region <region>
+portworld deploy aws-ecs-fargate --region <region> --cors-origins https://app.example.com
+
+portworld doctor --target azure-container-apps --azure-subscription <subscription> --azure-resource-group <resource-group> --azure-region <region>
+portworld deploy azure-container-apps --subscription <subscription> --resource-group <resource-group> --region <region> --cors-origins https://app.example.com
+
+portworld logs gcp-cloud-run --since 24h --limit 50
+portworld logs aws-ecs-fargate --since 24h --limit 50
+portworld logs azure-container-apps --since 24h --limit 50
+
+portworld update deploy --tag <image-tag>
 ```
 
-Repeat deploys reuse `.portworld/state/gcp-cloud-run.json`. After deploy, use:
+For managed targets in the current MVP backend:
+
+- object storage is the source of truth for memory files
+- Postgres is used for operational metadata
+- `gcp-cloud-run`: Cloud Run + GCS + Cloud SQL Postgres
+- `aws-ecs-fargate`: ECS/Fargate + CloudFront + ALB + S3 + Postgres operational metadata
+- `azure-container-apps`: Container Apps + Blob Storage + Postgres operational metadata
+- current MVP hardening note:
+  AWS one-click provisions public RDS ingress and Azure one-click provisions PostgreSQL public access; validate and tighten before production use
+
+Repeat deploys reuse target-specific state files under `.portworld/state/`. After deploy, use:
 
 - public liveness: `GET /livez`
 - authenticated readiness: `GET /readyz`
@@ -272,7 +296,7 @@ Repeat deploys reuse `.portworld/state/gcp-cloud-run.json`. After deploy, use:
 - `CORS_ORIGINS=*` is the local-dev default, not a recommended production setting.
 - `BACKEND_FORWARDED_ALLOW_IPS` should be set to your reverse proxy/LB peer IPs/CIDRs when deploying behind a proxy.
 - `BACKEND_RATE_LIMIT_HTTP_IP_MAX_REQUESTS` defaults to `30` and `BACKEND_RATE_LIMIT_HTTP_WINDOW_SECONDS` defaults to `60`.
-- When `BACKEND_ENABLE_IP_RATE_LIMITS=true`, the backend IP-rate-limits `GET /profile`, `PUT /profile`, `POST /profile/reset`, `GET /memory/export`, `GET /memory/session/{session_id}/status`, and `POST /memory/session/{session_id}/reset`.
+- When `BACKEND_ENABLE_IP_RATE_LIMITS=true`, the backend IP-rate-limits `GET /memory/user`, `PUT /memory/user`, `POST /memory/user/reset`, `GET /memory/export`, `GET /memory/sessions/{session_id}/status`, and `POST /memory/sessions/{session_id}/reset`.
 - In development profile, IP rate limits stay off by default unless you explicitly enable them.
 - Visual memory keeps derived memory by default and deletes raw frames unless debug retention is enabled.
 - When `REALTIME_TOOLING_ENABLED=true` and `TAVILY_API_KEY` is unset, the backend still starts but omits `web_search`.
