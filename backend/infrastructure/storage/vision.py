@@ -3,36 +3,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from backend.infrastructure.storage.common.vision_updates import (
+    UNSET,
+    resolve_error_details_json,
+    resolve_next_retry_at_ms,
+)
 from backend.infrastructure.storage.types import VisionFrameIndexRecord, VisionFrameIngestResult, now_ms
-
-_UNSET = object()
-
-
-def _resolve_next_retry_at_ms(
-    value: int | object | None,
-    existing_value: Any,
-) -> int | None:
-    """Resolve next_retry_at_ms with fallback to existing value if _UNSET."""
-    if isinstance(value, int):
-        return value
-    if value is _UNSET and existing_value is not None:
-        return int(existing_value)
-    return None
-
-
-def _resolve_error_details_json(
-    error_details: dict[str, Any] | object | None,
-    error_code: str | None,
-    existing_json: Any,
-) -> str | None:
-    """Resolve error_details_json with fallback to existing value if _UNSET."""
-    if isinstance(error_details, dict):
-        return json.dumps(error_details, ensure_ascii=True, sort_keys=True)
-    if error_details is None:
-        return None
-    if error_details is _UNSET and error_code is not None and existing_json is not None:
-        return str(existing_json)
-    return None
 
 
 class VisionFrameStorageMixin:
@@ -168,10 +144,10 @@ class VisionFrameStorageMixin:
         provider: str | None = None,
         model: str | None = None,
         analyzed_at_ms: int | None = None,
-        next_retry_at_ms: int | object = _UNSET,
-        attempt_count: int | object = _UNSET,
+        next_retry_at_ms: int | object = UNSET,
+        attempt_count: int | object = UNSET,
         error_code: str | None = None,
-        error_details: dict[str, Any] | None | object = _UNSET,
+        error_details: dict[str, Any] | None | object = UNSET,
         summary_snippet: str | None = None,
         routing_status: str | None = None,
         routing_reason: str | None = None,
@@ -206,7 +182,7 @@ class VisionFrameStorageMixin:
                     provider=provider,
                     model=model,
                     analyzed_at_ms=analyzed_at_ms,
-                    next_retry_at_ms=_resolve_next_retry_at_ms(
+                    next_retry_at_ms=resolve_next_retry_at_ms(
                         next_retry_at_ms,
                         existing["next_retry_at_ms"],
                     ),
@@ -216,10 +192,14 @@ class VisionFrameStorageMixin:
                         else int(existing["attempt_count"] or 0)
                     ),
                     error_code=error_code,
-                    error_details_json=_resolve_error_details_json(
+                    error_details_json=resolve_error_details_json(
                         error_details,
                         error_code,
-                        existing["error_details_json"],
+                        (
+                            str(existing["error_details_json"])
+                            if existing["error_details_json"] is not None
+                            else None
+                        ),
                     ),
                     summary_snippet=summary_snippet,
                     routing_status=routing_status,

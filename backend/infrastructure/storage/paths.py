@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import re
-from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
+from backend.infrastructure.storage.common.storage_ids import (
+    legacy_storage_component_for_id,
+    storage_component_for_id,
+)
 from backend.infrastructure.storage.types import now_ms
 from backend.memory.lifecycle import (
     SESSION_MEMORY_MARKDOWN_FILE_NAME,
@@ -16,7 +19,6 @@ from backend.memory.lifecycle import (
     VISION_ROUTING_EVENTS_LOG_FILE_NAME,
 )
 
-_STORAGE_ID_PREFIX_MAX_LENGTH = 24
 _HASHED_DIR_PATTERN = re.compile(r".+--[0-9a-f]{64}$")
 
 
@@ -77,17 +79,10 @@ class StoragePathMixin:
         return self.vision_frames_session_dir(session_id=session_id)
 
     def _storage_component_for_id(self, raw_id: str) -> str:
-        prefix = re.sub(r"[^A-Za-z0-9._-]+", "_", raw_id.strip())
-        prefix = prefix.strip("._-") or "id"
-        prefix = prefix[:_STORAGE_ID_PREFIX_MAX_LENGTH]
-        digest = sha256(raw_id.encode("utf-8")).hexdigest()
-        return f"{prefix}--{digest}"
+        return storage_component_for_id(raw_id)
 
     def _legacy_storage_component_for_id(self, raw_id: str) -> str:
-        return "".join(
-            char if char.isalnum() or char in "._-" else "_"
-            for char in raw_id.strip()
-        ) or "unknown"
+        return legacy_storage_component_for_id(raw_id)
 
     def _resolved_storage_dir(self, *, root: Path, raw_id: str) -> Path:
         return root / self._storage_component_for_id(raw_id)

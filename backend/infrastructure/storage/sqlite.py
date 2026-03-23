@@ -5,6 +5,11 @@ from contextlib import contextmanager
 from time import sleep
 from typing import Any, Callable, Iterator, TypeVar
 
+from backend.infrastructure.storage.common.record_mappers import to_vision_frame_index_record
+from backend.infrastructure.storage.common.sql_fragments import (
+    ARTIFACT_INDEX_UPSERT_SQLITE,
+    VISION_FRAME_INDEX_UPSERT_SQLITE,
+)
 from backend.infrastructure.storage.types import VisionFrameIndexRecord
 
 SCHEMA_VERSION = "4"
@@ -149,26 +154,7 @@ class SQLiteStorageMixin:
         connection: sqlite3.Connection,
     ) -> None:
         connection.execute(
-            """
-            INSERT INTO artifact_index(
-                artifact_id,
-                session_id,
-                artifact_kind,
-                relative_path,
-                content_type,
-                metadata_json,
-                created_at_ms,
-                updated_at_ms
-            )
-            VALUES(?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(artifact_id) DO UPDATE SET
-                session_id=excluded.session_id,
-                artifact_kind=excluded.artifact_kind,
-                relative_path=excluded.relative_path,
-                content_type=excluded.content_type,
-                metadata_json=excluded.metadata_json,
-                updated_at_ms=excluded.updated_at_ms
-            """,
+            ARTIFACT_INDEX_UPSERT_SQLITE,
             (
                 artifact_id,
                 session_id,
@@ -193,54 +179,7 @@ class SQLiteStorageMixin:
             connection = connection_cm.__enter__()
         try:
             connection.execute(
-                """
-                INSERT INTO vision_frame_index(
-                    session_id,
-                    frame_id,
-                    capture_ts_ms,
-                    ingest_ts_ms,
-                    width,
-                    height,
-                    processing_status,
-                    gate_status,
-                    gate_reason,
-                    phash,
-                    provider,
-                    model,
-                    analyzed_at_ms,
-                    next_retry_at_ms,
-                    attempt_count,
-                    error_code,
-                    error_details_json,
-                    summary_snippet,
-                    routing_status,
-                    routing_reason,
-                    routing_score,
-                    routing_metadata_json
-                )
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(session_id, frame_id) DO UPDATE SET
-                    capture_ts_ms=excluded.capture_ts_ms,
-                    ingest_ts_ms=excluded.ingest_ts_ms,
-                    width=excluded.width,
-                    height=excluded.height,
-                    processing_status=excluded.processing_status,
-                    gate_status=excluded.gate_status,
-                    gate_reason=excluded.gate_reason,
-                    phash=excluded.phash,
-                    provider=excluded.provider,
-                    model=excluded.model,
-                    analyzed_at_ms=excluded.analyzed_at_ms,
-                    next_retry_at_ms=excluded.next_retry_at_ms,
-                    attempt_count=excluded.attempt_count,
-                    error_code=excluded.error_code,
-                    error_details_json=excluded.error_details_json,
-                    summary_snippet=excluded.summary_snippet,
-                    routing_status=excluded.routing_status,
-                    routing_reason=excluded.routing_reason,
-                    routing_score=excluded.routing_score,
-                    routing_metadata_json=excluded.routing_metadata_json
-                """,
+                VISION_FRAME_INDEX_UPSERT_SQLITE,
                 (
                     record.session_id,
                     record.frame_id,
@@ -292,27 +231,4 @@ class SQLiteStorageMixin:
         return "database is locked" in message or "database is busy" in message
 
     def _row_to_vision_frame_index_record(self, row: sqlite3.Row) -> VisionFrameIndexRecord:
-        return VisionFrameIndexRecord(
-            session_id=str(row["session_id"]),
-            frame_id=str(row["frame_id"]),
-            capture_ts_ms=int(row["capture_ts_ms"]),
-            ingest_ts_ms=int(row["ingest_ts_ms"]),
-            width=int(row["width"]),
-            height=int(row["height"]),
-            processing_status=str(row["processing_status"]),
-            gate_status=str(row["gate_status"]) if row["gate_status"] is not None else None,
-            gate_reason=str(row["gate_reason"]) if row["gate_reason"] is not None else None,
-            phash=str(row["phash"]) if row["phash"] is not None else None,
-            provider=str(row["provider"]) if row["provider"] is not None else None,
-            model=str(row["model"]) if row["model"] is not None else None,
-            analyzed_at_ms=int(row["analyzed_at_ms"]) if row["analyzed_at_ms"] is not None else None,
-            next_retry_at_ms=int(row["next_retry_at_ms"]) if row["next_retry_at_ms"] is not None else None,
-            attempt_count=int(row["attempt_count"] or 0),
-            error_code=str(row["error_code"]) if row["error_code"] is not None else None,
-            error_details_json=str(row["error_details_json"]) if row["error_details_json"] is not None else None,
-            summary_snippet=str(row["summary_snippet"]) if row["summary_snippet"] is not None else None,
-            routing_status=str(row["routing_status"]) if row["routing_status"] is not None else None,
-            routing_reason=str(row["routing_reason"]) if row["routing_reason"] is not None else None,
-            routing_score=float(row["routing_score"]) if row["routing_score"] is not None else None,
-            routing_metadata_json=str(row["routing_metadata_json"]) if row["routing_metadata_json"] is not None else None,
-        )
+        return to_vision_frame_index_record(row)
