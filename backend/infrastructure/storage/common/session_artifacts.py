@@ -33,6 +33,12 @@ def session_artifact_descriptors(
             content_type="text/markdown",
         ),
         SessionArtifactDescriptor(
+            artifact_id=f"{session_id}:memory_candidate_log",
+            artifact_kind="memory_candidate_log",
+            artifact_path=session_storage.memory_candidates_log_path,
+            content_type="application/x-ndjson",
+        ),
+        SessionArtifactDescriptor(
             artifact_id=f"{session_id}:vision_event_log",
             artifact_kind="vision_event_log",
             artifact_path=session_storage.vision_events_log_path,

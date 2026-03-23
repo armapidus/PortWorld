@@ -41,6 +41,13 @@ def list_memory_export_artifacts(storage: object) -> list[MemoryExportArtifact]:
         )
         artifacts.extend(
             storage._build_export_artifacts_for_paths(
+                artifact_kind="memory_candidate_log",
+                session_id=session_id,
+                paths=(storage._relative_path(session_storage.memory_candidates_log_path),),
+            )
+        )
+        artifacts.extend(
+            storage._build_export_artifacts_for_paths(
                 artifact_kind="vision_event_log",
                 session_id=session_id,
                 paths=(storage._relative_path(session_storage.vision_events_log_path),),

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import re
-from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
+from backend.infrastructure.storage.common.storage_ids import storage_component_for_id
 from backend.memory.lifecycle import (
     CROSS_SESSION_MEMORY_TEMPLATE,
     MEMORY_CANDIDATES_LOG_FILE_NAME,
@@ -15,9 +14,6 @@ from backend.memory.lifecycle import (
     VISION_EVENTS_LOG_FILE_NAME,
     VISION_ROUTING_EVENTS_LOG_FILE_NAME,
 )
-
-_STORAGE_ID_PREFIX_MAX_LENGTH = 24
-
 
 class StoragePathMixin:
     paths: Any
@@ -78,11 +74,7 @@ class StoragePathMixin:
         return self.vision_frames_session_dir(session_id=session_id)
 
     def _storage_component_for_id(self, raw_id: str) -> str:
-        prefix = re.sub(r"[^A-Za-z0-9._-]+", "_", raw_id.strip())
-        prefix = prefix.strip("._-") or "id"
-        prefix = prefix[:_STORAGE_ID_PREFIX_MAX_LENGTH]
-        digest = sha256(raw_id.encode("utf-8")).hexdigest()
-        return f"{prefix}--{digest}"
+        return storage_component_for_id(raw_id)
 
     def _resolved_storage_dir(self, *, root: Path, raw_id: str) -> Path:
         return root / self._storage_component_for_id(raw_id)

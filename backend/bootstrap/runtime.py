@@ -4,9 +4,9 @@ from dataclasses import dataclass
 
 from backend.core.settings import Settings
 from backend.core.storage import BackendStorage, StorageInfo, StoragePaths
-from backend.infrastructure.storage.object_store import build_object_store
 from backend.infrastructure.storage.local import LocalBackendStorage
 from backend.infrastructure.storage.managed import ManagedBackendStorage
+from backend.infrastructure.storage.providers.object_store.factory import build_object_store
 from backend.memory.consolidation import DurableMemoryConsolidationRuntime
 from backend.realtime.factory import RealtimeProviderFactory
 from backend.tools.runtime import RealtimeToolingRuntime

@@ -4,6 +4,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from backend.infrastructure.storage.common.vision_updates import (
+    resolve_error_details_json,
+    resolve_next_retry_at_ms,
+)
 from backend.infrastructure.storage.types import ArtifactRecord, VisionFrameIndexRecord, VisionFrameIngestResult
 
 
@@ -51,7 +55,7 @@ def update_vision_frame_processing(
         provider=provider,
         model=model,
         analyzed_at_ms=analyzed_at_ms,
-        next_retry_at_ms=storage._resolve_next_retry_at_ms(
+        next_retry_at_ms=resolve_next_retry_at_ms(
             next_retry_at_ms,
             existing.next_retry_at_ms,
         ),
@@ -61,7 +65,7 @@ def update_vision_frame_processing(
             else int(existing.attempt_count or 0)
         ),
         error_code=error_code,
-        error_details_json=storage._resolve_error_details_json(
+        error_details_json=resolve_error_details_json(
             error_details,
             error_code,
             existing.error_details_json,
