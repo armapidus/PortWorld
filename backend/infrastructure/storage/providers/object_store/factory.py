@@ -1,32 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from importlib import import_module
 
-from backend.infrastructure.storage.providers.object_store.azure_blob import AzureBlobObjectStore
 from backend.infrastructure.storage.providers.object_store.base import ObjectStore
-from backend.infrastructure.storage.providers.object_store.gcs import GCSObjectStore
-from backend.infrastructure.storage.providers.object_store.s3 import S3ObjectStore
 
-
-ObjectStoreBuilder = Callable[[str, str | None, str], ObjectStore]
-
-
-def _build_gcs(store_name: str, endpoint: str | None, key_prefix: str) -> ObjectStore:
-    return GCSObjectStore(store_name=store_name, endpoint=endpoint, key_prefix=key_prefix)
-
-
-def _build_s3(store_name: str, endpoint: str | None, key_prefix: str) -> ObjectStore:
-    return S3ObjectStore(store_name=store_name, endpoint=endpoint, key_prefix=key_prefix)
-
-
-def _build_azure_blob(store_name: str, endpoint: str | None, key_prefix: str) -> ObjectStore:
-    return AzureBlobObjectStore(store_name=store_name, endpoint=endpoint, key_prefix=key_prefix)
-
-
-_OBJECT_STORE_BUILDERS: dict[str, ObjectStoreBuilder] = {
-    "gcs": _build_gcs,
-    "s3": _build_s3,
-    "azure_blob": _build_azure_blob,
+_OBJECT_STORE_TYPES: dict[str, tuple[str, str]] = {
+    # Keep compatibility module paths so test monkeypatching and legacy imports still work.
+    "gcs": ("backend.infrastructure.storage.gcs", "GCSObjectStore"),
+    "s3": ("backend.infrastructure.storage.s3", "S3ObjectStore"),
+    "azure_blob": ("backend.infrastructure.storage.azure_blob", "AzureBlobObjectStore"),
 }
 
 
@@ -42,7 +24,14 @@ def build_object_store(
     if not resolved_store_name:
         raise RuntimeError("Managed object store name is required.")
 
-    builder = _OBJECT_STORE_BUILDERS.get(provider)
-    if builder is None:
+    object_store_type = _OBJECT_STORE_TYPES.get(provider)
+    if object_store_type is None:
         raise RuntimeError(f"Unsupported managed object store provider: {provider!r}")
-    return builder(resolved_store_name, endpoint, key_prefix)
+    module_name, class_name = object_store_type
+    module = import_module(module_name)
+    object_store_class = getattr(module, class_name)
+    return object_store_class(
+        store_name=resolved_store_name,
+        endpoint=endpoint,
+        key_prefix=key_prefix,
+    )
