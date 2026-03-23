@@ -26,7 +26,6 @@ from backend.memory.events import AcceptedVisionEvent, coerce_accepted_vision_ev
 from backend.memory.lifecycle import (
     CROSS_SESSION_MEMORY_FILE_NAME,
     CROSS_SESSION_MEMORY_TEMPLATE,
-    PROFILE_ARTIFACT_FILE_NAMES,
     SESSION_MEMORY_TEMPLATE,
     SESSION_MEMORY_MARKDOWN_FILE_NAME,
     SHORT_TERM_MEMORY_TEMPLATE,
@@ -53,8 +52,6 @@ _STORAGE_ID_PREFIX_MAX_LENGTH = 24
 _UNSET = object()
 _CANONICAL_USER_MEMORY_RELATIVE_PATH = f"memory/{USER_MEMORY_FILE_NAME}"
 _CANONICAL_CROSS_SESSION_MEMORY_RELATIVE_PATH = f"memory/{CROSS_SESSION_MEMORY_FILE_NAME}"
-_LEGACY_PROFILE_MARKDOWN_RELATIVE_PATH = f"user/{PROFILE_ARTIFACT_FILE_NAMES[0]}"
-_LEGACY_PROFILE_JSON_RELATIVE_PATH = f"user/{PROFILE_ARTIFACT_FILE_NAMES[1]}"
 
 
 def _resolve_next_retry_at_ms(
@@ -171,54 +168,16 @@ class ManagedBackendStorage(BackendStorage):
         return build_profile_payload(record, include_metadata=False)
 
     def read_user_profile_markdown(self) -> str:
-        markdown_text = self.object_store.get_text(
-            relative_path=_CANONICAL_USER_MEMORY_RELATIVE_PATH
-        )
-        if markdown_text is not None:
-            return markdown_text
-        legacy_markdown = self.object_store.get_text(
-            relative_path=_LEGACY_PROFILE_MARKDOWN_RELATIVE_PATH
-        )
-        if legacy_markdown is not None:
-            self.object_store.put_text(
-                relative_path=_CANONICAL_USER_MEMORY_RELATIVE_PATH,
-                content=legacy_markdown,
-                content_type="text/markdown",
-            )
-            return legacy_markdown
-        legacy_json_payload = self._read_json_artifact(
-            relative_path=_LEGACY_PROFILE_JSON_RELATIVE_PATH,
-            context="managed legacy profile json artifact",
-        )
-        if legacy_json_payload is not None:
-            rendered = render_profile_markdown(parse_profile_record(legacy_json_payload))
-            self.object_store.put_text(
-                relative_path=_CANONICAL_USER_MEMORY_RELATIVE_PATH,
-                content=rendered,
-                content_type="text/markdown",
-            )
-            return rendered
-        document = self.metadata_store.read_profile_document()
-        fallback = self._coerce_text(document.get("markdown_text")) or empty_profile_markdown()
-        self.object_store.put_text(
+        return self._read_or_initialize_markdown_artifact(
             relative_path=_CANONICAL_USER_MEMORY_RELATIVE_PATH,
-            content=fallback,
-            content_type="text/markdown",
+            default_text=empty_profile_markdown(),
         )
-        return fallback
 
     def read_cross_session_memory(self) -> str:
-        cross_session_markdown = self.object_store.get_text(
-            relative_path=_CANONICAL_CROSS_SESSION_MEMORY_RELATIVE_PATH
-        )
-        if cross_session_markdown is not None:
-            return cross_session_markdown
-        self.object_store.put_text(
+        return self._read_or_initialize_markdown_artifact(
             relative_path=_CANONICAL_CROSS_SESSION_MEMORY_RELATIVE_PATH,
-            content=CROSS_SESSION_MEMORY_TEMPLATE,
-            content_type="text/markdown",
+            default_text=CROSS_SESSION_MEMORY_TEMPLATE,
         )
-        return CROSS_SESSION_MEMORY_TEMPLATE
 
     def write_user_profile(
         self,
@@ -296,46 +255,18 @@ class ManagedBackendStorage(BackendStorage):
     def read_session_memory(self, *, session_id: str) -> dict[str, Any]:
         self._require_session_persisted(session_id=session_id)
         session_storage = self.get_session_storage_paths(session_id=session_id)
-        markdown_text = self._read_memory_markdown_with_fallbacks(
-            canonical_relative_path=self._relative_path(session_storage.session_memory_markdown_path),
-            legacy_relative_paths=(
-                self._legacy_session_relative_path(
-                    session_id=session_id,
-                    file_name="session_memory.md",
-                ),
-            ),
-            fallback_document=self._coerce_text(
-                (self.metadata_store.read_session_memory_document(
-                    session_id=session_id,
-                    memory_scope="session",
-                ) or {}).get("markdown_text")
-            ),
-            fallback_template=SESSION_MEMORY_TEMPLATE,
-            content_type="text/markdown",
-            context=f"managed session memory artifact session_id={session_id}",
+        markdown_text = self._read_or_initialize_markdown_artifact(
+            relative_path=self._relative_path(session_storage.session_memory_markdown_path),
+            default_text=SESSION_MEMORY_TEMPLATE,
         )
         return self._read_memory_markdown_payload(markdown_text)
 
     def read_short_term_memory(self, *, session_id: str) -> dict[str, Any]:
         self._require_session_persisted(session_id=session_id)
         session_storage = self.get_session_storage_paths(session_id=session_id)
-        markdown_text = self._read_memory_markdown_with_fallbacks(
-            canonical_relative_path=self._relative_path(session_storage.short_term_memory_markdown_path),
-            legacy_relative_paths=(
-                self._legacy_session_relative_path(
-                    session_id=session_id,
-                    file_name="short_term_memory.md",
-                ),
-            ),
-            fallback_document=self._coerce_text(
-                (self.metadata_store.read_session_memory_document(
-                    session_id=session_id,
-                    memory_scope="short_term",
-                ) or {}).get("markdown_text")
-            ),
-            fallback_template=SHORT_TERM_MEMORY_TEMPLATE,
-            content_type="text/markdown",
-            context=f"managed short-term memory artifact session_id={session_id}",
+        markdown_text = self._read_or_initialize_markdown_artifact(
+            relative_path=self._relative_path(session_storage.short_term_memory_markdown_path),
+            default_text=SHORT_TERM_MEMORY_TEMPLATE,
         )
         return self._read_memory_markdown_payload(markdown_text)
 
@@ -433,9 +364,6 @@ class ManagedBackendStorage(BackendStorage):
             self._relative_path(self.get_session_storage_paths(session_id=session_id).session_memory_markdown_path),
             self._relative_path(self.get_session_storage_paths(session_id=session_id).vision_events_log_path),
             self._relative_path(self.get_session_storage_paths(session_id=session_id).vision_routing_events_log_path),
-            self._legacy_session_relative_path(session_id=session_id, file_name="short_term_memory.md"),
-            self._legacy_session_relative_path(session_id=session_id, file_name="session_memory.md"),
-            self._legacy_session_relative_path(session_id=session_id, file_name="vision_events.jsonl"),
         }
         for artifact in self.metadata_store.list_artifact_records_for_session(session_id=session_id):
             relative_paths.add(artifact.relative_path)
@@ -795,12 +723,6 @@ class ManagedBackendStorage(BackendStorage):
             )
         return artifacts
 
-    def migrate_legacy_storage_layout(self) -> dict[str, Any]:
-        raise RuntimeError(
-            "Storage layout migration is only supported when "
-            "BACKEND_STORAGE_BACKEND=local."
-        )
-
     def _register_session_artifacts(
         self,
         *,
@@ -851,60 +773,22 @@ class ManagedBackendStorage(BackendStorage):
         session_id: str,
         session_storage: SessionStorageResult,
     ) -> None:
-        self._read_memory_markdown_with_fallbacks(
-            canonical_relative_path=self._relative_path(session_storage.short_term_memory_markdown_path),
-            legacy_relative_paths=(
-                self._legacy_session_relative_path(
-                    session_id=session_id,
-                    file_name="short_term_memory.md",
-                ),
-            ),
-            fallback_document=self._coerce_text(
-                (self.metadata_store.read_session_memory_document(
-                    session_id=session_id,
-                    memory_scope="short_term",
-                ) or {}).get("markdown_text")
-            ),
-            fallback_template=SHORT_TERM_MEMORY_TEMPLATE,
-            content_type="text/markdown",
-            context=f"managed short-term memory artifact session_id={session_id}",
+        self._read_or_initialize_markdown_artifact(
+            relative_path=self._relative_path(session_storage.short_term_memory_markdown_path),
+            default_text=SHORT_TERM_MEMORY_TEMPLATE,
         )
-        self._read_memory_markdown_with_fallbacks(
-            canonical_relative_path=self._relative_path(session_storage.session_memory_markdown_path),
-            legacy_relative_paths=(
-                self._legacy_session_relative_path(
-                    session_id=session_id,
-                    file_name="session_memory.md",
-                ),
-            ),
-            fallback_document=self._coerce_text(
-                (self.metadata_store.read_session_memory_document(
-                    session_id=session_id,
-                    memory_scope="session",
-                ) or {}).get("markdown_text")
-            ),
-            fallback_template=SESSION_MEMORY_TEMPLATE,
-            content_type="text/markdown",
-            context=f"managed session memory artifact session_id={session_id}",
+        self._read_or_initialize_markdown_artifact(
+            relative_path=self._relative_path(session_storage.session_memory_markdown_path),
+            default_text=SESSION_MEMORY_TEMPLATE,
         )
         self._ensure_text_artifact(
             relative_path=self._relative_path(session_storage.vision_events_log_path),
-            fallback_text=self._render_ndjson(
-                self.metadata_store.list_session_events(
-                    session_id=session_id,
-                    log_kind="vision_events",
-                )
-            ),
+            fallback_text="",
             content_type="application/x-ndjson",
         )
         self._ensure_text_artifact(
             relative_path=self._relative_path(session_storage.vision_routing_events_log_path),
-            fallback_text=self._render_ndjson(
-                self.metadata_store.list_session_events(
-                    session_id=session_id,
-                    log_kind="vision_routing_events",
-                )
-            ),
+            fallback_text="",
             content_type="application/x-ndjson",
         )
 
@@ -941,10 +825,7 @@ class ManagedBackendStorage(BackendStorage):
             context=f"managed {log_kind} artifact session_id={session_id}",
         )
         if payloads is None:
-            payloads = self.metadata_store.list_session_events(
-                session_id=session_id,
-                log_kind=log_kind,
-            )
+            payloads = []
         payloads.append(event)
         self.object_store.put_text(
             relative_path=relative_path,
@@ -970,47 +851,7 @@ class ManagedBackendStorage(BackendStorage):
         )
         if from_object is not None:
             return from_object
-        return self.metadata_store.list_session_events(
-            session_id=session_id,
-            log_kind=log_kind,
-        )
-
-    def _read_memory_markdown_with_fallbacks(
-        self,
-        *,
-        canonical_relative_path: str,
-        legacy_relative_paths: tuple[str, ...],
-        fallback_document: str | None,
-        fallback_template: str,
-        content_type: str,
-        context: str,
-    ) -> str:
-        canonical_text = self.object_store.get_text(relative_path=canonical_relative_path)
-        if canonical_text is not None:
-            return canonical_text
-        for legacy_path in legacy_relative_paths:
-            legacy_text = self.object_store.get_text(relative_path=legacy_path)
-            if legacy_text is None:
-                continue
-            self.object_store.put_text(
-                relative_path=canonical_relative_path,
-                content=legacy_text,
-                content_type=content_type,
-            )
-            return legacy_text
-        if fallback_document is not None:
-            self.object_store.put_text(
-                relative_path=canonical_relative_path,
-                content=fallback_document,
-                content_type=content_type,
-            )
-            return fallback_document
-        self.object_store.put_text(
-            relative_path=canonical_relative_path,
-            content=fallback_template,
-            content_type=content_type,
-        )
-        return fallback_template
+        return []
 
     def _read_memory_markdown_payload(self, markdown: str) -> dict[str, Any]:
         payload: dict[str, Any] = {}
@@ -1069,21 +910,6 @@ class ManagedBackendStorage(BackendStorage):
             payload[canonical_key] = value
         return payload
 
-    def _read_json_artifact(
-        self,
-        *,
-        relative_path: str,
-        context: str,
-    ) -> dict[str, object] | None:
-        raw_json = self.object_store.get_text(relative_path=relative_path)
-        if raw_json is None:
-            return None
-        payload = self._parse_json_payload(raw_json, context=context)
-        if payload is None:
-            logger.warning("Failed decoding %s from object store; falling back", context)
-            return None
-        return payload
-
     def _read_ndjson_artifact(
         self,
         *,
@@ -1100,31 +926,13 @@ class ManagedBackendStorage(BackendStorage):
             try:
                 payload = json.loads(line)
             except json.JSONDecodeError:
-                logger.warning("Failed decoding %s line=%s; falling back", context, index)
+                logger.warning("Failed decoding %s line=%s; returning empty payload", context, index)
                 return None
             if not isinstance(payload, dict):
-                logger.warning("Invalid NDJSON root for %s line=%s; falling back", context, index)
+                logger.warning("Invalid NDJSON root for %s line=%s; returning empty payload", context, index)
                 return None
             payloads.append(payload)
         return payloads
-
-    def _parse_json_payload(
-        self,
-        raw_json: str | None,
-        *,
-        context: str,
-    ) -> dict[str, object] | None:
-        if raw_json is None:
-            return None
-        try:
-            payload = json.loads(raw_json)
-        except json.JSONDecodeError:
-            logger.warning("Failed decoding %s", context)
-            return None
-        if not isinstance(payload, dict):
-            logger.warning("Invalid JSON root for %s", context)
-            return None
-        return payload
 
     def _read_profile_markdown_export_bytes(self) -> bytes:
         markdown_text = self.object_store.get_text(
@@ -1178,11 +986,6 @@ class ManagedBackendStorage(BackendStorage):
             return normalize_object_store_relative_path(artifact_path)
         raise TypeError(f"Unsupported managed artifact path type: {type(artifact_path).__name__}")
 
-    def _coerce_text(self, value: object) -> str | None:
-        if isinstance(value, str):
-            return value
-        return None
-
     def _render_ndjson(self, payloads: list[dict[str, Any]]) -> str:
         if not payloads:
             return ""
@@ -1191,10 +994,21 @@ class ManagedBackendStorage(BackendStorage):
             for payload in payloads
         )
 
-    def _legacy_session_relative_path(self, *, session_id: str, file_name: str) -> str:
-        return normalize_object_store_relative_path(
-            str(Path("session") / self._storage_component_for_id(session_id) / file_name)
+    def _read_or_initialize_markdown_artifact(
+        self,
+        *,
+        relative_path: str,
+        default_text: str,
+    ) -> str:
+        existing_text = self.object_store.get_text(relative_path=relative_path)
+        if existing_text is not None:
+            return existing_text
+        self.object_store.put_text(
+            relative_path=relative_path,
+            content=default_text,
+            content_type="text/markdown",
         )
+        return default_text
 
     def _parse_csv_list(self, raw_value: str) -> list[str]:
         values: list[str] = []
