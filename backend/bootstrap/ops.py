@@ -7,7 +7,7 @@ from backend.bootstrap.memory_export import write_memory_export_zip
 from backend.bootstrap.runtime import build_backend_storage, check_runtime_configuration
 from backend.core.settings import Settings
 from backend.core.storage import now_ms
-from backend.infrastructure.storage import StorageBootstrapResult
+from backend.infrastructure.storage.types import StorageBootstrapResult
 
 
 def check_backend_config(
