@@ -43,7 +43,7 @@ LEGACY_PIPX_UPGRADE_COMMAND = "python3 -m pipx upgrade {package_name}"
 UPDATE_CLI_COMMAND_NAME = "portworld update cli"
 UPDATE_DEPLOY_COMMAND_NAME = "portworld update deploy"
 WRAPPED_DEPLOY_COMMAND = "portworld deploy gcp-cloud-run"
-SELF_HOST_DOCS_HINT = "See backend/README.md and docs/BACKEND_SELF_HOSTING.md."
+SELF_HOST_DOCS_HINT = "See backend/README.md and docs/operations/BACKEND_SELF_HOSTING.md."
 
 
 class UpdateUsageError(RuntimeError):

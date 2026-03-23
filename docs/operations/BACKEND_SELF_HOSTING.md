@@ -110,7 +110,7 @@ Start the backend:
 docker compose up --build
 ```
 
-The image installs the pinned backend runtime set from `backend/requirements.txt`. The editable top-level dependency list lives in `backend/requirements.in`. This improves install determinism, but it is not yet a fully hashed cross-platform lockfile.
+The backend image installs the packaged runtime from `pyproject.toml`.
 
 Verify process health:
 
@@ -125,7 +125,7 @@ Expected response:
 ```
 
 `GET /livez` confirms process liveness only. It does not validate upstream provider credentials or provider readiness.
-Use `GET /livez` for public and Cloud Run liveness checks. `GET /healthz` remains available as a compatibility alias for older local tooling.
+Use `GET /livez` for public and Cloud Run liveness checks.
 Use `portworld ops check-config --full-readiness` for a stricter preflight that includes provider validation and a storage bootstrap probe. The legacy `python3 -m backend.cli check-config --full-readiness` path still works.
 
 Optional operator CLI commands from the repo root:
@@ -224,7 +224,6 @@ Route reference:
 
 - `GET /livez`
   - public liveness endpoint for local and Cloud Run probes
-- `GET /healthz`
   - compatibility liveness alias retained for older tooling
 - `GET /profile`
   - read the current persistent profile scaffold or populated profile

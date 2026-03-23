@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Mapping
 
-from backend.infrastructure.storage import (
+from backend.infrastructure.storage.errors import CorruptStorageArtifactError, SessionNotFoundError
+from backend.infrastructure.storage.types import (
     ArtifactRecord,
-    CorruptStorageArtifactError,
     MemoryExportArtifact,
     RealtimeReadOnlyStorageView,
-    SessionNotFoundError,
     SessionMemoryResetResult,
     SessionStorageResult,
     StorageBootstrapResult,
