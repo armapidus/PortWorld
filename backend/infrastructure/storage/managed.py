@@ -28,10 +28,8 @@ from backend.memory.lifecycle import (
     CROSS_SESSION_MEMORY_TEMPLATE,
     MEMORY_CANDIDATES_LOG_FILE_NAME,
     SESSION_MEMORY_TEMPLATE,
-    SESSION_MEMORY_JSON_FILE_NAME,
     SESSION_MEMORY_MARKDOWN_FILE_NAME,
     SHORT_TERM_MEMORY_TEMPLATE,
-    SHORT_TERM_MEMORY_JSON_FILE_NAME,
     SHORT_TERM_MEMORY_MARKDOWN_FILE_NAME,
     USER_MEMORY_ARTIFACT_FILE_NAMES,
     USER_MEMORY_FILE_NAME,
@@ -117,7 +115,6 @@ class ManagedBackendStorage(BackendStorage):
             storage_backend=self.backend_name,
             sqlite_path=None,
             user_profile_markdown_path=None,
-            user_profile_json_path=None,
             bootstrapped_at_ms=now_ms(),
             storage_details=dict(self.storage_info.details),
         )
@@ -142,7 +139,6 @@ class ManagedBackendStorage(BackendStorage):
         return SessionStorageResult(
             session_dir=session_dir,
             short_term_memory_markdown_path=session_dir / SHORT_TERM_MEMORY_MARKDOWN_FILE_NAME,
-            short_term_memory_json_path=session_dir / SHORT_TERM_MEMORY_JSON_FILE_NAME,
             session_memory_markdown_path=session_dir / SESSION_MEMORY_MARKDOWN_FILE_NAME,
             session_memory_json_path=session_dir / SESSION_MEMORY_JSON_FILE_NAME,
             memory_candidates_log_path=session_dir / MEMORY_CANDIDATES_LOG_FILE_NAME,
@@ -261,13 +257,6 @@ class ManagedBackendStorage(BackendStorage):
             content_type="text/markdown",
         )
         return empty_user_memory_payload()
-
-    def write_user_memory(self, *, markdown: str) -> None:
-        self.object_store.put_text(
-            relative_path=_CANONICAL_USER_MEMORY_RELATIVE_PATH,
-            content=markdown,
-            content_type="text/markdown",
-        )
 
     def write_cross_session_memory(self, *, markdown: str) -> None:
         self.object_store.put_text(
