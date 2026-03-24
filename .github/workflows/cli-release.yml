@@ -138,6 +138,52 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
 
+      - name: Wait for TestPyPI index propagation
+        env:
+          PACKAGE_NAME: ${{ needs.validate.outputs.package_name }}
+          PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          python - <<'PY'
+          import os
+          import time
+          import urllib.error
+          import urllib.request
+
+          package_name = os.environ["PACKAGE_NAME"].strip()
+          package_version = os.environ["PACKAGE_VERSION"].strip()
+          simple_index_url = f"https://test.pypi.org/simple/{package_name}/"
+          deadline = time.time() + 300
+          poll_interval_seconds = 5
+
+          while True:
+              try:
+                  with urllib.request.urlopen(simple_index_url, timeout=15) as response:
+                      html = response.read().decode("utf-8", errors="replace")
+              except urllib.error.URLError as exc:
+                  if time.time() >= deadline:
+                      raise SystemExit(
+                          f"Timed out waiting for TestPyPI index {simple_index_url}: {exc}"
+                      ) from exc
+                  print(f"TestPyPI index not reachable yet: {exc}; retrying in {poll_interval_seconds}s")
+                  time.sleep(poll_interval_seconds)
+                  continue
+
+              if package_version in html:
+                  print(f"Found {package_name}=={package_version} on TestPyPI.")
+                  break
+
+              if time.time() >= deadline:
+                  raise SystemExit(
+                      f"Timed out waiting for {package_name}=={package_version} to appear on TestPyPI."
+                  )
+
+              print(
+                  f"{package_name}=={package_version} not visible on TestPyPI yet; "
+                  f"retrying in {poll_interval_seconds}s"
+              )
+              time.sleep(poll_interval_seconds)
+          PY
+
       - name: Install package from TestPyPI
         env:
           PACKAGE_NAME: ${{ needs.validate.outputs.package_name }}

@@ -26,6 +26,27 @@ must mirror the corresponding section in this changelog.
 
 - No user-visible security changes recorded yet.
 
+## [v0.2.0b8] - 2026-03-24
+
+### Added
+
+- No user-visible additions recorded yet.
+
+### Changed
+
+- Release automation now waits for TestPyPI package index propagation before
+  running the installed CLI smoke test, avoiding false negatives immediately
+  after publish.
+
+### Fixed
+
+- Fixed managed-storage startup in published runtimes by aligning the managed
+  user-memory bootstrap path with the canonical user-memory helper imports.
+
+### Security
+
+- No user-visible security changes recorded yet.
+
 ## [v0.2.0b7] - 2026-03-24
 
 ### Added

@@ -175,7 +175,7 @@ class ManagedBackendStorage(BackendStorage):
     def read_user_memory_markdown(self) -> str:
         return self._read_or_initialize_markdown_artifact(
             relative_path=_CANONICAL_USER_MEMORY_RELATIVE_PATH,
-            default_text=empty_profile_markdown(),
+            default_text=empty_user_memory_markdown(),
         )
 
     def read_user_profile_markdown(self) -> str:
