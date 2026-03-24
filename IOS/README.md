@@ -138,7 +138,7 @@ These are useful for migration context and historical reasoning only.
 
 ### Retained Future-Hardware Dependency
 
-- [meta-wearables-dat-ios](https://github.com/facebook/meta-wearables-dat-ios) v0.4.0
+- [meta-wearables-dat-ios](https://github.com/facebook/meta-wearables-dat-ios) v0.5.0
 
 The DAT SDK remains in the project because later work will extend the cleaned phone runtime toward glasses support.
 
