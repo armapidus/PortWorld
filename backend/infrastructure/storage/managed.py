@@ -172,11 +172,14 @@ class ManagedBackendStorage(BackendStorage):
         record = parse_user_memory_markdown(markdown_text)
         return build_user_memory_payload(record, include_metadata=False)
 
-    def read_user_profile_markdown(self) -> str:
+    def read_user_memory_markdown(self) -> str:
         return self._read_or_initialize_markdown_artifact(
             relative_path=_CANONICAL_USER_MEMORY_RELATIVE_PATH,
             default_text=empty_profile_markdown(),
         )
+
+    def read_user_profile_markdown(self) -> str:
+        return self.read_user_memory_markdown()
 
     def read_cross_session_memory(self) -> str:
         return self._read_or_initialize_markdown_artifact(
@@ -217,6 +220,13 @@ class ManagedBackendStorage(BackendStorage):
             content_type="text/markdown",
         )
         return empty_user_memory_payload()
+
+    def write_user_memory(self, *, markdown: str) -> None:
+        self.object_store.put_text(
+            relative_path=_CANONICAL_USER_MEMORY_RELATIVE_PATH,
+            content=markdown,
+            content_type="text/markdown",
+        )
 
     def write_cross_session_memory(self, *, markdown: str) -> None:
         self.object_store.put_text(

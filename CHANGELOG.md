@@ -26,6 +26,30 @@ must mirror the corresponding section in this changelog.
 
 - No user-visible security changes recorded yet.
 
+## [v0.2.0b7] - 2026-03-24
+
+### Added
+
+- No user-visible additions recorded yet.
+
+### Changed
+
+- Updated published workspace env defaults so released operator workspaces use
+  the same current model names as `backend/.env.example`.
+- Corrected published GCP deploy image resolution for GHCR-backed Artifact
+  Registry remote repositories, so managed deploys target the mirrored image
+  path that Cloud Run can actually pull.
+
+### Fixed
+
+- Restored canonical managed-storage user-memory markdown accessors so managed
+  runtime bootstrap no longer crashes when the backend initializes durable
+  memory artifacts.
+
+### Security
+
+- No user-visible security changes recorded yet.
+
 ## [v0.2.0b6] - 2026-03-23
 
 ### Added

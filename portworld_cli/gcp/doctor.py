@@ -7,6 +7,7 @@ from portworld_cli.deploy_artifacts import (
     IMAGE_NAME,
     IMAGE_SOURCE_MODE_PUBLISHED_RELEASE,
     derive_published_artifact_repository,
+    derive_remote_image_name,
 )
 from portworld_cli.gcp import (
     GCPAdapters,
@@ -350,6 +351,7 @@ def evaluate_gcp_cloud_run_readiness(
         )
         image_tag = DOCTOR_IMAGE_TAG
         image_source_mode = "source_build"
+        image_name = IMAGE_NAME
         if runtime_source == RUNTIME_SOURCE_PUBLISHED:
             artifact_repository = derive_published_artifact_repository(artifact_repository)
             image_tag = (
@@ -357,11 +359,15 @@ def evaluate_gcp_cloud_run_readiness(
                 or DOCTOR_IMAGE_TAG
             )
             image_source_mode = IMAGE_SOURCE_MODE_PUBLISHED_RELEASE
+            image_name = derive_remote_image_name(
+                project_config.deploy.published_runtime.image_ref or "",
+                fallback_image_name=IMAGE_NAME,
+            )
         image_uri = build_image_uri(
             project_id=project_id,
             region=region,
             repository=artifact_repository,
-            image_name=IMAGE_NAME,
+            image_name=image_name,
             tag=image_tag,
         )
         checks.append(

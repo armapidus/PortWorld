@@ -13,6 +13,7 @@ from portworld_cli.deploy_artifacts import (
     IMAGE_SOURCE_MODE_PUBLISHED_RELEASE,
     IMAGE_SOURCE_MODE_SOURCE_BUILD,
     PUBLISHED_ARTIFACT_REPOSITORY_SUFFIX,
+    derive_remote_image_name,
 )
 from portworld_cli.deploy_state import DeployState
 from portworld_cli.gcp import GCPAdapters, build_image_uri, resolve_project_id, resolve_region
@@ -242,6 +243,7 @@ def resolve_deploy_config(
     published_image_ref = None
     image_source_mode = IMAGE_SOURCE_MODE_SOURCE_BUILD
     resolved_artifact_repository = artifact_repository
+    deploy_image_name = IMAGE_NAME
     if runtime_source == RUNTIME_SOURCE_PUBLISHED:
         published_runtime = None if project_config is None else project_config.deploy.published_runtime
         try:
@@ -258,6 +260,10 @@ def resolve_deploy_config(
         image_tag = published_selection.image_tag
         image_source_mode = published_selection.image_source_mode
         resolved_artifact_repository = published_selection.artifact_repository
+        deploy_image_name = derive_remote_image_name(
+            published_selection.image_ref,
+            fallback_image_name=IMAGE_NAME,
+        )
     else:
         if project_root is None:
             raise DeployUsageError("Source-mode deploy requires a PortWorld repo checkout.")
@@ -319,7 +325,7 @@ def resolve_deploy_config(
             project_id=project_id,
             region=region,
             repository=resolved_artifact_repository,
-            image_name=IMAGE_NAME,
+            image_name=deploy_image_name,
             tag=image_tag,
         ),
         published_release_tag=published_release_tag,
