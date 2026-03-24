@@ -26,6 +26,28 @@ must mirror the corresponding section in this changelog.
 
 - No user-visible security changes recorded yet.
 
+## [v0.2.0b9] - 2026-03-24
+
+### Added
+
+- No user-visible additions recorded yet.
+
+### Changed
+
+- Updated AWS published deploys to pull the pinned released backend image
+  directly from GHCR, matching the published-runtime operator flow used on GCP.
+
+### Fixed
+
+- Removed the broken AWS published-runtime assumption that a released image had
+  already been mirrored into ECR before ECS deploy.
+- Updated AWS doctor and deploy output so published workspaces no longer report
+  ECR as a required dependency when the runtime is using a published image.
+
+### Security
+
+- No user-visible security changes recorded yet.
+
 ## [v0.2.0b8] - 2026-03-24
 
 ### Added
