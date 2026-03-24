@@ -198,10 +198,24 @@ def build_health_summary(
 
         host_port = session.project_config.deploy.published_runtime.host_port
         base_url = f"http://127.0.0.1:{host_port}"
+        env_values = session.config_session.merged_env_values()
+        host_header = _resolve_local_probe_host_header(session)
+        bearer_token = _normalize_text(env_values.get("BACKEND_BEARER_TOKEN"))
         return HealthSummary(
             source="local_probes",
-            livez=probe_endpoint(base_url, "/livez"),
-            readyz=probe_endpoint(base_url, "/readyz"),
+            livez=probe_endpoint(
+                base_url,
+                "/livez",
+                headers=_build_probe_headers(host_header=host_header),
+            ),
+            readyz=probe_endpoint(
+                base_url,
+                "/readyz",
+                headers=_build_probe_headers(
+                    host_header=host_header,
+                    bearer_token=bearer_token,
+                ),
+            ),
         )
 
     service_ref = live_status.service_ref
@@ -215,15 +229,50 @@ def build_health_summary(
     )
 
 
-def probe_endpoint(service_url: str, path: str) -> str:
+def probe_endpoint(
+    service_url: str,
+    path: str,
+    *,
+    headers: dict[str, str] | None = None,
+) -> str:
     try:
         response = httpx.get(
             f"{service_url.rstrip('/')}{path}",
+            headers=headers,
             timeout=LIVE_PROBE_TIMEOUT_SECONDS,
         )
     except httpx.HTTPError:
         return "unknown"
     return "pass" if response.status_code == 200 else "fail"
+
+
+def _build_probe_headers(
+    *,
+    host_header: str | None = None,
+    bearer_token: str | None = None,
+) -> dict[str, str] | None:
+    headers: dict[str, str] = {}
+    if host_header:
+        headers["Host"] = host_header
+    if bearer_token:
+        headers["Authorization"] = f"Bearer {bearer_token}"
+    return headers or None
+
+
+def _resolve_local_probe_host_header(session: InspectionSession) -> str | None:
+    for candidate in session.project_config.security.allowed_hosts:
+        normalized = _normalize_text(candidate)
+        if normalized is None or normalized == "*":
+            continue
+        return normalized
+    return None
+
+
+def _normalize_text(value: object | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
 
 
 def build_status_message(
