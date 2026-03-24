@@ -30,9 +30,7 @@ struct MetaConnectionView: View {
 
   private var isReadyToContinue: Bool {
     wearablesRuntimeManager.configurationState == .ready &&
-      isRegistered &&
-      hasDiscoveredDevice &&
-      wearablesRuntimeManager.activeCompatibilityMessage == nil
+      isRegistered
   }
 
   var body: some View {
@@ -241,7 +239,7 @@ private extension MetaConnectionView {
       return "\(wearablesRuntimeManager.devices.count) compatible \(suffix) available."
     }
     if isRegistered {
-      return "Waiting for your glasses to appear nearby."
+      return "Registration is complete. Grant Meta camera access and keep your glasses nearby so they appear here."
     }
     return "Discovery begins after Meta authorization completes."
   }

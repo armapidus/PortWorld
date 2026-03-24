@@ -40,13 +40,20 @@
 	<key>MWDAT</key>
 	<dict>
 		<key>AppLinkURLScheme</key>
-		<string>portworld://</string>
-		<key>ClientToken</key>
-		<string>$(CLIENT_TOKEN)</string>
+		<string>$(PORTWORLD_DAT_APP_LINK_URL_SCHEME)://</string>
+#if PORTWORLD_DAT_REGISTERED_MODE
 		<key>MetaAppID</key>
-		<string>$(META_APP_ID)</string>
+		<string>$(PORTWORLD_DAT_META_APP_ID)</string>
+		<key>ClientToken</key>
+		<string>$(PORTWORLD_DAT_CLIENT_TOKEN)</string>
 		<key>TeamID</key>
 		<string>$(DEVELOPMENT_TEAM)</string>
+#else
+		<key>MetaAppID</key>
+		<string>$(PORTWORLD_DAT_META_APP_ID)</string>
+		<key>TeamID</key>
+		<string>$(DEVELOPMENT_TEAM)</string>
+#endif
 	</dict>
 	<key>NSAppTransportSecurity</key>
 	<dict>

@@ -14,6 +14,144 @@ final class WearablesRuntimeManager: ObservableObject {
     case failed
   }
 
+  private enum DATConfigurationMode: String {
+    case developerMode
+    case registeredProject
+    case invalidMixedConfig
+  }
+
+  private struct DATConfiguration {
+    let rawAppLinkURLScheme: String?
+    let normalizedAppLinkURLScheme: String?
+    let metaAppID: String?
+    let clientToken: String?
+    let teamID: String?
+    let bundleURLSchemes: [String]
+    let hasMetaAppIDKey: Bool
+    let hasClientTokenKey: Bool
+    let hasTeamIDKey: Bool
+
+    init(bundle: Bundle = .main) {
+      let mwdat = bundle.object(forInfoDictionaryKey: "MWDAT") as? [String: Any] ?? [:]
+      let urlTypes = bundle.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]] ?? []
+
+      rawAppLinkURLScheme = Self.normalizedValue(from: mwdat["AppLinkURLScheme"])
+      normalizedAppLinkURLScheme = Self.normalizeScheme(rawAppLinkURLScheme)
+      metaAppID = Self.normalizedValue(from: mwdat["MetaAppID"])
+      clientToken = Self.normalizedValue(from: mwdat["ClientToken"])
+      teamID = Self.normalizedValue(from: mwdat["TeamID"])
+      hasMetaAppIDKey = mwdat.keys.contains("MetaAppID")
+      hasClientTokenKey = mwdat.keys.contains("ClientToken")
+      hasTeamIDKey = mwdat.keys.contains("TeamID")
+      bundleURLSchemes = urlTypes
+        .flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] }
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+        .filter { $0.isEmpty == false }
+    }
+
+    var mode: DATConfigurationMode {
+      validationFailure == nil ? inferredMode : .invalidMixedConfig
+    }
+
+    var validationFailure: (message: String, diagnostics: [String])? {
+      guard let normalizedAppLinkURLScheme else {
+        return invalid(
+          message: "MWDAT.AppLinkURLScheme is missing or empty.",
+          detail: "Define `MWDAT.AppLinkURLScheme` in `Info.plist` so Meta AI can callback into the app."
+        )
+      }
+
+      guard bundleURLSchemes.contains(normalizedAppLinkURLScheme) else {
+        return invalid(
+          message: "MWDAT.AppLinkURLScheme does not match a registered app URL scheme.",
+          detail: "Keep `MWDAT.AppLinkURLScheme` aligned with `CFBundleURLSchemes`."
+        )
+      }
+
+      if hasClientTokenKey && clientToken == nil {
+        return invalid(
+          message: "MWDAT.ClientToken is present but empty.",
+          detail: "Omit `ClientToken` for developer mode, or provide a real token for registered-project mode."
+        )
+      }
+
+      if let clientToken, clientToken.isEmpty == false, (metaAppID == nil || metaAppID == "0") {
+        return invalid(
+          message: "MWDAT.ClientToken is configured without a registered Meta application ID.",
+          detail: "Use developer mode without `ClientToken`, or provide both `MetaAppID` and `ClientToken` for registered-project mode."
+        )
+      }
+
+      if let metaAppID, metaAppID.isEmpty == false, metaAppID != "0" {
+        guard let teamID, teamID.isEmpty == false else {
+          return invalid(
+            message: "MWDAT.TeamID is required when using a registered Meta application ID.",
+            detail: "Registered-project mode requires `TeamID` to match the Xcode signing team."
+          )
+        }
+
+        guard let clientToken, clientToken.isEmpty == false else {
+          return invalid(
+            message: "MWDAT.ClientToken is required when using a registered Meta application ID.",
+            detail: "Add the Meta Developer Center client token when enabling registered-project mode."
+          )
+        }
+      }
+
+      return nil
+    }
+
+    private var inferredMode: DATConfigurationMode {
+      if let metaAppID, metaAppID.isEmpty == false, metaAppID != "0" {
+        return .registeredProject
+      }
+
+      return .developerMode
+    }
+
+    func diagnostics() -> [String] {
+      [
+        "Detected DAT configuration mode: \(mode.rawValue).",
+        normalizedAppLinkURLScheme.map { "AppLinkURLScheme: \($0)://." } ?? "AppLinkURLScheme: missing.",
+        "Registered app URL schemes: \(bundleURLSchemes.joined(separator: ", ")).",
+        "MetaAppID configured: \(metaAppID ?? "<empty>").",
+        "ClientToken configured: \(clientToken == nil ? "no" : "yes").",
+        "TeamID configured: \(teamID == nil ? "no" : "yes")."
+      ]
+    }
+
+    private func invalid(message: String, detail: String) -> (message: String, diagnostics: [String]) {
+      var diagnostics = diagnostics()
+      diagnostics.append(detail)
+      return (message, diagnostics)
+    }
+
+    private static func normalizedValue(from rawValue: Any?) -> String? {
+      guard let rawValue else { return nil }
+
+      let stringValue: String
+      if let rawString = rawValue as? String {
+        stringValue = rawString
+      } else {
+        stringValue = String(describing: rawValue)
+      }
+
+      let trimmed = stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+      return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func normalizeScheme(_ rawScheme: String?) -> String? {
+      guard let rawScheme else { return nil }
+
+      let normalizedScheme = rawScheme
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .replacingOccurrences(of: "://", with: "")
+        .lowercased()
+
+      return normalizedScheme.isEmpty ? nil : normalizedScheme
+    }
+  }
+
   enum MockWorkflowState: String {
     case disabled
     case preparing
@@ -65,6 +203,7 @@ final class WearablesRuntimeManager: ObservableObject {
   private let wearablesProvider: () -> WearablesInterface
   private let mockDeviceController: MockDeviceController
   private let audioSession: AVAudioSession
+  private let datConfiguration: DATConfiguration
   private let appLinkURLScheme: String?
   private var wearables: WearablesInterface?
   private var glassesSessionCoordinator: GlassesSessionCoordinator?
@@ -76,6 +215,7 @@ final class WearablesRuntimeManager: ObservableObject {
   private var compatibilityListenerTokens: [DeviceIdentifier: AnyListenerToken] = [:]
   private var compatibilityMessages: [DeviceIdentifier: String] = [:]
   private var activeGlassesDeviceID: DeviceIdentifier?
+  private var isEnsuringDiscoveryPermission = false
   private var wantsVisionCapture = false
   private var visionSessionID: String?
   private var visionEndpointURL: URL?
@@ -91,13 +231,15 @@ final class WearablesRuntimeManager: ObservableObject {
     wearablesProvider: @escaping () -> WearablesInterface = { Wearables.shared },
     mockDeviceController: MockDeviceController? = nil,
     audioSession: AVAudioSession = .sharedInstance(),
-    appLinkURLScheme: String? = WearablesRuntimeManager.configuredAppLinkURLScheme()
+    appLinkURLScheme: String? = nil
   ) {
+    let datConfiguration = WearablesRuntimeManager.loadDATConfiguration()
     self.configure = configure
     self.wearablesProvider = wearablesProvider
     self.mockDeviceController = mockDeviceController ?? MockDeviceController()
     self.audioSession = audioSession
-    self.appLinkURLScheme = appLinkURLScheme?.lowercased()
+    self.datConfiguration = datConfiguration
+    self.appLinkURLScheme = (appLinkURLScheme ?? datConfiguration.normalizedAppLinkURLScheme)?.lowercased()
     self.isMockModeEnabled = false
     self.isMockDeviceReady = self.mockDeviceController.isEnabled
     self.isPreparingMockDevice = false
@@ -142,7 +284,12 @@ final class WearablesRuntimeManager: ObservableObject {
       do {
         try await wearables.startRegistration()
       } catch let error as RegistrationError {
-        self.presentError(error.description)
+        if error == .alreadyRegistered {
+          self.registrationState = .registered
+          await self.ensureDiscoveryPermissionIfNeeded(using: wearables)
+        } else {
+          self.presentError(error.description)
+        }
       } catch {
         self.presentError(error.localizedDescription)
       }
@@ -318,6 +465,11 @@ final class WearablesRuntimeManager: ObservableObject {
       resetGlassesSessionSnapshot()
     }
 
+    if let validationFailure = datConfiguration.validationFailure {
+      failConfiguration(message: validationFailure.message, diagnostics: validationFailure.diagnostics)
+      return
+    }
+
     do {
       try configure()
       let wearables = wearablesProvider()
@@ -329,6 +481,7 @@ final class WearablesRuntimeManager: ObservableObject {
       monitorDeviceCompatibility(devices: wearables.devices)
       ensureGlassesSessionCoordinator(using: wearables)
       ensureGlassesPhotoCaptureController(using: wearables)
+      await ensureDiscoveryPermissionIfNeeded(using: wearables)
       refreshDevelopmentReadiness()
 
       #if DEBUG
@@ -337,17 +490,10 @@ final class WearablesRuntimeManager: ObservableObject {
         }
       #endif
     } catch {
-      wearables = nil
-      registrationState = nil
-      devices = []
-      configurationState = .failed
-      configurationErrorMessage = error.localizedDescription
-      configurationDiagnostics = Self.buildInitializationDiagnostics(from: error)
-      glassesSessionCoordinator = nil
-      glassesPhotoCaptureController = nil
-      visionFrameUploader = nil
-      resetGlassesSessionSnapshot()
-      refreshDevelopmentReadiness()
+      failConfiguration(
+        message: error.localizedDescription,
+        diagnostics: Self.buildInitializationDiagnostics(from: error, datConfiguration: datConfiguration)
+      )
     }
   }
 
@@ -357,6 +503,9 @@ final class WearablesRuntimeManager: ObservableObject {
       guard let self else { return }
       for await state in wearables.registrationStateStream() {
         self.registrationState = state
+        if state == .registered {
+          await self.ensureDiscoveryPermissionIfNeeded(using: wearables)
+        }
         self.refreshDevelopmentReadiness()
         await self.reconcileActiveGlassesSession()
       }
@@ -408,6 +557,27 @@ final class WearablesRuntimeManager: ObservableObject {
         }
       }
       compatibilityListenerTokens[deviceID] = token
+    }
+  }
+
+  private func ensureDiscoveryPermissionIfNeeded(using wearables: WearablesInterface) async {
+    guard registrationState == .registered else { return }
+    guard devices.isEmpty else { return }
+    guard isEnsuringDiscoveryPermission == false else { return }
+
+    isEnsuringDiscoveryPermission = true
+    defer { isEnsuringDiscoveryPermission = false }
+
+    do {
+      let status = try await wearables.checkPermissionStatus(.camera)
+      guard status != .granted else { return }
+
+      let requestStatus = try await wearables.requestPermission(.camera)
+      if requestStatus != .granted {
+        presentError("Grant camera access in the Meta AI app so your glasses can appear in PortWorld.")
+      }
+    } catch {
+      presentError("Unable to request Meta camera access. Open the Meta AI app and grant camera permission for PortWorld.")
     }
   }
 
@@ -546,6 +716,20 @@ final class WearablesRuntimeManager: ObservableObject {
   private func presentError(_ message: String) {
     errorMessage = message
     showError = true
+  }
+
+  private func failConfiguration(message: String, diagnostics: [String]) {
+    wearables = nil
+    registrationState = nil
+    devices = []
+    configurationState = .failed
+    configurationErrorMessage = message
+    configurationDiagnostics = diagnostics
+    glassesSessionCoordinator = nil
+    glassesPhotoCaptureController = nil
+    visionFrameUploader = nil
+    resetGlassesSessionSnapshot()
+    refreshDevelopmentReadiness()
   }
 
   private func registerAudioRouteObserverIfNeeded() {
@@ -767,27 +951,15 @@ final class WearablesRuntimeManager: ObservableObject {
     return actualScheme == expectedScheme
   }
 
-  private nonisolated static func configuredAppLinkURLScheme() -> String? {
-    guard
-      let mwdat = Bundle.main.object(forInfoDictionaryKey: "MWDAT") as? [String: Any],
-      let rawScheme = mwdat["AppLinkURLScheme"] as? String
-    else {
-      return nil
-    }
-
-    let normalizedScheme = rawScheme
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-      .replacingOccurrences(of: "://", with: "")
-      .lowercased()
-
-    return normalizedScheme.isEmpty ? nil : normalizedScheme
+  private static func loadDATConfiguration() -> DATConfiguration {
+    DATConfiguration()
   }
 
-  private static func buildInitializationDiagnostics(from error: Error) -> [String] {
+  private static func buildInitializationDiagnostics(from error: Error, datConfiguration: DATConfiguration) -> [String] {
     let nsError = error as NSError
-    var diagnostics = [
+    var diagnostics = datConfiguration.diagnostics() + [
       "Confirm the Meta AI app is installed and developer mode is enabled for this build.",
-      "Verify `MWDAT.AppLinkURLScheme` and `MWDAT.MetaAppID` values in `Info.plist` (`MetaAppID=0` is valid for developer mode).",
+      "Verify the DAT mode is consistent: developer mode should not define `ClientToken`; registered-project mode requires `MetaAppID`, `ClientToken`, and `TeamID`.",
       "Check that Bluetooth is enabled and your glasses can be discovered by the phone.",
       "Retry initialization after correcting the issue."
     ]
