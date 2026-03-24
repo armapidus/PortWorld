@@ -14,6 +14,7 @@ from portworld_cli.aws.common import (
     validate_s3_bucket_name,
 )
 from portworld_cli.output import DiagnosticCheck
+from portworld_cli.workspace.project_config import RUNTIME_SOURCE_PUBLISHED
 from portworld_cli.workspace.project_config import ProjectConfig
 
 
@@ -62,6 +63,7 @@ class AWSDoctorEvaluation:
 
 def evaluate_aws_ecs_fargate_readiness(
     *,
+    runtime_source: str | None,
     explicit_region: str | None,
     explicit_cluster: str | None,
     explicit_service: str | None,
@@ -105,7 +107,9 @@ def evaluate_aws_ecs_fargate_readiness(
         env_values.get("BACKEND_OBJECT_STORE_NAME"),
         None if service_name is None else f"{service_name}-memory",
     )
-    ecr_repository = None if service_name is None else f"{service_name}-backend"
+    ecr_repository = None
+    if runtime_source != RUNTIME_SOURCE_PUBLISHED and service_name is not None:
+        ecr_repository = f"{service_name}-backend"
     rds_instance_identifier = None if service_name is None else _normalize_rds_identifier(f"{service_name}-pg")
     alb_name = None if service_name is None else f"{service_name}-alb"[:32]
     cloudfront_comment = None if service_name is None else f"PortWorld managed {service_name}"

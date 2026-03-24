@@ -76,7 +76,7 @@ class _ResolvedAWSDeployConfig:
     requested_subnet_ids: tuple[str, ...]
     explicit_database_url: str | None
     bucket_name: str
-    ecr_repository: str
+    ecr_repository: str | None
     image_tag: str
     image_uri: str
     cors_origins: str
@@ -141,11 +141,12 @@ def run_deploy_aws_ecs_fargate(
                 "region": config.region,
                 "ecs_service_name": config.app_name,
                 "bucket_name": config.bucket_name,
-                "ecr_repository": config.ecr_repository,
                 "image_uri": config.image_uri,
                 "rds_instance_identifier": config.rds_instance_identifier,
             }
         )
+        if config.ecr_repository is not None:
+            resources["ecr_repository"] = config.ecr_repository
 
         result = _run_aws_deploy_mutations(
             config,
@@ -348,16 +349,16 @@ def _resolve_aws_deploy_config(
             action="Verify AWS credentials and retry.",
         )
 
-    ecr_repository = _first_non_empty(options.ecr_repo, f"{app_name}-backend")
-    assert ecr_repository is not None
-
     image_source_mode = IMAGE_SOURCE_MODE_SOURCE_BUILD
     published_release_tag: str | None = None
     published_image_ref: str | None = None
+    ecr_repository: str | None = None
     if runtime_source == RUNTIME_SOURCE_PUBLISHED:
+        if options.ecr_repo is not None:
+            raise DeployUsageError("--ecr-repo is only supported in runtime_source=source.")
         published = resolve_published_image_selection(
             explicit_tag=options.tag,
-            artifact_repository=ecr_repository,
+            artifact_repository=f"{app_name}-backend",
             release_tag=project_config.deploy.published_runtime.release_tag,
             image_ref=project_config.deploy.published_runtime.image_ref,
         )
@@ -365,16 +366,18 @@ def _resolve_aws_deploy_config(
         image_tag = published.image_tag
         published_release_tag = published.release_tag
         published_image_ref = published.image_ref
+        image_uri = published.image_ref
     else:
+        ecr_repository = _first_non_empty(options.ecr_repo, f"{app_name}-backend")
+        assert ecr_repository is not None
         if project_root is None:
             image_tag = normalize_optional_text(options.tag) or str(_now_ms())
         else:
             image_tag = resolve_source_image_tag(explicit_tag=options.tag, project_root=project_root)
-
-    image_uri = (
-        f"{account_id}.dkr.ecr.{region}.amazonaws.com/"
-        f"{ecr_repository}:{image_tag}"
-    )
+        image_uri = (
+            f"{account_id}.dkr.ecr.{region}.amazonaws.com/"
+            f"{ecr_repository}:{image_tag}"
+        )
 
     cors_origins = _first_non_empty(options.cors_origins, env_values.get("CORS_ORIGINS"), "*")
     allowed_hosts = _first_non_empty(options.allowed_hosts, env_values.get("BACKEND_ALLOWED_HOSTS"), "*")
@@ -449,15 +452,15 @@ def _run_aws_deploy_mutations(
     project_root: Path,
 ) -> _AWSDeployMutationResult:
     _ensure_s3_bucket(config, stage_records=stage_records)
-    _ensure_ecr_repository(config, stage_records=stage_records)
-    _docker_login_to_ecr(config, stage_records=stage_records)
     if config.image_source_mode == IMAGE_SOURCE_MODE_SOURCE_BUILD:
+        _ensure_ecr_repository(config, stage_records=stage_records)
+        _docker_login_to_ecr(config, stage_records=stage_records)
         _build_and_push_image(config, stage_records=stage_records, project_root=project_root)
     else:
         stage_records.append(
             _stage_ok(
                 "publish_image",
-                f"Skipped docker build/push for image_source_mode={config.image_source_mode}.",
+                f"Using published image `{config.image_uri}`.",
             )
         )
 

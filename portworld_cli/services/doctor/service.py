@@ -372,6 +372,7 @@ def _run_aws_ecs_fargate_doctor(
         ),
     )
     evaluation = evaluate_aws_ecs_fargate_readiness(
+        runtime_source=session.effective_runtime_source,
         explicit_region=options.aws_region,
         explicit_cluster=options.aws_cluster,
         explicit_service=options.aws_service,
@@ -384,31 +385,33 @@ def _run_aws_ecs_fargate_doctor(
     )
     checks = (root_check, *evaluation.checks)
     details = evaluation.details
+    message_pairs: list[tuple[str, object | None]] = [
+        ("target", options.target),
+        ("full", options.full),
+        ("workspace_root", session.workspace_root),
+        ("workspace_resolution_source", session.workspace_resolution_source),
+        ("active_workspace_root", session.active_workspace_root),
+        (
+            "project_root",
+            None if session.project_paths is None else session.project_paths.project_root,
+        ),
+        ("aws_region", details.region),
+        ("aws_ecs_cluster", details.cluster_name),
+        ("aws_ecs_service", details.service_name),
+        ("aws_vpc_id", details.vpc_id),
+        ("aws_subnet_ids", ",".join(details.subnet_ids)),
+        ("s3_bucket_name", details.bucket_name),
+        ("aws_rds_instance", details.rds_instance_identifier),
+        ("aws_alb_dns_name", details.alb_dns_name),
+        ("aws_cloudfront_domain", details.cloudfront_domain_name),
+        ("aws_service_url", details.service_url),
+    ]
+    if details.ecr_repository is not None:
+        message_pairs.insert(12, ("aws_ecr_repository", details.ecr_repository))
     return CommandResult(
         ok=evaluation.ok,
         command=COMMAND_NAME,
-        message=format_key_value_lines(
-            ("target", options.target),
-            ("full", options.full),
-            ("workspace_root", session.workspace_root),
-            ("workspace_resolution_source", session.workspace_resolution_source),
-            ("active_workspace_root", session.active_workspace_root),
-            (
-                "project_root",
-                None if session.project_paths is None else session.project_paths.project_root,
-            ),
-            ("aws_region", details.region),
-            ("aws_ecs_cluster", details.cluster_name),
-            ("aws_ecs_service", details.service_name),
-            ("aws_vpc_id", details.vpc_id),
-            ("aws_subnet_ids", ",".join(details.subnet_ids)),
-            ("s3_bucket_name", details.bucket_name),
-            ("aws_ecr_repository", details.ecr_repository),
-            ("aws_rds_instance", details.rds_instance_identifier),
-            ("aws_alb_dns_name", details.alb_dns_name),
-            ("aws_cloudfront_domain", details.cloudfront_domain_name),
-            ("aws_service_url", details.service_url),
-        ),
+        message=format_key_value_lines(*message_pairs),
         data={
             "target": options.target,
             "workspace_root": str(session.workspace_root),
