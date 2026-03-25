@@ -10,7 +10,8 @@ iOS-specific implementation guide for work under `IOS/`.
 - The app is phone-first. Active focus is clean UI/UX polish.
 - Next phases: code cleanup, removal of unused features (phone-specific features, mock device kit), and App Store publishing prep.
 - Ray-Ban Meta Gen 2 hardware testing is deferred until the app is near publishing.
-- `IOS/PortWorld/FutureHardware/` (DAT / wearables / mock-device layer) is preserved but not an active work surface. Do not expand it unless the user explicitly requests it.
+- The active DAT / wearables runtime lives under `IOS/PortWorld/Runtime/Glasses/`.
+- Any leftover `IOS/PortWorld/FutureHardware/` content should be treated as cleanup debt, not implementation authority.
 - Historical / compatibility code lives under `IOS/Legacy/` — reference only.
 
 ---
@@ -29,8 +30,8 @@ iOS-specific implementation guide for work under `IOS/`.
   Wake/sleep detection and speech recognizer-backed wake engine
 - `IOS/PortWorld/Runtime/AudioIO/`
   Phone audio bridge
-- `IOS/PortWorld/FutureHardware/`
-  DAT / wearables / mock-device capability layer — preserved, not active
+- `IOS/PortWorld/Runtime/Glasses/`
+  Active DAT / wearables lifecycle, session, and vision capture runtime
 - `IOS/Legacy/`
   Historical runtime and compatibility code — reference only
 
@@ -129,7 +130,8 @@ When unsure:
 - prefer the active `IOS/PortWorld/` path over legacy code
 - prefer small, conservative refactors over broad rewrites
 - prefer one obvious ownership boundary over layered duplicate state
-- do not expand `FutureHardware/` or touch `IOS/Legacy/` unless explicitly asked
+- prefer the active `Runtime/Glasses/` path for DAT / wearables work
+- do not revive `FutureHardware/` or touch `IOS/Legacy/` unless explicitly asked
 
 ---
 
