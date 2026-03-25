@@ -13,6 +13,7 @@ from backend.ws.session.session_registry import SessionRecord, session_registry
 from backend.ws.session.transport_contracts import SendControl
 
 MAX_TRACE_TEXT_PREVIEW = 120
+_BACKGROUND_FINALIZATION_TASKS: set[asyncio.Task[str]] = set()
 
 logger = logging.getLogger(__name__)
 
@@ -93,12 +94,54 @@ async def _close_finalize_and_mark_ended(
     if vision_memory_runtime is not None:
         await vision_memory_runtime.finalize_session(session_id=active_session.session_id)
     if durable_memory_runtime is not None:
-        await durable_memory_runtime.finalize_session(session_id=active_session.session_id)
+        _schedule_background_finalize_session(
+            session_id=active_session.session_id,
+            durable_memory_runtime=durable_memory_runtime,
+        )
     await asyncio.to_thread(
         storage.upsert_session_status,
         session_id=active_session.session_id,
         status="ended",
     )
+
+
+def _schedule_background_finalize_session(
+    *,
+    session_id: str,
+    durable_memory_runtime: DurableMemoryConsolidationRuntime,
+) -> None:
+    task = asyncio.create_task(
+        _run_background_finalize_session(
+            session_id=session_id,
+            durable_memory_runtime=durable_memory_runtime,
+        ),
+        name=f"durable-memory-finalize-{session_id}",
+    )
+    _BACKGROUND_FINALIZATION_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_FINALIZATION_TASKS.discard)
+
+
+async def _run_background_finalize_session(
+    *,
+    session_id: str,
+    durable_memory_runtime: DurableMemoryConsolidationRuntime,
+) -> str:
+    try:
+        status = await durable_memory_runtime.finalize_session(session_id=session_id)
+        logger.info(
+            "Memory consolidation finalized session=%s status=%s",
+            session_id,
+            status,
+        )
+        return status
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception(
+            "Background memory consolidation task failed session=%s",
+            session_id,
+        )
+        return "failed"
 
 
 def trace_ws_message(

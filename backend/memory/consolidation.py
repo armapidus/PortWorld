@@ -529,9 +529,9 @@ class DurableMemoryConsolidationRuntime:
     async def shutdown(self) -> None:
         await self._client.shutdown()
 
-    async def finalize_session(self, *, session_id: str) -> None:
+    async def finalize_session(self, *, session_id: str) -> str:
         if not self.settings.memory_consolidation_enabled:
-            return
+            return "disabled"
 
         candidates = await _run_storage(self.storage.read_memory_candidates, session_id=session_id)
         session_memory_payload = await _run_storage(
@@ -543,12 +543,12 @@ class DurableMemoryConsolidationRuntime:
             session_id=session_id,
         )
         if not candidates and not session_memory_payload:
-            return
+            return "skipped"
 
         user_memory_markdown = await _run_storage(self.storage.read_user_memory)
         cross_session_markdown = await _run_storage(self.storage.read_cross_session_memory)
 
-        payload = await self._request_consolidation(
+        payload, outcome = await self._request_consolidation(
             session_id=session_id,
             current_user_memory=user_memory_markdown,
             current_cross_session_memory=cross_session_markdown,
@@ -556,7 +556,7 @@ class DurableMemoryConsolidationRuntime:
             memory_candidates=candidates,
         )
         if payload is None:
-            return
+            return outcome
 
         next_user_memory = _normalize_markdown_document(
             payload.get("user_memory_markdown"),
@@ -576,6 +576,7 @@ class DurableMemoryConsolidationRuntime:
             await _run_storage(self.storage.write_user_memory, markdown=next_user_memory)
         if _materially_changed(cross_session_markdown, next_cross_session):
             await _run_storage(self.storage.write_cross_session_memory, markdown=next_cross_session)
+        return "completed"
 
     async def _request_consolidation(
         self,
@@ -585,26 +586,40 @@ class DurableMemoryConsolidationRuntime:
         current_cross_session_memory: str,
         session_memory_markdown: str,
         memory_candidates: list[dict[str, Any]],
-    ) -> dict[str, Any] | None:
+    ) -> tuple[dict[str, Any] | None, str]:
         try:
-            return await self._client.request_json(
-                system_prompt=SYSTEM_PROMPT,
-                user_prompt=_build_consolidation_user_prompt(
-                    session_id=session_id,
-                    current_user_memory=current_user_memory,
-                    current_cross_session_memory=current_cross_session_memory,
-                    session_memory_markdown=session_memory_markdown,
-                    memory_candidates=memory_candidates,
+            return (
+                await self._client.request_json(
+                    system_prompt=SYSTEM_PROMPT,
+                    user_prompt=_build_consolidation_user_prompt(
+                        session_id=session_id,
+                        current_user_memory=current_user_memory,
+                        current_cross_session_memory=current_cross_session_memory,
+                        session_memory_markdown=session_memory_markdown,
+                        memory_candidates=memory_candidates,
+                    ),
                 ),
+                "completed",
             )
         except (VisionProviderError, RuntimeError, ValueError, KeyError, httpx.HTTPError) as exc:
+            outcome = "failed"
+            if isinstance(exc, VisionProviderError) and (exc.provider_error_code or "").strip() == "provider_read_timeout":
+                outcome = "timed_out"
+                logger.warning(
+                    "Memory consolidation timed out session=%s provider=%s model=%s detail=%s",
+                    session_id,
+                    self._client.provider_name,
+                    self._client.model_name,
+                    sanitize_sensitive_text(str(exc)),
+                )
+                return None, outcome
             logger.warning(
                 "Memory consolidation request failed session=%s provider=%s detail=%s",
                 session_id,
                 self._client.provider_name,
                 sanitize_sensitive_text(str(exc)),
             )
-            return None
+            return None, outcome
 
 
 async def _run_storage(function, /, *args, **kwargs):
