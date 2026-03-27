@@ -13,47 +13,15 @@ final class AppSettingsStore: ObservableObject {
     var backendBaseURL: String
     var bearerToken: String
     var validationState: BackendValidationState
-    var phoneVisionEnabled: Bool
 
     init(
       backendBaseURL: String,
       bearerToken: String,
-      validationState: BackendValidationState,
-      phoneVisionEnabled: Bool
+      validationState: BackendValidationState
     ) {
       self.backendBaseURL = backendBaseURL
       self.bearerToken = bearerToken
       self.validationState = validationState
-      self.phoneVisionEnabled = phoneVisionEnabled
-    }
-
-    init(from decoder: Decoder) throws {
-      let container = try decoder.container(keyedBy: CodingKeys.self)
-      backendBaseURL = try container.decodeIfPresent(String.self, forKey: .backendBaseURL) ?? ""
-      bearerToken = try container.decodeIfPresent(String.self, forKey: .bearerToken) ?? ""
-      validationState =
-        try container.decodeIfPresent(BackendValidationState.self, forKey: .validationState) ?? .unknown
-      phoneVisionEnabled = try container.decodeIfPresent(Bool.self, forKey: .phoneVisionEnabled) ?? false
-    }
-
-    func encode(to encoder: Encoder) throws {
-      var container = encoder.container(keyedBy: PersistedCodingKeys.self)
-      try container.encode(backendBaseURL, forKey: .backendBaseURL)
-      try container.encode(validationState, forKey: .validationState)
-      try container.encode(phoneVisionEnabled, forKey: .phoneVisionEnabled)
-    }
-
-    private enum CodingKeys: String, CodingKey {
-      case backendBaseURL
-      case bearerToken
-      case validationState
-      case phoneVisionEnabled
-    }
-
-    private enum PersistedCodingKeys: String, CodingKey {
-      case backendBaseURL
-      case validationState
-      case phoneVisionEnabled
     }
   }
 
@@ -95,8 +63,7 @@ final class AppSettingsStore: ObservableObject {
     self.settings = Settings(
       backendBaseURL: decodedSettings?.backendBaseURL ?? bundleBaseURL,
       bearerToken: resolvedBearerToken,
-      validationState: decodedSettings?.validationState ?? .unknown,
-      phoneVisionEnabled: decodedSettings?.phoneVisionEnabled ?? false
+      validationState: decodedSettings?.validationState ?? .unknown
     )
 
     if keychainBearerToken.isEmpty && resolvedBearerToken.isEmpty == false {
@@ -122,11 +89,6 @@ final class AppSettingsStore: ObservableObject {
 
   func markValidationState(_ validationState: BackendValidationState) {
     settings.validationState = validationState
-    persist()
-  }
-
-  func setPhoneVisionEnabled(_ enabled: Bool) {
-    settings.phoneVisionEnabled = enabled
     persist()
   }
 

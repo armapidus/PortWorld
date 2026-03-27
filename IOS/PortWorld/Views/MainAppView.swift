@@ -1,4 +1,4 @@
-// Root shell for the phone-first assistant with secondary access to future hardware setup.
+// Root shell for the glasses-first assistant experience.
 import SwiftUI
 
 struct MainAppView: View {
@@ -49,15 +49,6 @@ struct MainAppView: View {
               route = nextOnboardingRoute()
             }
           )
-        case .wakePractice:
-          WakePracticeView(
-            wearablesRuntimeManager: wearablesRuntimeManager,
-            settings: appSettingsStore.settings,
-            onContinue: {
-              onboardingStore.markWakePracticeCompleted()
-              route = nextOnboardingRoute()
-            }
-          )
         case .profileInterview:
           ProfileInterviewView(
             wearablesRuntimeManager: wearablesRuntimeManager,
@@ -71,15 +62,7 @@ struct MainAppView: View {
           PostOnboardingShellView(
             appSettingsStore: appSettingsStore,
             wearablesRuntimeManager: wearablesRuntimeManager,
-            onOpenMetaSetup: {
-              route = .metaConnection
-            },
-            onOpenWakePractice: {
-              route = .wakePractice
-            },
-            onOpenProfileInterview: {
-              route = .profileInterview
-            }
+            onOpenMetaSetup: { route = .metaConnection }
           )
           .id(runtimeHostIdentity)
         }
@@ -134,10 +117,6 @@ private extension MainAppView {
       onboardingStore.progress.metaSkipped == false
     {
       return .metaConnection
-    }
-
-    if onboardingStore.progress.wakePracticeCompleted == false {
-      return .wakePractice
     }
 
     if onboardingStore.progress.profileCompleted == false {

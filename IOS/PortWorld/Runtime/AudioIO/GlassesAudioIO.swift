@@ -20,14 +20,12 @@ final class GlassesAudioIO: AssistantAudioIOControlling {
   var onWakePCMFrame: ((WakeWordPCMFrame) -> Void)? {
     didSet {
       hfpAudioManager.onWakePCMFrame = onWakePCMFrame
-      fallbackPhoneAudioIO.onWakePCMFrame = onWakePCMFrame
     }
   }
 
   var onRealtimePCMFrame: (@Sendable (Data, Int64) -> Void)? {
     didSet {
       hfpAudioManager.onRealtimePCMFrame = onRealtimePCMFrame
-      fallbackPhoneAudioIO.onRealtimePCMFrame = onRealtimePCMFrame
     }
   }
 
@@ -36,18 +34,15 @@ final class GlassesAudioIO: AssistantAudioIOControlling {
   private enum ActivePipeline {
     case none
     case hfp
-    case mockFallback
   }
 
   private let hfpAudioManager: AudioCollectionManager
   private let audioSession: AVAudioSession
   private let hfpPlaybackEngine: AssistantPlaybackEngine
   private let hfpAudioSessionLeaseManager: AudioSessionLeaseManager
-  private let fallbackPhoneAudioIO: PhoneAudioIO
   private var audioRouteObserver: NSObjectProtocol?
   private var activePipeline: ActivePipeline = .none
   private var isResponseStreaming = false
-  private var isDowngradingToFallback = false
 
   init() {
     let manager = AudioCollectionManager(
@@ -58,7 +53,6 @@ final class GlassesAudioIO: AssistantAudioIOControlling {
     self.audioSession = .sharedInstance()
     self.hfpPlaybackEngine = AssistantPlaybackEngine(audioEngine: manager.sharedAudioEngine)
     self.hfpAudioSessionLeaseManager = AudioSessionLeaseManager(arbiter: AudioSessionArbiter())
-    self.fallbackPhoneAudioIO = PhoneAudioIO()
 
     hfpAudioManager.isPlaybackPendingProvider = { [hfpPlaybackEngine] in
       hfpPlaybackEngine.hasActivePendingPlayback()
@@ -95,8 +89,6 @@ final class GlassesAudioIO: AssistantAudioIOControlling {
       return .inactive
     case .hfp:
       return .glassesHFP
-    case .mockFallback:
-      return .glassesMockFallback
     }
   }
 
@@ -114,9 +106,7 @@ final class GlassesAudioIO: AssistantAudioIOControlling {
       return
     }
 
-    try await fallbackPhoneAudioIO.prepareForArmedListening()
-    activePipeline = .mockFallback
-    publishAudioModeChange()
+    throw Error.startFailed("Glasses audio requires a live Bluetooth HFP route.")
   }
 
   func appendAssistantPCMData(_ pcmData: Data) throws {
@@ -124,8 +114,6 @@ final class GlassesAudioIO: AssistantAudioIOControlling {
     case .hfp:
       let format = AssistantAudioFormat(codec: "pcm_s16le", sampleRate: 24_000, channels: 1)
       try hfpPlaybackEngine.appendPCMData(pcmData, format: format)
-    case .mockFallback:
-      try fallbackPhoneAudioIO.appendAssistantPCMData(pcmData)
     case .none:
       throw Error.startFailed("Glasses audio is not active.")
     }
@@ -142,8 +130,6 @@ final class GlassesAudioIO: AssistantAudioIOControlling {
     switch activePipeline {
     case .hfp:
       hfpPlaybackEngine.handlePlaybackControl(payload)
-    case .mockFallback:
-      fallbackPhoneAudioIO.handlePlaybackControl(payload)
     case .none:
       break
     }
@@ -155,8 +141,6 @@ final class GlassesAudioIO: AssistantAudioIOControlling {
       guard isResponseStreaming || hfpPlaybackEngine.hasActivePendingPlayback() else { return }
       isResponseStreaming = false
       hfpPlaybackEngine.cancelResponse()
-    case .mockFallback:
-      fallbackPhoneAudioIO.cancelPlayback()
     case .none:
       break
     }
@@ -166,8 +150,6 @@ final class GlassesAudioIO: AssistantAudioIOControlling {
     switch activePipeline {
     case .hfp:
       return isResponseStreaming || hfpPlaybackEngine.hasActivePendingPlayback()
-    case .mockFallback:
-      return fallbackPhoneAudioIO.isAssistantPlaybackActive()
     case .none:
       return false
     }
@@ -177,8 +159,6 @@ final class GlassesAudioIO: AssistantAudioIOControlling {
     switch activePipeline {
     case .hfp:
       hfpPlaybackEngine.prepareForBackground()
-    case .mockFallback:
-      fallbackPhoneAudioIO.prepareForBackground()
     case .none:
       break
     }
@@ -188,9 +168,6 @@ final class GlassesAudioIO: AssistantAudioIOControlling {
     switch activePipeline {
     case .hfp:
       hfpPlaybackEngine.restoreFromBackground()
-      publishAudioModeChange()
-    case .mockFallback:
-      fallbackPhoneAudioIO.restoreFromForeground()
       publishAudioModeChange()
     case .none:
       break
@@ -205,8 +182,6 @@ final class GlassesAudioIO: AssistantAudioIOControlling {
     switch activePipeline {
     case .hfp:
       return "glasses_hfp/\(hfpStateDescription())"
-    case .mockFallback:
-      return "glasses_mock_fallback/\(fallbackPhoneAudioIO.stateDescription())"
     case .none:
       return "inactive"
     }
@@ -216,8 +191,6 @@ final class GlassesAudioIO: AssistantAudioIOControlling {
     switch activePipeline {
     case .hfp:
       return hfpPlaybackEngine.currentRouteDescription()
-    case .mockFallback:
-      return fallbackPhoneAudioIO.playbackRouteDescription()
     case .none:
       return audioSession.currentRoute.outputs.map(\.portType.rawValue).joined(separator: ",")
     }
@@ -230,9 +203,8 @@ private extension GlassesAudioIO {
 
     guard activePipeline == .hfp else { return }
     guard isHFPRouteReady == false else { return }
-    guard isDowngradingToFallback == false else { return }
 
-    await downgradeToFallbackPhoneAudio()
+    await stopActivePipelineIfNeeded(resetMode: true)
   }
 
   func prepareHFPPipelineIfPossible() async throws -> Bool {
@@ -284,27 +256,6 @@ private extension GlassesAudioIO {
     }
   }
 
-  func downgradeToFallbackPhoneAudio() async {
-    guard activePipeline == .hfp else { return }
-
-    isDowngradingToFallback = true
-    cancelPlayback()
-    hfpPlaybackEngine.shutdown()
-    await hfpAudioManager.stop()
-    try? await hfpAudioSessionLeaseManager.releaseIfNeeded()
-
-    do {
-      try await fallbackPhoneAudioIO.prepareForArmedListening()
-      activePipeline = .mockFallback
-    } catch {
-      activePipeline = .none
-    }
-
-    isResponseStreaming = false
-    isDowngradingToFallback = false
-    publishAudioModeChange()
-  }
-
   func stopActivePipelineIfNeeded(resetMode: Bool) async {
     switch activePipeline {
     case .hfp:
@@ -312,8 +263,6 @@ private extension GlassesAudioIO {
       hfpPlaybackEngine.shutdown()
       await hfpAudioManager.stop()
       try? await hfpAudioSessionLeaseManager.releaseIfNeeded()
-    case .mockFallback:
-      await fallbackPhoneAudioIO.stop()
     case .none:
       break
     }

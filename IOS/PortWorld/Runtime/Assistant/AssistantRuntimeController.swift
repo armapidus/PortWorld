@@ -14,12 +14,11 @@ final class AssistantRuntimeController {
   }
 
   let config: AssistantRuntimeConfig
-  let phoneAudioIO: PhoneAudioIO
   let glassesAudioIO: GlassesAudioIO
   let backendSessionClient: BackendSessionClient
   let wakePhraseDetector: WakePhraseDetector
   var activeAudioIO: AssistantAudioIOControlling
-  var activeAssistantRoute: AssistantRoute = .phone
+  var activeAssistantRoute: AssistantRoute = .glasses
 
   var wakeWarmupTask: Task<Void, Never>?
   var wakeListeningGeneration: Int = 0
@@ -45,29 +44,25 @@ final class AssistantRuntimeController {
 
   init(
     config: AssistantRuntimeConfig,
-    phoneAudioIO: PhoneAudioIO? = nil,
     glassesAudioIO: GlassesAudioIO? = nil,
     backendSessionClient: BackendSessionClient? = nil,
     wakePhraseDetector: WakePhraseDetector? = nil
   ) {
     self.config = config
-    let resolvedPhoneAudioIO = phoneAudioIO ?? PhoneAudioIO()
     let resolvedGlassesAudioIO = glassesAudioIO ?? GlassesAudioIO()
-    self.phoneAudioIO = resolvedPhoneAudioIO
     self.glassesAudioIO = resolvedGlassesAudioIO
     self.backendSessionClient = backendSessionClient ?? BackendSessionClient(
       webSocketURL: config.webSocketURL,
       requestHeaders: config.requestHeaders
     )
     self.wakePhraseDetector = wakePhraseDetector ?? WakePhraseDetector(config: config)
-    self.activeAudioIO = resolvedPhoneAudioIO
+    self.activeAudioIO = resolvedGlassesAudioIO
     self.status = AssistantRuntimeStatus(
       wakePhraseText: config.wakePhrase,
       sleepPhraseText: config.sleepPhrase,
       infoText: "Assistant runtime ready."
     )
 
-    bindAudioIO(resolvedPhoneAudioIO)
     bindAudioIO(resolvedGlassesAudioIO)
     bindWakePhraseDetector()
     bindBackendEvents()
@@ -164,11 +159,6 @@ final class AssistantRuntimeController {
 
   func selectAudioIO(for route: AssistantRoute) {
     activeAssistantRoute = route
-    switch route {
-    case .phone:
-      activeAudioIO = phoneAudioIO
-    case .glasses:
-      activeAudioIO = glassesAudioIO
-    }
+    activeAudioIO = glassesAudioIO
   }
 }

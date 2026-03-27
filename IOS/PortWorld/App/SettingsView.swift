@@ -8,8 +8,6 @@ struct SettingsView: View {
   @Binding var scrollTarget: SettingsScrollTarget?
 
   let onOpenMetaSetup: () -> Void
-  let onOpenWakePractice: () -> Void
-  let onOpenProfileInterview: () -> Void
 
   @State private var backendBaseURL: String
   @State private var bearerToken: String
@@ -24,17 +22,13 @@ struct SettingsView: View {
     viewModel: AssistantRuntimeViewModel,
     wearablesRuntimeManager: WearablesRuntimeManager,
     scrollTarget: Binding<SettingsScrollTarget?>,
-    onOpenMetaSetup: @escaping () -> Void,
-    onOpenWakePractice: @escaping () -> Void,
-    onOpenProfileInterview: @escaping () -> Void
+    onOpenMetaSetup: @escaping () -> Void
   ) {
     self.appSettingsStore = appSettingsStore
     self.viewModel = viewModel
     self.wearablesRuntimeManager = wearablesRuntimeManager
     _scrollTarget = scrollTarget
     self.onOpenMetaSetup = onOpenMetaSetup
-    self.onOpenWakePractice = onOpenWakePractice
-    self.onOpenProfileInterview = onOpenProfileInterview
     _backendBaseURL = State(initialValue: appSettingsStore.settings.backendBaseURL)
     _bearerToken = State(initialValue: appSettingsStore.settings.bearerToken)
   }
@@ -52,11 +46,8 @@ struct SettingsView: View {
           VStack(alignment: .leading, spacing: PWSpace.section) {
             backendSection(readiness: readiness)
               .id(SettingsScrollTarget.backend)
-            phoneVisionSection
-              .id(SettingsScrollTarget.phoneVision)
             glassesSection(readiness: readiness)
               .id(SettingsScrollTarget.glasses)
-            practiceSection
             helpSection
               .id(SettingsScrollTarget.help)
           }
@@ -169,70 +160,6 @@ private extension SettingsView {
     }
   }
 
-  var phoneVisionSection: some View {
-    PWCard {
-      VStack(alignment: .leading, spacing: PWSpace.lg) {
-        Text("Phone Vision")
-          .font(PWTypography.headline)
-          .foregroundStyle(PWColor.textPrimary)
-
-        PWStatusRow(
-          title: phoneVisionTitle,
-          value: phoneVisionDetail,
-          tone: phoneVisionTone,
-          systemImage: phoneVisionSystemImage
-        )
-
-        if viewModel.status.phoneVisionUploadCount > 0 || viewModel.status.phoneVisionUploadFailureCount > 0 {
-          PWStatusRow(
-            title: "Uploads",
-            value: "success=\(viewModel.status.phoneVisionUploadCount) failed=\(viewModel.status.phoneVisionUploadFailureCount)",
-            tone: viewModel.status.phoneVisionUploadFailureCount > 0 ? .warning : .neutral,
-            systemImage: "camera.aperture"
-          )
-        }
-
-        if viewModel.status.phoneVisionLastErrorText.isEmpty == false {
-          PWStatusRow(
-            title: viewModel.status.phoneVisionHasAnalysisWarning ? "Analysis warning" : "Last error",
-            value: viewModel.status.phoneVisionLastErrorText,
-            tone: viewModel.status.phoneVisionHasAnalysisWarning ? .warning : .error,
-            systemImage: "exclamationmark.triangle"
-          )
-        }
-
-        PWSecondaryButton(
-          title: viewModel.status.phoneVisionToggleTitle,
-          isDisabled: viewModel.status.canTogglePhoneVision == false
-        ) {
-          viewModel.setPhoneVisionEnabled(viewModel.status.phoneVisionModeText != "enabled")
-        }
-      }
-    }
-  }
-
-  var practiceSection: some View {
-    PWCard {
-      VStack(alignment: .leading, spacing: PWSpace.lg) {
-        Text("Practice & Profile")
-          .font(PWTypography.headline)
-          .foregroundStyle(PWColor.textPrimary)
-
-        PWSecondaryButton(title: "Replay Wake Practice") {
-          Task {
-            await performNavigationAction(onOpenWakePractice)
-          }
-        }
-
-        PWSecondaryButton(title: "Replay Profile Onboarding") {
-          Task {
-            await performNavigationAction(onOpenProfileInterview)
-          }
-        }
-      }
-    }
-  }
-
   var helpSection: some View {
     PWCard {
       VStack(alignment: .leading, spacing: PWSpace.lg) {
@@ -259,11 +186,6 @@ private extension SettingsView {
           title: "Glasses not nearby",
           detail: "Bring your paired glasses nearby, keep Bluetooth enabled, and try reconnecting."
         )
-
-        SettingsHelpBlock(
-          title: "Speech recognition denied",
-          detail: "Allow microphone and speech recognition access in iPhone Settings before replaying wake practice."
-        )
       }
     }
   }
@@ -278,36 +200,6 @@ private extension SettingsView {
 
   var backendButtonTitle: String {
     hasUnsavedBackendChanges ? "Save & Verify Backend" : "Re-check Backend"
-  }
-
-  var phoneVisionTitle: String {
-    "Phone vision is \(viewModel.status.phoneVisionModeText)"
-  }
-
-  var phoneVisionDetail: String {
-    let base = viewModel.status.phoneVisionDetailText
-    let captureState = viewModel.status.phoneVisionCaptureStateText
-    if captureState == "inactive" {
-      return base
-    }
-    return "\(base)\nCurrent state: \(captureState)."
-  }
-
-  var phoneVisionTone: PWStatusTone {
-    if viewModel.status.phoneVisionHasAnalysisWarning {
-      return .warning
-    }
-    if viewModel.status.phoneVisionLastErrorText.isEmpty == false {
-      return .error
-    }
-    if viewModel.status.phoneVisionModeText == "enabled" {
-      return .success
-    }
-    return .neutral
-  }
-
-  var phoneVisionSystemImage: String {
-    viewModel.status.phoneVisionModeText == "enabled" ? "camera.fill" : "camera"
   }
 
   var hasUnsavedBackendChanges: Bool {
@@ -362,23 +254,22 @@ private extension SettingsView {
         bearerToken: trimmedToken,
         validationState: .valid
       )
-      isValidatingBackend = false
-    } catch let error as BackendValidationClient.ValidationError {
-      appSettingsStore.updateBackendSettings(
-        backendBaseURL: trimmedURL,
-        bearerToken: trimmedToken,
-        validationState: .invalid
-      )
-      backendErrorMessage = error.errorDescription ?? "Validation failed."
-      isValidatingBackend = false
     } catch {
+      let message = error.localizedDescription
+      backendErrorMessage = message
       appSettingsStore.updateBackendSettings(
         backendBaseURL: trimmedURL,
         bearerToken: trimmedToken,
         validationState: .invalid
       )
-      backendErrorMessage = "Validation failed."
-      isValidatingBackend = false
+    }
+
+    isValidatingBackend = false
+  }
+
+  func stopAssistantIfNeeded() async {
+    if viewModel.status.canDeactivate {
+      await viewModel.deactivateAssistant()
     }
   }
 
@@ -387,11 +278,6 @@ private extension SettingsView {
     await MainActor.run {
       action()
     }
-  }
-
-  func stopAssistantIfNeeded() async {
-    guard viewModel.status.canDeactivate else { return }
-    await viewModel.deactivateAssistant()
   }
 
   func normalized(_ value: String) -> String {

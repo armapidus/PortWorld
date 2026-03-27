@@ -12,9 +12,7 @@ enum AssistantRuntimeState: String, Codable, Sendable {
 
 enum AssistantAudioMode: String, Codable, Sendable {
   case inactive
-  case phone
   case glassesHFP = "glasses_hfp"
-  case glassesMockFallback = "glasses_mock_fallback"
 }
 
 enum AssistantTransportError: Error, LocalizedError, Sendable {

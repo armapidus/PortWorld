@@ -7,7 +7,6 @@ enum AppRoute {
   case connectAgents
   case backendSetup
   case metaConnection
-  case wakePractice
   case profileInterview
   case home
 }

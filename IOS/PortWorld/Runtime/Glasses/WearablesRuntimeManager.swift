@@ -666,14 +666,10 @@ final class WearablesRuntimeManager: ObservableObject {
       if isHFPRouteAvailable {
         glassesAudioDetailText = "Bidirectional Bluetooth HFP is available on this phone for the next glasses activation."
       } else {
-        glassesAudioDetailText = "No live Bluetooth HFP route is detected. The glasses route will fall back to phone audio while developing without hardware."
+        glassesAudioDetailText = "No live Bluetooth HFP route is detected. Connect the glasses audio route before activating the assistant."
       }
-    case .phone:
-      glassesAudioDetailText = "Phone audio is active."
     case .glassesHFP:
       glassesAudioDetailText = "Glasses lifecycle and Bluetooth HFP audio are both active."
-    case .glassesMockFallback:
-      glassesAudioDetailText = "Glasses lifecycle is active, but audio is using the phone fallback because no live HFP route is available."
     }
 
     switch configurationState {
@@ -713,7 +709,7 @@ final class WearablesRuntimeManager: ObservableObject {
       }
 
       glassesDevelopmentReadinessDetail =
-        "Glasses runtime can activate, but live audio still depends on a real Bluetooth HFP route."
+        "Glasses are connected, but a live Bluetooth HFP route is still required before the assistant can activate."
     }
   }
 

@@ -26,9 +26,6 @@ struct AgentView: View {
       VStack(spacing: PWSpace.section) {
         Spacer(minLength: 0)
 
-        routeSelector
-          .frame(maxWidth: 320)
-
         AgentPlaceholderView(isAwake: isAwake)
 
         VStack(spacing: PWSpace.md) {
@@ -64,27 +61,6 @@ private extension AgentView {
     }
   }
 
-  var routeSelector: some View {
-    VStack(alignment: .leading, spacing: PWSpace.sm) {
-      Text("Assistant route")
-        .font(PWTypography.headline)
-        .foregroundStyle(PWColor.textPrimary)
-
-      Picker(
-        "Assistant route",
-        selection: Binding(
-          get: { viewModel.status.selectedRoute },
-          set: { viewModel.selectRoute($0) }
-        )
-      ) {
-        Text("Phone").tag(AssistantRoute.phone)
-        Text("Glasses").tag(AssistantRoute.glasses)
-      }
-      .pickerStyle(.segmented)
-      .disabled(viewModel.status.canChangeRoute == false)
-    }
-  }
-
   @ViewBuilder
   func primaryButton(readiness: HomeReadinessState) -> some View {
     if viewModel.status.canDeactivate {
@@ -117,19 +93,19 @@ private extension AgentView {
       if readiness.backendStatus.action == .openBackendSettings {
         return "Backend needs attention"
       }
-      if viewModel.status.selectedRoute == .glasses && readiness.canActivateAssistant == false {
+      if readiness.canActivateAssistant == false {
         return "Glasses aren’t ready"
       }
-      return viewModel.status.selectedRoute == .phone ? "Ready on your phone" : "Ready to wake Mario"
+      return "Ready to wake Mario"
 
     case .connectingConversation:
-      return viewModel.status.selectedRoute == .phone ? "Mario is joining on your phone" : "Mario is joining"
+      return "Mario is joining"
 
     case .armedListening:
       return "Listening for \"\(viewModel.status.wakePhraseText)\""
 
     case .activeConversation:
-      return viewModel.status.selectedRoute == .phone ? "Mario is awake on your phone" : "Mario is awake"
+      return "Mario is awake"
 
     case .pausedByHardware:
       return "Mario is waiting for your glasses"
@@ -147,28 +123,19 @@ private extension AgentView {
       if readiness.backendStatus.action == .openBackendSettings {
         return readiness.backendStatus.detail
       }
-      if viewModel.status.selectedRoute == .phone {
-        return "Use your iPhone microphone and speaker to test the assistant."
-      }
       if readiness.canActivateAssistant == false {
         return readiness.glassesStatus.detail
       }
       return "Mario will start through your connected glasses."
 
     case .connectingConversation:
-      return viewModel.status.selectedRoute == .phone
-        ? "Phone route is opening a live backend session."
-        : "Glasses route is opening a live backend session."
+      return "Glasses route is opening a live backend session."
 
     case .armedListening:
-      return viewModel.status.selectedRoute == .phone
-        ? "Mario is listening through your iPhone."
-        : "Mario is listening through your glasses."
+      return "Mario is listening through your glasses."
 
     case .activeConversation:
-      return viewModel.status.selectedRoute == .phone
-        ? "Phone route is active."
-        : "Glasses route is active."
+      return "Glasses route is active."
 
     case .pausedByHardware:
       return "Reconnect your glasses or deactivate the assistant."

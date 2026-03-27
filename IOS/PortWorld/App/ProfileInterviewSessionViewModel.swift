@@ -16,7 +16,6 @@ final class ProfileInterviewSessionViewModel: ObservableObject {
     settings: AppSettingsStore.Settings
   ) {
     let appSettingsStore = AppSettingsStore()
-    appSettingsStore.setPhoneVisionEnabled(settings.phoneVisionEnabled)
     appSettingsStore.updateBackendSettings(
       backendBaseURL: settings.backendBaseURL,
       bearerToken: settings.bearerToken,

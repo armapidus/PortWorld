@@ -6,9 +6,7 @@ extension AssistantRuntimeController {
     guard status.assistantRuntimeState == .inactive else { return }
     selectAudioIO(for: route)
     status.errorText = ""
-    status.infoText = route == .glasses
-      ? "Preparing glasses audio routing and wake detection."
-      : "Preparing phone microphone, speaker playback, and wake detection."
+    status.infoText = "Preparing glasses audio routing and wake detection."
     publishStatus()
 
     let authorization = await wakePhraseDetector.requestAuthorizationIfNeeded()

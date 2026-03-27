@@ -8,7 +8,6 @@ private enum AppTab: Hashable {
 
 enum SettingsScrollTarget: Hashable {
   case backend
-  case phoneVision
   case glasses
   case help
 }
@@ -17,8 +16,6 @@ struct PostOnboardingShellView: View {
   @ObservedObject var appSettingsStore: AppSettingsStore
   let wearablesRuntimeManager: WearablesRuntimeManager
   let onOpenMetaSetup: () -> Void
-  let onOpenWakePractice: () -> Void
-  let onOpenProfileInterview: () -> Void
 
   @StateObject private var viewModel: AssistantRuntimeViewModel
   @State private var selectedTab: AppTab = .home
@@ -27,15 +24,11 @@ struct PostOnboardingShellView: View {
   init(
     appSettingsStore: AppSettingsStore,
     wearablesRuntimeManager: WearablesRuntimeManager,
-    onOpenMetaSetup: @escaping () -> Void,
-    onOpenWakePractice: @escaping () -> Void,
-    onOpenProfileInterview: @escaping () -> Void
+    onOpenMetaSetup: @escaping () -> Void
   ) {
     self.appSettingsStore = appSettingsStore
     self.wearablesRuntimeManager = wearablesRuntimeManager
     self.onOpenMetaSetup = onOpenMetaSetup
-    self.onOpenWakePractice = onOpenWakePractice
-    self.onOpenProfileInterview = onOpenProfileInterview
 
     let config = AssistantRuntimeConfig.load(
       backendBaseURLOverride: appSettingsStore.settings.backendBaseURL,
@@ -83,9 +76,7 @@ struct PostOnboardingShellView: View {
         viewModel: viewModel,
         wearablesRuntimeManager: wearablesRuntimeManager,
         scrollTarget: $settingsScrollTarget,
-        onOpenMetaSetup: onOpenMetaSetup,
-        onOpenWakePractice: onOpenWakePractice,
-        onOpenProfileInterview: onOpenProfileInterview
+        onOpenMetaSetup: onOpenMetaSetup
       )
       .tabItem {
         Label("Settings", systemImage: "gearshape")
