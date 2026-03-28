@@ -4,21 +4,27 @@ struct HomeView: View {
   @ObservedObject private var viewModel: AssistantRuntimeViewModel
   @ObservedObject private var appSettingsStore: AppSettingsStore
   @ObservedObject private var wearablesRuntimeManager: WearablesRuntimeManager
+  let shouldShowProfileSetupCallToAction: Bool
   let onOpenBackendSettings: () -> Void
   let onOpenGlassesSettings: () -> Void
+  let onOpenProfileSetup: () -> Void
 
   init(
     viewModel: AssistantRuntimeViewModel,
     appSettingsStore: AppSettingsStore,
     wearablesRuntimeManager: WearablesRuntimeManager,
+    shouldShowProfileSetupCallToAction: Bool,
     onOpenBackendSettings: @escaping () -> Void,
-    onOpenGlassesSettings: @escaping () -> Void
+    onOpenGlassesSettings: @escaping () -> Void,
+    onOpenProfileSetup: @escaping () -> Void
   ) {
     self.viewModel = viewModel
     self.appSettingsStore = appSettingsStore
     self.wearablesRuntimeManager = wearablesRuntimeManager
+    self.shouldShowProfileSetupCallToAction = shouldShowProfileSetupCallToAction
     self.onOpenBackendSettings = onOpenBackendSettings
     self.onOpenGlassesSettings = onOpenGlassesSettings
+    self.onOpenProfileSetup = onOpenProfileSetup
   }
 
   var body: some View {
@@ -33,6 +39,9 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: PWSpace.section) {
           heroCard(readiness: readiness)
           readinessCard(readiness: readiness)
+          if shouldShowProfileSetup(readiness: readiness) {
+            profileSetupCard
+          }
           phrasesCard
         }
         .padding(.bottom, PWSpace.hero)
@@ -79,6 +88,25 @@ private extension HomeView {
     }
   }
 
+  var profileSetupCard: some View {
+    PWCard {
+      VStack(alignment: .leading, spacing: PWSpace.md) {
+        Text("Finish profile setup")
+          .font(PWTypography.headline)
+          .foregroundStyle(PWColor.textPrimary)
+
+        Text("Mario still needs to walk you through the voice flow and collect your initial setup details.")
+          .font(PWTypography.body)
+          .foregroundStyle(PWColor.textSecondary)
+          .fixedSize(horizontal: false, vertical: true)
+
+        PWSecondaryButton(title: "Start profile setup") {
+          onOpenProfileSetup()
+        }
+      }
+    }
+  }
+
   func readinessCard(readiness: HomeReadinessState) -> some View {
     PWCard {
       VStack(alignment: .leading, spacing: PWSpace.lg) {
@@ -104,6 +132,10 @@ private extension HomeView {
     case .openGlassesSettings:
       onOpenGlassesSettings()
     }
+  }
+
+  func shouldShowProfileSetup(readiness: HomeReadinessState) -> Bool {
+    shouldShowProfileSetupCallToAction && readiness.canActivateAssistant
   }
 }
 

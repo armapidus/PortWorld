@@ -7,7 +7,9 @@ struct SettingsView: View {
   @ObservedObject var wearablesRuntimeManager: WearablesRuntimeManager
   @Binding var scrollTarget: SettingsScrollTarget?
 
+  let shouldShowProfileSetupCallToAction: Bool
   let onOpenMetaSetup: () -> Void
+  let onOpenProfileSetup: () -> Void
 
   @State private var backendBaseURL: String
   @State private var bearerToken: String
@@ -22,13 +24,17 @@ struct SettingsView: View {
     viewModel: AssistantRuntimeViewModel,
     wearablesRuntimeManager: WearablesRuntimeManager,
     scrollTarget: Binding<SettingsScrollTarget?>,
-    onOpenMetaSetup: @escaping () -> Void
+    shouldShowProfileSetupCallToAction: Bool,
+    onOpenMetaSetup: @escaping () -> Void,
+    onOpenProfileSetup: @escaping () -> Void
   ) {
     self.appSettingsStore = appSettingsStore
     self.viewModel = viewModel
     self.wearablesRuntimeManager = wearablesRuntimeManager
     _scrollTarget = scrollTarget
+    self.shouldShowProfileSetupCallToAction = shouldShowProfileSetupCallToAction
     self.onOpenMetaSetup = onOpenMetaSetup
+    self.onOpenProfileSetup = onOpenProfileSetup
     _backendBaseURL = State(initialValue: appSettingsStore.settings.backendBaseURL)
     _bearerToken = State(initialValue: appSettingsStore.settings.bearerToken)
   }
@@ -148,6 +154,14 @@ private extension SettingsView {
           }
         }
 
+        if shouldShowProfileSetupCallToAction && readiness.canActivateAssistant {
+          PWSecondaryButton(title: "Start profile setup") {
+            Task {
+              await performNavigationAction(onOpenProfileSetup)
+            }
+          }
+        }
+
         if wearablesRuntimeManager.registrationState == .registered {
           PWDestructiveButton(title: "Disconnect Glasses") {
             Task {
@@ -179,7 +193,7 @@ private extension SettingsView {
 
         SettingsHelpBlock(
           title: "Meta connection incomplete",
-          detail: "Open the glasses section and reconnect PortWorld through the Meta AI app."
+          detail: "Open the glasses section and reconnect PortWorld through the Meta AI app. You can also finish profile setup here once your glasses are ready."
         )
 
         SettingsHelpBlock(

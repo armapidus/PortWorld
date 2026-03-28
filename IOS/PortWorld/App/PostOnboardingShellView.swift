@@ -15,7 +15,9 @@ enum SettingsScrollTarget: Hashable {
 struct PostOnboardingShellView: View {
   @ObservedObject var appSettingsStore: AppSettingsStore
   let wearablesRuntimeManager: WearablesRuntimeManager
+  let shouldShowProfileSetupCallToAction: Bool
   let onOpenMetaSetup: () -> Void
+  let onOpenProfileSetup: () -> Void
 
   @StateObject private var viewModel: AssistantRuntimeViewModel
   @State private var selectedTab: AppTab = .home
@@ -24,11 +26,15 @@ struct PostOnboardingShellView: View {
   init(
     appSettingsStore: AppSettingsStore,
     wearablesRuntimeManager: WearablesRuntimeManager,
-    onOpenMetaSetup: @escaping () -> Void
+    shouldShowProfileSetupCallToAction: Bool,
+    onOpenMetaSetup: @escaping () -> Void,
+    onOpenProfileSetup: @escaping () -> Void
   ) {
     self.appSettingsStore = appSettingsStore
     self.wearablesRuntimeManager = wearablesRuntimeManager
+    self.shouldShowProfileSetupCallToAction = shouldShowProfileSetupCallToAction
     self.onOpenMetaSetup = onOpenMetaSetup
+    self.onOpenProfileSetup = onOpenProfileSetup
 
     let config = AssistantRuntimeConfig.load(
       backendBaseURLOverride: appSettingsStore.settings.backendBaseURL,
@@ -49,12 +55,14 @@ struct PostOnboardingShellView: View {
         viewModel: viewModel,
         appSettingsStore: appSettingsStore,
         wearablesRuntimeManager: wearablesRuntimeManager,
+        shouldShowProfileSetupCallToAction: shouldShowProfileSetupCallToAction,
         onOpenBackendSettings: {
           openSettings(.backend)
         },
         onOpenGlassesSettings: {
           openSettings(.glasses)
-        }
+        },
+        onOpenProfileSetup: onOpenProfileSetup
       )
       .tabItem {
         Label("Home", systemImage: "house")
@@ -76,7 +84,9 @@ struct PostOnboardingShellView: View {
         viewModel: viewModel,
         wearablesRuntimeManager: wearablesRuntimeManager,
         scrollTarget: $settingsScrollTarget,
-        onOpenMetaSetup: onOpenMetaSetup
+        shouldShowProfileSetupCallToAction: shouldShowProfileSetupCallToAction,
+        onOpenMetaSetup: onOpenMetaSetup,
+        onOpenProfileSetup: onOpenProfileSetup
       )
       .tabItem {
         Label("Settings", systemImage: "gearshape")
