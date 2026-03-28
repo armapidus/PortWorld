@@ -123,10 +123,10 @@ This is the working assistant runtime and should be treated as the active produc
 
 This exists because DAT integration, glasses lifecycle, and mock-device workflow still live in a bounded slice even though the main assistant runtime now consumes that state.
 
-### 4. Historical / Legacy Context
+### 4. Historical Context
 
-- `IOS/Legacy/`
 - `../docs/archived/`
+- git history
 
 These are useful for migration context and historical reasoning only.
 
@@ -207,6 +207,6 @@ When working in the iOS app, assume this ordering:
 
 1. trust the active runtime in `IOS/PortWorld/` first
 2. treat `FutureHardware/` as the bounded DAT / glasses capability layer consumed by the main runtime
-3. treat `IOS/Legacy/` and archived docs as historical context only
+3. treat archived docs and git history as historical context only
 
 If a file or flow conflicts with the working assistant runtime, the active runtime should win unless the task is explicitly about legacy migration or historical comparison.

@@ -39,7 +39,7 @@ Golden rules:
 ## Active Source Of Truth
 
 - Active iOS runtime: `IOS/PortWorld/`
-- Historical iOS runtime / compatibility code: `IOS/Legacy/`
+- Historical iOS runtime context: `docs/archived/ios-history/` and git history
 - Active backend: `backend/`
 
 Do not treat legacy code or archived docs as implementation authority over the active runtime.

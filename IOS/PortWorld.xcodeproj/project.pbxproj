@@ -18,17 +18,6 @@
 		0C66636B2F5361000084DE6C /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		0C66636C2F5361000084DE6C /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		0C66636D2F5361000084DE6C /* Config.xcconfig.template */ = {isa = PBXFileReference; lastKnownFileType = text; path = Config.xcconfig.template; sourceTree = "<group>"; };
-		0C70BA9C2F5B5CCB0056D629 /* RuntimeCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeCoordinator.swift; sourceTree = "<group>"; };
-		0C70BA9F2F5B5CCB0056D629 /* GatewayTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayTransport.swift; sourceTree = "<group>"; };
-		0C70BAA02F5B5CCB0056D629 /* RealtimeTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeTransport.swift; sourceTree = "<group>"; };
-		0C70BAA72F5B5CCB0056D629 /* RollingVideoBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RollingVideoBuffer.swift; sourceTree = "<group>"; };
-		0C70BAAB2F5B5CCB0056D629 /* SessionOrchestrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionOrchestrator.swift; sourceTree = "<group>"; };
-		0C70BAAD2F5B5CCB0056D629 /* VisionFrameUploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionFrameUploader.swift; sourceTree = "<group>"; };
-		0C70BAB42F5B5CCB0056D629 /* SessionStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStateStore.swift; sourceTree = "<group>"; };
-		0C70BAB52F5B5CCB0056D629 /* SessionViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionViewModel.swift; sourceTree = "<group>"; };
-		0C70BABE2F5B5CCB0056D629 /* NonStreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NonStreamView.swift; sourceTree = "<group>"; };
-		0C70BAC02F5B5CCB0056D629 /* StreamSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamSessionView.swift; sourceTree = "<group>"; };
-		0C70BAC12F5B5CCB0056D629 /* StreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -60,7 +49,6 @@
 				0C66636E2F5361000084DE6C /* Config */,
 				0C66630A2F5353540084DE6C /* Info.plist */,
 				0C66635A2F535F2D0084DE6C /* PortWorld.entitlements */,
-				0C70BAFA2F5B9FC70056D629 /* Legacy */,
 			);
 			sourceTree = "<group>";
 		};
@@ -80,72 +68,6 @@
 				0C66636D2F5361000084DE6C /* Config.xcconfig.template */,
 			);
 			path = Config;
-			sourceTree = "<group>";
-		};
-		0C70BAFA2F5B9FC70056D629 /* Legacy */ = {
-			isa = PBXGroup;
-			children = (
-				0C70BAFB2F5B9FCC0056D629 /* AssistantRuntime */,
-			);
-			path = Legacy;
-			sourceTree = "<group>";
-		};
-		0C70BAFB2F5B9FCC0056D629 /* AssistantRuntime */ = {
-			isa = PBXGroup;
-			children = (
-				0C70BAFC2F5B9FCC0056D629 /* Views */,
-				0C70BAFD2F5B9FCC0056D629 /* ViewModels */,
-				0C70BAFE2F5B9FCC0056D629 /* Coordinators */,
-				0C70BAFF2F5B9FCC0056D629 /* Runtime */,
-			);
-			path = AssistantRuntime;
-			sourceTree = "<group>";
-		};
-		0C70BAFC2F5B9FCC0056D629 /* Views */ = {
-			isa = PBXGroup;
-			children = (
-				0C70BAC02F5B5CCB0056D629 /* StreamSessionView.swift */,
-				0C70BAC12F5B5CCB0056D629 /* StreamView.swift */,
-				0C70BABE2F5B5CCB0056D629 /* NonStreamView.swift */,
-			);
-			path = Views;
-			sourceTree = "<group>";
-		};
-		0C70BAFD2F5B9FCC0056D629 /* ViewModels */ = {
-			isa = PBXGroup;
-			children = (
-				0C70BAB52F5B5CCB0056D629 /* SessionViewModel.swift */,
-				0C70BAB42F5B5CCB0056D629 /* SessionStateStore.swift */,
-			);
-			path = ViewModels;
-			sourceTree = "<group>";
-		};
-		0C70BAFE2F5B9FCC0056D629 /* Coordinators */ = {
-			isa = PBXGroup;
-			children = (
-				0C70BA9C2F5B5CCB0056D629 /* RuntimeCoordinator.swift */,
-			);
-			path = Coordinators;
-			sourceTree = "<group>";
-		};
-		0C70BAFF2F5B9FCC0056D629 /* Runtime */ = {
-			isa = PBXGroup;
-			children = (
-				0C70BAAB2F5B5CCB0056D629 /* SessionOrchestrator.swift */,
-				0C70BB002F5BA03E0056D629 /* Transport */,
-				0C70BAAD2F5B5CCB0056D629 /* VisionFrameUploader.swift */,
-				0C70BAA72F5B5CCB0056D629 /* RollingVideoBuffer.swift */,
-			);
-			path = Runtime;
-			sourceTree = "<group>";
-		};
-		0C70BB002F5BA03E0056D629 /* Transport */ = {
-			isa = PBXGroup;
-			children = (
-				0C70BA9F2F5B5CCB0056D629 /* GatewayTransport.swift */,
-				0C70BAA02F5B5CCB0056D629 /* RealtimeTransport.swift */,
-			);
-			path = Transport;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -183,7 +105,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2630;
-				LastUpgradeCheck = 2630;
+				LastUpgradeCheck = 2640;
 				TargetAttributes = {
 					0C6662DB2F534F350084DE6C = {
 						CreatedOnToolsVersion = 26.3;
@@ -293,6 +215,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -351,6 +274,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
 			};
