@@ -1,39 +1,15 @@
 import SwiftUI
 
 struct HomeView: View {
-  @ObservedObject private var viewModel: AssistantRuntimeViewModel
-  @ObservedObject private var appSettingsStore: AppSettingsStore
-  @ObservedObject private var wearablesRuntimeManager: WearablesRuntimeManager
+  let readiness: HomeReadinessState
+  let wakePhraseText: String
+  let sleepPhraseText: String
   let shouldShowProfileSetupCallToAction: Bool
   let onOpenBackendSettings: () -> Void
   let onOpenGlassesSettings: () -> Void
   let onOpenProfileSetup: () -> Void
 
-  init(
-    viewModel: AssistantRuntimeViewModel,
-    appSettingsStore: AppSettingsStore,
-    wearablesRuntimeManager: WearablesRuntimeManager,
-    shouldShowProfileSetupCallToAction: Bool,
-    onOpenBackendSettings: @escaping () -> Void,
-    onOpenGlassesSettings: @escaping () -> Void,
-    onOpenProfileSetup: @escaping () -> Void
-  ) {
-    self.viewModel = viewModel
-    self.appSettingsStore = appSettingsStore
-    self.wearablesRuntimeManager = wearablesRuntimeManager
-    self.shouldShowProfileSetupCallToAction = shouldShowProfileSetupCallToAction
-    self.onOpenBackendSettings = onOpenBackendSettings
-    self.onOpenGlassesSettings = onOpenGlassesSettings
-    self.onOpenProfileSetup = onOpenProfileSetup
-  }
-
   var body: some View {
-    let readiness = HomeReadinessState(
-      settings: appSettingsStore.settings,
-      runtimeStatus: viewModel.status,
-      wearablesRuntimeManager: wearablesRuntimeManager
-    )
-
     PWScreen(title: "Home", titleAlignment: .center, topPadding: PWSpace.md) {
       ScrollView(showsIndicators: false) {
         VStack(alignment: .leading, spacing: PWSpace.section) {
@@ -75,13 +51,13 @@ private extension HomeView {
 
         PhraseRow(
           title: "Start",
-          phrase: viewModel.status.wakePhraseText,
+          phrase: wakePhraseText,
           systemImage: "waveform"
         )
 
         PhraseRow(
           title: "Stop",
-          phrase: viewModel.status.sleepPhraseText,
+          phrase: sleepPhraseText,
           systemImage: "stop.circle"
         )
       }

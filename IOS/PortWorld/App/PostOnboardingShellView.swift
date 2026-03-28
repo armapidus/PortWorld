@@ -1,3 +1,4 @@
+import MWDATCore
 import SwiftUI
 
 private enum AppTab: Hashable {
@@ -13,8 +14,8 @@ enum SettingsScrollTarget: Hashable {
 }
 
 struct PostOnboardingShellView: View {
-  @ObservedObject var appSettingsStore: AppSettingsStore
-  let wearablesRuntimeManager: WearablesRuntimeManager
+  @ObservedObject private var appSettingsStore: AppSettingsStore
+  @ObservedObject private var wearablesRuntimeManager: WearablesRuntimeManager
   let shouldShowProfileSetupCallToAction: Bool
   let onOpenMetaSetup: () -> Void
   let onOpenProfileSetup: () -> Void
@@ -52,9 +53,9 @@ struct PostOnboardingShellView: View {
   var body: some View {
     TabView(selection: $selectedTab) {
       HomeView(
-        viewModel: viewModel,
-        appSettingsStore: appSettingsStore,
-        wearablesRuntimeManager: wearablesRuntimeManager,
+        readiness: readiness,
+        wakePhraseText: viewModel.status.wakePhraseText,
+        sleepPhraseText: viewModel.status.sleepPhraseText,
         shouldShowProfileSetupCallToAction: shouldShowProfileSetupCallToAction,
         onOpenBackendSettings: {
           openSettings(.backend)
@@ -70,9 +71,10 @@ struct PostOnboardingShellView: View {
       .tag(AppTab.home)
 
       AgentView(
-        viewModel: viewModel,
-        appSettingsStore: appSettingsStore,
-        wearablesRuntimeManager: wearablesRuntimeManager
+        readiness: readiness,
+        runtimeStatus: viewModel.status,
+        onActivateAssistant: activateAssistant,
+        onDeactivateAssistant: deactivateAssistant
       )
       .tabItem {
         Label("Agent", systemImage: "sparkles")
@@ -80,13 +82,17 @@ struct PostOnboardingShellView: View {
       .tag(AppTab.agent)
 
       SettingsView(
-        appSettingsStore: appSettingsStore,
-        viewModel: viewModel,
-        wearablesRuntimeManager: wearablesRuntimeManager,
+        settings: appSettingsStore.settings,
+        readiness: readiness,
+        isAssistantActive: viewModel.status.canDeactivate,
+        isGlassesRegistered: wearablesRuntimeManager.registrationState == .registered,
         scrollTarget: $settingsScrollTarget,
         shouldShowProfileSetupCallToAction: shouldShowProfileSetupCallToAction,
+        onUpdateBackendSettings: updateBackendSettings,
+        onStopAssistantIfNeeded: stopAssistantIfNeeded,
         onOpenMetaSetup: onOpenMetaSetup,
-        onOpenProfileSetup: onOpenProfileSetup
+        onOpenProfileSetup: onOpenProfileSetup,
+        onDisconnectGlasses: disconnectGlasses
       )
       .tabItem {
         Label("Settings", systemImage: "gearshape")
@@ -100,8 +106,49 @@ struct PostOnboardingShellView: View {
 }
 
 private extension PostOnboardingShellView {
+  var readiness: HomeReadinessState {
+    HomeReadinessState(
+      settings: appSettingsStore.settings,
+      runtimeStatus: viewModel.status,
+      wearablesRuntimeManager: wearablesRuntimeManager
+    )
+  }
+
   func openSettings(_ target: SettingsScrollTarget) {
     settingsScrollTarget = target
     selectedTab = .settings
+  }
+
+  func activateAssistant() {
+    Task {
+      await viewModel.activateAssistant()
+    }
+  }
+
+  func deactivateAssistant() {
+    Task {
+      await viewModel.deactivateAssistant()
+    }
+  }
+
+  func updateBackendSettings(
+    backendBaseURL: String,
+    bearerToken: String,
+    validationState: AppSettingsStore.BackendValidationState
+  ) {
+    appSettingsStore.updateBackendSettings(
+      backendBaseURL: backendBaseURL,
+      bearerToken: bearerToken,
+      validationState: validationState
+    )
+  }
+
+  func stopAssistantIfNeeded() async {
+    guard viewModel.status.canDeactivate else { return }
+    await viewModel.deactivateAssistant()
+  }
+
+  func disconnectGlasses() {
+    wearablesRuntimeManager.disconnectGlasses()
   }
 }

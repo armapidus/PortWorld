@@ -66,7 +66,6 @@ struct MainAppView: View {
             onOpenMetaSetup: { route = .metaConnection },
             onOpenProfileSetup: { route = .profileInterview }
           )
-          .id(runtimeHostIdentity)
         }
 
         if route == .splash {
@@ -90,14 +89,6 @@ struct MainAppView: View {
 }
 
 private extension MainAppView {
-  var runtimeHostIdentity: String {
-    [
-      appSettingsStore.settings.backendBaseURL,
-      appSettingsStore.settings.bearerToken,
-      appSettingsStore.settings.validationState.rawValue,
-    ].joined(separator: "|")
-  }
-
   func nextOnboardingRoute() -> AppRoute {
     if onboardingStore.hasCompletedInitialOnboarding {
       return .home

@@ -1,27 +1,12 @@
 import SwiftUI
 
 struct AgentView: View {
-  @ObservedObject private var viewModel: AssistantRuntimeViewModel
-  @ObservedObject private var appSettingsStore: AppSettingsStore
-  @ObservedObject private var wearablesRuntimeManager: WearablesRuntimeManager
-
-  init(
-    viewModel: AssistantRuntimeViewModel,
-    appSettingsStore: AppSettingsStore,
-    wearablesRuntimeManager: WearablesRuntimeManager
-  ) {
-    self.viewModel = viewModel
-    self.appSettingsStore = appSettingsStore
-    self.wearablesRuntimeManager = wearablesRuntimeManager
-  }
+  let readiness: HomeReadinessState
+  let runtimeStatus: AssistantRuntimeStatus
+  let onActivateAssistant: () -> Void
+  let onDeactivateAssistant: () -> Void
 
   var body: some View {
-    let readiness = HomeReadinessState(
-      settings: appSettingsStore.settings,
-      runtimeStatus: viewModel.status,
-      wearablesRuntimeManager: wearablesRuntimeManager
-    )
-
     PWScreen(title: "Agent", titleAlignment: .center, topPadding: PWSpace.md) {
       VStack(spacing: PWSpace.section) {
         Spacer(minLength: 0)
@@ -53,7 +38,7 @@ struct AgentView: View {
 
 private extension AgentView {
   var isAwake: Bool {
-    switch viewModel.status.assistantRuntimeState {
+    switch runtimeStatus.assistantRuntimeState {
     case .inactive:
       return false
     case .armedListening, .connectingConversation, .activeConversation, .pausedByHardware, .deactivating:
@@ -63,30 +48,26 @@ private extension AgentView {
 
   @ViewBuilder
   func primaryButton(readiness: HomeReadinessState) -> some View {
-    if viewModel.status.canDeactivate {
+    if runtimeStatus.canDeactivate {
       PWPrimaryButton(title: "Deactivate Assistant") {
-        Task {
-          await viewModel.deactivateAssistant()
-        }
+        onDeactivateAssistant()
       }
     } else {
       PWPrimaryButton(
-        title: viewModel.status.activationButtonTitle,
-        isDisabled: readiness.canActivateAssistant == false || viewModel.status.canActivateSelectedRoute == false || isStopping
+        title: runtimeStatus.activationButtonTitle,
+        isDisabled: readiness.canActivateAssistant == false || runtimeStatus.canActivateSelectedRoute == false || isStopping
       ) {
-        Task {
-          await viewModel.activateAssistant()
-        }
+        onActivateAssistant()
       }
     }
   }
 
   var isStopping: Bool {
-    viewModel.status.assistantRuntimeState == .deactivating
+    runtimeStatus.assistantRuntimeState == .deactivating
   }
 
   func statusLine(readiness: HomeReadinessState) -> String {
-    let runtimeState = viewModel.status.assistantRuntimeState
+    let runtimeState = runtimeStatus.assistantRuntimeState
 
     switch runtimeState {
     case .inactive:
@@ -102,7 +83,7 @@ private extension AgentView {
       return "Mario is joining"
 
     case .armedListening:
-      return "Listening for \"\(viewModel.status.wakePhraseText)\""
+      return "Listening for \"\(runtimeStatus.wakePhraseText)\""
 
     case .activeConversation:
       return "Mario is awake"
@@ -116,7 +97,7 @@ private extension AgentView {
   }
 
   func detailLine(readiness: HomeReadinessState) -> String {
-    let runtimeState = viewModel.status.assistantRuntimeState
+    let runtimeState = runtimeStatus.assistantRuntimeState
 
     switch runtimeState {
     case .inactive:

@@ -1,15 +1,18 @@
-import MWDATCore
 import SwiftUI
 
 struct SettingsView: View {
-  @ObservedObject var appSettingsStore: AppSettingsStore
-  @ObservedObject var viewModel: AssistantRuntimeViewModel
-  @ObservedObject var wearablesRuntimeManager: WearablesRuntimeManager
+  let settings: AppSettingsStore.Settings
+  let readiness: HomeReadinessState
+  let isAssistantActive: Bool
+  let isGlassesRegistered: Bool
   @Binding var scrollTarget: SettingsScrollTarget?
 
   let shouldShowProfileSetupCallToAction: Bool
+  let onUpdateBackendSettings: (String, String, AppSettingsStore.BackendValidationState) -> Void
+  let onStopAssistantIfNeeded: () async -> Void
   let onOpenMetaSetup: () -> Void
   let onOpenProfileSetup: () -> Void
+  let onDisconnectGlasses: () -> Void
 
   @State private var backendBaseURL: String
   @State private var bearerToken: String
@@ -20,41 +23,65 @@ struct SettingsView: View {
   private let validationClient = BackendValidationClient()
 
   init(
-    appSettingsStore: AppSettingsStore,
-    viewModel: AssistantRuntimeViewModel,
-    wearablesRuntimeManager: WearablesRuntimeManager,
+    settings: AppSettingsStore.Settings,
+    readiness: HomeReadinessState,
+    isAssistantActive: Bool,
+    isGlassesRegistered: Bool,
     scrollTarget: Binding<SettingsScrollTarget?>,
     shouldShowProfileSetupCallToAction: Bool,
+    onUpdateBackendSettings: @escaping (String, String, AppSettingsStore.BackendValidationState) -> Void,
+    onStopAssistantIfNeeded: @escaping () async -> Void,
     onOpenMetaSetup: @escaping () -> Void,
-    onOpenProfileSetup: @escaping () -> Void
+    onOpenProfileSetup: @escaping () -> Void,
+    onDisconnectGlasses: @escaping () -> Void
   ) {
-    self.appSettingsStore = appSettingsStore
-    self.viewModel = viewModel
-    self.wearablesRuntimeManager = wearablesRuntimeManager
+    self.settings = settings
+    self.readiness = readiness
+    self.isAssistantActive = isAssistantActive
+    self.isGlassesRegistered = isGlassesRegistered
     _scrollTarget = scrollTarget
     self.shouldShowProfileSetupCallToAction = shouldShowProfileSetupCallToAction
+    self.onUpdateBackendSettings = onUpdateBackendSettings
+    self.onStopAssistantIfNeeded = onStopAssistantIfNeeded
     self.onOpenMetaSetup = onOpenMetaSetup
     self.onOpenProfileSetup = onOpenProfileSetup
-    _backendBaseURL = State(initialValue: appSettingsStore.settings.backendBaseURL)
-    _bearerToken = State(initialValue: appSettingsStore.settings.bearerToken)
+    self.onDisconnectGlasses = onDisconnectGlasses
+    _backendBaseURL = State(initialValue: settings.backendBaseURL)
+    _bearerToken = State(initialValue: settings.bearerToken)
   }
 
   var body: some View {
-    let readiness = HomeReadinessState(
-      settings: appSettingsStore.settings,
-      runtimeStatus: viewModel.status,
-      wearablesRuntimeManager: wearablesRuntimeManager
-    )
-
     PWScreen(title: "Settings", titleAlignment: .center, topPadding: PWSpace.md) {
       ScrollViewReader { proxy in
         ScrollView(showsIndicators: false) {
           VStack(alignment: .leading, spacing: PWSpace.section) {
-            backendSection(readiness: readiness)
-              .id(SettingsScrollTarget.backend)
-            glassesSection(readiness: readiness)
-              .id(SettingsScrollTarget.glasses)
-            helpSection
+            SettingsBackendSection(
+              readiness: readiness,
+              backendBaseURL: $backendBaseURL,
+              bearerToken: $bearerToken,
+              backendURLMessage: backendURLMessage,
+              backendURLTone: backendURLTone,
+              focusedField: $focusedField,
+              buttonTitle: isValidatingBackend ? "Checking…" : backendButtonTitle,
+              isButtonDisabled: isValidatingBackend || normalized(backendBaseURL).isEmpty,
+              onBackendURLSubmit: focusBearerToken,
+              onBearerTokenSubmit: submitBackendValidation,
+              onValidate: submitBackendValidation
+            )
+            .id(SettingsScrollTarget.backend)
+
+            SettingsGlassesSection(
+              readiness: readiness,
+              isGlassesRegistered: isGlassesRegistered,
+              shouldShowProfileSetupCallToAction: shouldShowProfileSetupCallToAction,
+              glassesButtonTitle: glassesButtonTitle,
+              onOpenMetaSetup: openMetaSetup,
+              onOpenProfileSetup: openProfileSetup,
+              onDisconnectGlasses: disconnectGlasses
+            )
+            .id(SettingsScrollTarget.glasses)
+
+            SettingsHelpSection()
               .id(SettingsScrollTarget.help)
           }
           .padding(.bottom, PWSpace.hero)
@@ -77,7 +104,135 @@ private extension SettingsView {
     case bearerToken
   }
 
-  func backendSection(readiness: HomeReadinessState) -> some View {
+  var glassesButtonTitle: String {
+    if isGlassesRegistered {
+      return "Reconnect Glasses"
+    }
+
+    return "Connect Glasses"
+  }
+
+  var backendButtonTitle: String {
+    hasUnsavedBackendChanges ? "Save & Verify Backend" : "Re-check Backend"
+  }
+
+  var hasUnsavedBackendChanges: Bool {
+    normalized(backendBaseURL) != settings.backendBaseURL ||
+      normalized(bearerToken) != settings.bearerToken
+  }
+
+  var backendURLTone: PWFieldTone {
+    if backendErrorMessage.isEmpty == false {
+      return .error
+    }
+
+    if settings.validationState == .valid &&
+      normalized(backendBaseURL) == settings.backendBaseURL &&
+      hasUnsavedBackendChanges == false
+    {
+      return .success
+    }
+
+    return .normal
+  }
+
+  var backendURLMessage: String? {
+    if backendErrorMessage.isEmpty == false {
+      return backendErrorMessage
+    }
+
+    if hasUnsavedBackendChanges {
+      return "Save and verify your changes before starting the assistant again."
+    }
+
+    if settings.validationState == .valid {
+      return "Backend connection verified."
+    }
+
+    return "Base URL only. PortWorld derives the required endpoints automatically."
+  }
+
+  func focusBearerToken() {
+    focusedField = .bearerToken
+  }
+
+  func submitBackendValidation() {
+    Task {
+      await validateAndSaveBackend()
+    }
+  }
+
+  func openMetaSetup() {
+    Task {
+      await performNavigationAction(onOpenMetaSetup)
+    }
+  }
+
+  func openProfileSetup() {
+    Task {
+      await performNavigationAction(onOpenProfileSetup)
+    }
+  }
+
+  func disconnectGlasses() {
+    Task {
+      await stopAssistantIfNeeded()
+      onDisconnectGlasses()
+    }
+  }
+
+  func validateAndSaveBackend() async {
+    let trimmedURL = normalized(backendBaseURL)
+    let trimmedToken = normalized(bearerToken)
+
+    isValidatingBackend = true
+    backendErrorMessage = ""
+
+    await stopAssistantIfNeeded()
+
+    do {
+      try await validationClient.validate(baseURLString: trimmedURL, bearerToken: trimmedToken)
+      onUpdateBackendSettings(trimmedURL, trimmedToken, .valid)
+    } catch {
+      backendErrorMessage = error.localizedDescription
+      onUpdateBackendSettings(trimmedURL, trimmedToken, .invalid)
+    }
+
+    isValidatingBackend = false
+  }
+
+  func stopAssistantIfNeeded() async {
+    if isAssistantActive {
+      await onStopAssistantIfNeeded()
+    }
+  }
+
+  func performNavigationAction(_ action: @escaping () -> Void) async {
+    await stopAssistantIfNeeded()
+    await MainActor.run {
+      action()
+    }
+  }
+
+  func normalized(_ value: String) -> String {
+    value.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+}
+
+private struct SettingsBackendSection: View {
+  let readiness: HomeReadinessState
+  @Binding var backendBaseURL: String
+  @Binding var bearerToken: String
+  let backendURLMessage: String?
+  let backendURLTone: PWFieldTone
+  let focusedField: FocusState<SettingsView.Field?>.Binding
+  let buttonTitle: String
+  let isButtonDisabled: Bool
+  let onBackendURLSubmit: () -> Void
+  let onBearerTokenSubmit: () -> Void
+  let onValidate: () -> Void
+
+  var body: some View {
     PWCard {
       VStack(alignment: .leading, spacing: PWSpace.lg) {
         Text("Backend")
@@ -101,10 +256,8 @@ private extension SettingsView {
           keyboardType: .URL,
           submitLabel: .next
         )
-        .focused($focusedField, equals: .backendURL)
-        .onSubmit {
-          focusedField = .bearerToken
-        }
+        .focused(focusedField, equals: .backendURL)
+        .onSubmit(onBackendURLSubmit)
 
         PWTextFieldRow(
           label: "Bearer Token",
@@ -115,26 +268,29 @@ private extension SettingsView {
           textInputAutocapitalization: .never,
           submitLabel: .go
         )
-        .focused($focusedField, equals: .bearerToken)
-        .onSubmit {
-          Task {
-            await validateAndSaveBackend()
-          }
-        }
+        .focused(focusedField, equals: .bearerToken)
+        .onSubmit(onBearerTokenSubmit)
 
         PWSecondaryButton(
-          title: isValidatingBackend ? "Checking…" : backendButtonTitle,
-          isDisabled: isValidatingBackend || normalized(backendBaseURL).isEmpty
-        ) {
-          Task {
-            await validateAndSaveBackend()
-          }
-        }
+          title: buttonTitle,
+          isDisabled: isButtonDisabled,
+          action: onValidate
+        )
       }
     }
   }
+}
 
-  func glassesSection(readiness: HomeReadinessState) -> some View {
+private struct SettingsGlassesSection: View {
+  let readiness: HomeReadinessState
+  let isGlassesRegistered: Bool
+  let shouldShowProfileSetupCallToAction: Bool
+  let glassesButtonTitle: String
+  let onOpenMetaSetup: () -> Void
+  let onOpenProfileSetup: () -> Void
+  let onDisconnectGlasses: () -> Void
+
+  var body: some View {
     PWCard {
       VStack(alignment: .leading, spacing: PWSpace.lg) {
         Text("Glasses")
@@ -148,33 +304,22 @@ private extension SettingsView {
           systemImage: readiness.glassesStatus.systemImage
         )
 
-        PWSecondaryButton(title: glassesButtonTitle) {
-          Task {
-            await performNavigationAction(onOpenMetaSetup)
-          }
-        }
+        PWSecondaryButton(title: glassesButtonTitle, action: onOpenMetaSetup)
 
         if shouldShowProfileSetupCallToAction && readiness.canActivateAssistant {
-          PWSecondaryButton(title: "Start profile setup") {
-            Task {
-              await performNavigationAction(onOpenProfileSetup)
-            }
-          }
+          PWSecondaryButton(title: "Start profile setup", action: onOpenProfileSetup)
         }
 
-        if wearablesRuntimeManager.registrationState == .registered {
-          PWDestructiveButton(title: "Disconnect Glasses") {
-            Task {
-              await stopAssistantIfNeeded()
-              wearablesRuntimeManager.disconnectGlasses()
-            }
-          }
+        if isGlassesRegistered {
+          PWDestructiveButton(title: "Disconnect Glasses", action: onDisconnectGlasses)
         }
       }
     }
   }
+}
 
-  var helpSection: some View {
+private struct SettingsHelpSection: View {
+  var body: some View {
     PWCard {
       VStack(alignment: .leading, spacing: PWSpace.lg) {
         Text("Help")
@@ -202,100 +347,6 @@ private extension SettingsView {
         )
       }
     }
-  }
-
-  var glassesButtonTitle: String {
-    if wearablesRuntimeManager.registrationState == .registered {
-      return "Reconnect Glasses"
-    }
-
-    return "Connect Glasses"
-  }
-
-  var backendButtonTitle: String {
-    hasUnsavedBackendChanges ? "Save & Verify Backend" : "Re-check Backend"
-  }
-
-  var hasUnsavedBackendChanges: Bool {
-    normalized(backendBaseURL) != appSettingsStore.settings.backendBaseURL ||
-      normalized(bearerToken) != appSettingsStore.settings.bearerToken
-  }
-
-  var backendURLTone: PWFieldTone {
-    if backendErrorMessage.isEmpty == false {
-      return .error
-    }
-
-    if appSettingsStore.settings.validationState == .valid &&
-      normalized(backendBaseURL) == appSettingsStore.settings.backendBaseURL &&
-      hasUnsavedBackendChanges == false
-    {
-      return .success
-    }
-
-    return .normal
-  }
-
-  var backendURLMessage: String? {
-    if backendErrorMessage.isEmpty == false {
-      return backendErrorMessage
-    }
-
-    if hasUnsavedBackendChanges {
-      return "Save and verify your changes before starting the assistant again."
-    }
-
-    if appSettingsStore.settings.validationState == .valid {
-      return "Backend connection verified."
-    }
-
-    return "Base URL only. PortWorld derives the required endpoints automatically."
-  }
-
-  func validateAndSaveBackend() async {
-    let trimmedURL = normalized(backendBaseURL)
-    let trimmedToken = normalized(bearerToken)
-
-    isValidatingBackend = true
-    backendErrorMessage = ""
-
-    await stopAssistantIfNeeded()
-
-    do {
-      try await validationClient.validate(baseURLString: trimmedURL, bearerToken: trimmedToken)
-      appSettingsStore.updateBackendSettings(
-        backendBaseURL: trimmedURL,
-        bearerToken: trimmedToken,
-        validationState: .valid
-      )
-    } catch {
-      let message = error.localizedDescription
-      backendErrorMessage = message
-      appSettingsStore.updateBackendSettings(
-        backendBaseURL: trimmedURL,
-        bearerToken: trimmedToken,
-        validationState: .invalid
-      )
-    }
-
-    isValidatingBackend = false
-  }
-
-  func stopAssistantIfNeeded() async {
-    if viewModel.status.canDeactivate {
-      await viewModel.deactivateAssistant()
-    }
-  }
-
-  func performNavigationAction(_ action: @escaping () -> Void) async {
-    await stopAssistantIfNeeded()
-    await MainActor.run {
-      action()
-    }
-  }
-
-  func normalized(_ value: String) -> String {
-    value.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 }
 
