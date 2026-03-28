@@ -366,8 +366,7 @@ actor VisionFrameUploader: VisionFrameUploaderProtocol {
 
   private func isLocalNetworkDenied(_ error: URLError) -> Bool {
     guard
-      let userInfo = error.errorUserInfo as? [String: Any],
-      let path = userInfo[Self.networkPathKey] as? String
+      let path = error.errorUserInfo[Self.networkPathKey] as? String
     else {
       return false
     }
