@@ -77,6 +77,16 @@ final class ProfileInterviewSessionViewModel: ObservableObject {
     await runtimeViewModel.stopGuidedConversation()
   }
 
+  func waitUntilProfileReadyForReview() async {
+    guard isProfileReadyForReview == false else { return }
+
+    for await isReady in $isProfileReadyForReview.values {
+      if isReady {
+        return
+      }
+    }
+  }
+
   private func startInterview() async {
     guard isStarting == false else { return }
     isStarting = true

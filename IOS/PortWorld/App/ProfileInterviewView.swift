@@ -60,16 +60,7 @@ struct ProfileInterviewView: View {
       }
     )
     .task {
-      await viewModel.startInterviewIfNeeded()
-    }
-    .onChange(of: viewModel.isProfileReadyForReview) { _, isReady in
-      guard isReady else { return }
-      continueIfNeeded()
-    }
-    .onDisappear {
-      if viewModel.isInterviewRunning {
-        Task { await viewModel.stopInterview() }
-      }
+      await runInterviewFlow()
     }
   }
 }
@@ -140,14 +131,33 @@ private extension ProfileInterviewView {
     Task { await viewModel.retryInterview() }
   }
 
+  func runInterviewFlow() async {
+    await withTaskCancellationHandler(operation: {
+      await viewModel.startInterviewIfNeeded()
+      await viewModel.waitUntilProfileReadyForReview()
+      guard Task.isCancelled == false else { return }
+      continueIfNeeded()
+    }, onCancel: {
+      Task {
+        await stopInterviewIfNeeded()
+      }
+    })
+  }
+
   func continueIfNeeded() {
     guard isContinuing == false else { return }
     isContinuing = true
     Task {
-      await viewModel.stopInterview()
+      await stopInterviewIfNeeded()
       await MainActor.run {
         onContinue()
       }
+    }
+  }
+
+  func stopInterviewIfNeeded() async {
+    if viewModel.isInterviewRunning {
+      await viewModel.stopInterview()
     }
   }
 }
