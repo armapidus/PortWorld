@@ -116,6 +116,13 @@ class PromptDefaultBehaviorTests(unittest.TestCase):
         )
         self.assertEqual(mode, SETUP_MODE_MANUAL)
 
+    def test_setup_mode_defaults_to_quickstart_when_interactive(self) -> None:
+        mode = _resolve_setup_mode(
+            _base_cli_context(non_interactive=False),
+            _base_init_options(),
+        )
+        self.assertEqual(mode, SETUP_MODE_QUICKSTART)
+
     def test_setup_mode_keeps_explicit_value(self) -> None:
         options = replace(_base_init_options(), setup_mode=SETUP_MODE_QUICKSTART)
         mode = _resolve_setup_mode(
