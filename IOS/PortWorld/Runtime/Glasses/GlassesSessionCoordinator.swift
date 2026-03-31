@@ -25,28 +25,22 @@ final class GlassesSessionCoordinator {
 
   private let wearables: WearablesInterface
   private let deviceSelector: AutoDeviceSelector
-  private let deviceStateSession: DeviceStateSession
-
   private var snapshot = Snapshot()
   private var isStarted = false
   private var activeDeviceTask: Task<Void, Never>?
-  private var sessionStateListenerToken: AnyListenerToken?
   private var linkStateListenerToken: AnyListenerToken?
 
   init(wearables: WearablesInterface) {
     self.wearables = wearables
     self.deviceSelector = AutoDeviceSelector(wearables: wearables)
-    self.deviceStateSession = DeviceStateSession(deviceSelector: deviceSelector)
     startObservingActiveDevice()
     publishSnapshot()
   }
 
   deinit {
     activeDeviceTask?.cancel()
-    let sessionStateListenerToken = self.sessionStateListenerToken
     let linkStateListenerToken = self.linkStateListenerToken
     Task {
-      await sessionStateListenerToken?.cancel()
       await linkStateListenerToken?.cancel()
     }
   }
@@ -59,19 +53,14 @@ final class GlassesSessionCoordinator {
 
     isStarted = true
     snapshot.errorMessage = nil
-    snapshot.phase = snapshot.activeDeviceID == nil ? .waitingForDevice : .starting
-    publishSnapshot()
-
-    do {
-      try await deviceStateSession.start()
-      applySessionState(deviceStateSession.state)
-    } catch {
-      isStarted = false
-      snapshot.phase = .failed
-      snapshot.errorMessage = error.localizedDescription
-      publishSnapshot()
-      throw error
+    if snapshot.activeDeviceID == nil {
+      snapshot.phase = .waitingForDevice
+      snapshot.sessionState = nil
+    } else {
+      snapshot.phase = .running
+      snapshot.sessionState = .running
     }
+    publishSnapshot()
   }
 
   func stop() async {
@@ -84,12 +73,6 @@ final class GlassesSessionCoordinator {
 
     snapshot.phase = .stopping
     publishSnapshot()
-
-    do {
-      try await deviceStateSession.stop()
-    } catch {
-      snapshot.errorMessage = error.localizedDescription
-    }
 
     isStarted = false
     snapshot.phase = .inactive
@@ -107,29 +90,26 @@ final class GlassesSessionCoordinator {
   }
 
   private func handleActiveDeviceChange(_ activeDeviceID: DeviceIdentifier?) async {
-    await cancelActiveDeviceListeners()
+    await cancelActiveDeviceListener()
 
     snapshot.activeDeviceID = activeDeviceID
     if let activeDeviceID, let device = wearables.deviceForIdentifier(activeDeviceID) {
       snapshot.activeDeviceName = device.nameOrId()
       attachLinkStateListener(to: device)
-      await attachSessionStateListener(for: activeDeviceID)
+      if isStarted {
+        snapshot.phase = .running
+        snapshot.sessionState = .running
+        snapshot.errorMessage = nil
+      }
     } else {
       snapshot.activeDeviceName = "-"
       if isStarted, snapshot.phase != .stopping {
         snapshot.phase = .waitingForDevice
+        snapshot.sessionState = nil
       }
     }
 
     publishSnapshot()
-  }
-
-  private func attachSessionStateListener(for deviceID: DeviceIdentifier) async {
-    sessionStateListenerToken = await wearables.addDeviceSessionStateListener(forDeviceId: deviceID) { [weak self] state in
-      Task { @MainActor [weak self] in
-        self?.applySessionState(state)
-      }
-    }
   }
 
   private func attachLinkStateListener(to device: Device) {
@@ -140,45 +120,24 @@ final class GlassesSessionCoordinator {
     }
   }
 
-  private func applySessionState(_ state: SessionState) {
-    snapshot.sessionState = state
-
-    guard isStarted else {
-      publishSnapshot()
-      return
-    }
-
-    switch state {
-    case .running:
-      snapshot.phase = .running
-      snapshot.errorMessage = nil
-    case .paused:
-      snapshot.phase = .paused
-    case .waitingForDevice, .unknown:
-      snapshot.phase = .waitingForDevice
-    case .stopped:
-      snapshot.phase = .inactive
-    }
-
-    publishSnapshot()
-  }
-
   private func applyLinkState(_ linkState: LinkState) {
     guard isStarted, snapshot.phase != .stopping else { return }
 
     switch linkState {
     case .connected:
-      break
+      snapshot.phase = .running
+      snapshot.sessionState = .running
+      snapshot.errorMessage = nil
+      publishSnapshot()
     case .connecting, .disconnected:
       snapshot.phase = .waitingForDevice
+      snapshot.sessionState = nil
       publishSnapshot()
     }
   }
 
-  private func cancelActiveDeviceListeners() async {
-    await sessionStateListenerToken?.cancel()
+  private func cancelActiveDeviceListener() async {
     await linkStateListenerToken?.cancel()
-    sessionStateListenerToken = nil
     linkStateListenerToken = nil
   }
 

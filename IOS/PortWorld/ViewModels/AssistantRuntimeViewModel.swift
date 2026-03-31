@@ -223,7 +223,6 @@ final class AssistantRuntimeViewModel: ObservableObject {
   private func synchronizeVisionCaptureIfNeeded() async {
     let shouldCaptureVision =
       controllerStatus.assistantRuntimeState == .activeConversation &&
-      wearablesRuntimeManager.glassesSessionPhase == .running &&
       controllerStatus.sessionID != "-"
 
     await wearablesRuntimeManager.setVisionCaptureActive(

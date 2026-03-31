@@ -141,6 +141,13 @@ private extension HomeReadinessState {
     runtimeStatus: AssistantRuntimeStatus,
     wearablesRuntimeManager: WearablesRuntimeManager
   ) -> HomeStatusRowState {
+    if let visionStatus = makeVisionStatusIfNeeded(
+      runtimeStatus: runtimeStatus,
+      wearablesRuntimeManager: wearablesRuntimeManager
+    ) {
+      return visionStatus
+    }
+
     switch wearablesRuntimeManager.glassesSessionPhase {
     case .starting:
       return HomeStatusRowState(
@@ -226,6 +233,99 @@ private extension HomeReadinessState {
       systemImage: "checkmark.circle",
       action: nil
     )
+  }
+
+  static func makeVisionStatusIfNeeded(
+    runtimeStatus: AssistantRuntimeStatus,
+    wearablesRuntimeManager: WearablesRuntimeManager
+  ) -> HomeStatusRowState? {
+    guard runtimeStatus.assistantRuntimeState == .activeConversation ||
+      wearablesRuntimeManager.isVisionCaptureRequested else {
+      return nil
+    }
+
+    switch wearablesRuntimeManager.visionStreamPhase {
+    case .requestingPermission, .starting:
+      return HomeStatusRowState(
+        title: "Glasses",
+        label: "Connecting",
+        detail: "Starting the DAT camera stream from your glasses.",
+        tone: .neutral,
+        systemImage: "camera.viewfinder",
+        action: nil
+      )
+
+    case .waitingForDevice:
+      return HomeStatusRowState(
+        title: "Glasses",
+        label: "Connecting",
+        detail: "Waiting for the glasses camera stream to become available.",
+        tone: .warning,
+        systemImage: "antenna.radiowaves.left.and.right",
+        action: .openGlassesSettings
+      )
+
+    case .capturing:
+      if wearablesRuntimeManager.visionUploadFailureCount > 0,
+        !wearablesRuntimeManager.visionLastErrorText.isEmpty {
+        return HomeStatusRowState(
+          title: "Glasses",
+          label: "Needs attention",
+          detail: "Vision stream is live, but backend upload is failing: \(wearablesRuntimeManager.visionLastErrorText)",
+          tone: .warning,
+          systemImage: "exclamationmark.triangle",
+          action: .openGlassesSettings
+        )
+      }
+
+      let detail: String
+      if wearablesRuntimeManager.visionUploadCount > 0 {
+        detail = "Your glasses camera stream is live and frames are reaching the backend."
+      } else {
+        detail = "Your glasses camera stream is live. Waiting for the first backend vision upload."
+      }
+
+      return HomeStatusRowState(
+        title: "Glasses",
+        label: "Ready",
+        detail: detail,
+        tone: .success,
+        systemImage: "checkmark.circle",
+        action: nil
+      )
+
+    case .paused:
+      return HomeStatusRowState(
+        title: "Glasses",
+        label: "Needs attention",
+        detail: "The glasses camera stream is paused right now.",
+        tone: .warning,
+        systemImage: "pause.circle",
+        action: .openGlassesSettings
+      )
+
+    case .failed:
+      return HomeStatusRowState(
+        title: "Glasses",
+        label: "Needs attention",
+        detail: wearablesRuntimeManager.visionLastErrorText.isEmpty
+          ? "The DAT camera stream failed."
+          : wearablesRuntimeManager.visionLastErrorText,
+        tone: .error,
+        systemImage: "xmark.octagon",
+        action: .openGlassesSettings
+      )
+
+    case .inactive, .stopping:
+      return HomeStatusRowState(
+        title: "Glasses",
+        label: "Connecting",
+        detail: "Preparing the glasses camera stream now.",
+        tone: .neutral,
+        systemImage: "camera.viewfinder",
+        action: nil
+      )
+    }
   }
 
   static func glassesStatusLabel(

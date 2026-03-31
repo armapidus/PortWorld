@@ -30,6 +30,7 @@ final class GlassesPhotoCaptureController {
   private var isActive = false
   private var minimumFrameIntervalMs: Int64 = 1_000
   private var lastSampleTimestampMs: Int64?
+  private var hasLoggedFirstSample = false
 
   init(wearables: WearablesInterface) {
     self.deviceSessionCoordinator = DeviceSessionCoordinator(wearables: wearables)
@@ -41,11 +42,18 @@ final class GlassesPhotoCaptureController {
     minimumFrameIntervalMs = Int64((1_000.0 / max(0.1, photoFps)).rounded())
 
     guard !isActive else {
+      if snapshot.phase == .failed || snapshot.phase == .inactive {
+        snapshot.errorMessage = nil
+        snapshot.phase = .starting
+        publishSnapshot()
+        await deviceSessionCoordinator.startSession()
+      }
       return
     }
 
     isActive = true
     lastSampleTimestampMs = nil
+    hasLoggedFirstSample = false
     snapshot.errorMessage = nil
     snapshot.phase = .requestingPermission
     publishSnapshot()
@@ -75,6 +83,7 @@ final class GlassesPhotoCaptureController {
 
     isActive = false
     lastSampleTimestampMs = nil
+    hasLoggedFirstSample = false
     snapshot.phase = .stopping
     publishSnapshot()
     await deviceSessionCoordinator.stopSession()
@@ -92,10 +101,12 @@ final class GlassesPhotoCaptureController {
       guard let self else { return }
       self.snapshot.phase = .failed
       self.snapshot.errorMessage = DeviceSessionCoordinator.formatStreamingError(error)
+      self.debugLog("Stream error phase=failed error=\(self.snapshot.errorMessage ?? "unknown")")
       self.publishSnapshot()
     }
 
     deviceSessionCoordinator.hooks.onStreamingStateChanged = { [weak self] state in
+      self?.debugLog("Streaming state changed state=\(state)")
       self?.applyStreamingState(state)
     }
   }
@@ -109,15 +120,19 @@ final class GlassesPhotoCaptureController {
       snapshot.errorMessage = nil
     case .waitingForDevice:
       snapshot.phase = .waitingForDevice
+      snapshot.errorMessage = nil
     case .streaming:
       snapshot.phase = .capturing
       snapshot.errorMessage = nil
     case .paused:
       snapshot.phase = .paused
+      snapshot.errorMessage = nil
     case .stopping:
       snapshot.phase = .stopping
+      snapshot.errorMessage = nil
     case .stopped:
       snapshot.phase = .inactive
+      snapshot.errorMessage = nil
     @unknown default:
       snapshot.phase = .failed
       snapshot.errorMessage = "Unknown glasses photo capture state."
@@ -135,10 +150,20 @@ final class GlassesPhotoCaptureController {
     }
 
     lastSampleTimestampMs = timestampMs
+    if hasLoggedFirstSample == false {
+      hasLoggedFirstSample = true
+      debugLog("Accepted first sampled frame timestampMs=\(timestampMs)")
+    }
     onPhotoCaptured?(image, timestampMs)
   }
 
   private func publishSnapshot() {
     onSnapshotUpdated?(snapshot)
+  }
+
+  private func debugLog(_ message: String) {
+    #if DEBUG
+      print("[GlassesPhotoCaptureController] \(message)")
+    #endif
   }
 }

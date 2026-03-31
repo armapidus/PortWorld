@@ -7,6 +7,17 @@ import OSLog
 
 @MainActor
 final class AudioCollectionManager: ObservableObject {
+    private enum StartError: LocalizedError {
+        case invalidInputFormat(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidInputFormat(let detail):
+                return "Invalid recording tap format: \(detail)"
+            }
+        }
+    }
+
     struct HFPRouteAvailability: Equatable {
         let isSelectable: Bool
         let isActive: Bool
@@ -144,7 +155,14 @@ final class AudioCollectionManager: ObservableObject {
         do {
             configureVoiceProcessingIfNeeded()
 
-            let inputFormat = tapController.inputFormat()
+            guard let inputFormat = tapController.inputFormat() else {
+                throw StartError.invalidInputFormat("audio input format is unavailable")
+            }
+            guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+                throw StartError.invalidInputFormat(
+                    "sampleRate=\(inputFormat.sampleRate) channelCount=\(inputFormat.channelCount)"
+                )
+            }
 
             if isTapInstalled {
                 tapController.removeTap()
@@ -692,7 +710,7 @@ private final class SystemNotificationCenter: NotificationObserving {
 }
 
 protocol AudioTapControlling {
-    func inputFormat() -> AVAudioFormat
+    func inputFormat() -> AVAudioFormat?
     func installTap(format: AVAudioFormat, block: @escaping AVAudioNodeTapBlock)
     func removeTap()
     func prepareEngine()
@@ -707,8 +725,12 @@ private final class EngineAudioTapController: AudioTapControlling {
         self.engine = engine
     }
 
-    func inputFormat() -> AVAudioFormat {
-        engine.inputNode.inputFormat(forBus: 0)
+    func inputFormat() -> AVAudioFormat? {
+        let format = engine.inputNode.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            return nil
+        }
+        return format
     }
 
     func installTap(format: AVAudioFormat, block: @escaping AVAudioNodeTapBlock) {

@@ -7,6 +7,11 @@ import UIKit
 
 @MainActor
 final class WearablesRuntimeManager: ObservableObject {
+  private struct VisionUploaderConfiguration: Equatable {
+    let endpointURL: URL
+    let requestHeaders: [String: String]
+  }
+
   enum ConfigurationState: Equatable {
     case idle
     case configuring
@@ -219,6 +224,7 @@ final class WearablesRuntimeManager: ObservableObject {
   @Published private(set) var glassesSessionErrorMessage: String?
   @Published private(set) var glassesDevelopmentReadinessDetail: String =
     "Complete DAT setup before validating the glasses runtime."
+  @Published private(set) var visionStreamPhase: GlassesPhotoCaptureController.Phase = .inactive
   @Published private(set) var visionCaptureStateText: String = "inactive"
   @Published private(set) var visionUploadCount: Int = 0
   @Published private(set) var visionUploadFailureCount: Int = 0
@@ -270,6 +276,14 @@ final class WearablesRuntimeManager: ObservableObject {
     activationBlocker == nil
   }
 
+  var isVisionCaptureRequested: Bool {
+    wantsVisionCapture
+  }
+
+  var isVisionStreamReady: Bool {
+    visionStreamPhase == .capturing
+  }
+
   var hasSatisfiedDiscoveryPermission: Bool {
     discoveryPermissionState == .granted || devices.isEmpty == false
   }
@@ -308,6 +322,7 @@ final class WearablesRuntimeManager: ObservableObject {
   private var visionEndpointURL: URL?
   private var visionRequestHeaders: [String: String] = [:]
   private var visionPhotoFps: Double = 1.0
+  private var visionUploaderConfiguration: VisionUploaderConfiguration?
 
   init(
     configure: @escaping () throws -> Void = { try Wearables.configure() },
@@ -579,6 +594,7 @@ final class WearablesRuntimeManager: ObservableObject {
       glassesSessionCoordinator = nil
       glassesPhotoCaptureController = nil
       visionFrameUploader = nil
+      visionUploaderConfiguration = nil
       wearables = nil
       registrationState = nil
       devices = []
@@ -779,6 +795,7 @@ final class WearablesRuntimeManager: ObservableObject {
     glassesAudioMode = .inactive
     isGlassesSessionRequested = false
     glassesSessionErrorMessage = nil
+    visionStreamPhase = .inactive
     visionCaptureStateText = "inactive"
     visionUploadCount = 0
     visionUploadFailureCount = 0
@@ -787,11 +804,16 @@ final class WearablesRuntimeManager: ObservableObject {
   }
 
   private func applyGlassesPhotoCaptureSnapshot(_ snapshot: GlassesPhotoCaptureController.Snapshot) {
+    visionStreamPhase = snapshot.phase
     visionCaptureStateText = snapshot.phase.rawValue
     if let errorMessage = snapshot.errorMessage, !errorMessage.isEmpty {
       visionLastErrorText = errorMessage
     } else if snapshot.phase != .failed {
       visionLastErrorText = ""
+    }
+
+    Task { @MainActor [weak self] in
+      await self?.synchronizeVisionCapture()
     }
   }
 
@@ -811,6 +833,7 @@ final class WearablesRuntimeManager: ObservableObject {
     glassesSessionCoordinator = nil
     glassesPhotoCaptureController = nil
     visionFrameUploader = nil
+    visionUploaderConfiguration = nil
     resetGlassesSessionSnapshot()
     refreshDevelopmentReadiness()
   }
@@ -919,47 +942,44 @@ final class WearablesRuntimeManager: ObservableObject {
     guard configurationState == .ready else { return }
     guard registrationState == .registered else { return }
     guard isGlassesSessionRequested else { return }
-    guard glassesSessionPhase == .running else {
-      if visionCaptureStateText != GlassesPhotoCaptureController.Phase.failed.rawValue {
-        visionCaptureStateText = "waiting_for_glasses"
-      }
-      return
-    }
     guard let wearables, let visionEndpointURL else { return }
     guard let sessionID = visionSessionID, !sessionID.isEmpty, sessionID != "-" else { return }
 
     ensureGlassesPhotoCaptureController(using: wearables)
 
-    if visionFrameUploader == nil {
-      let uploader = VisionFrameUploader(
-        endpointURL: visionEndpointURL,
-        defaultHeaders: visionRequestHeaders,
-        sessionID: sessionID,
-        uploadIntervalMs: Int64((1000.0 / max(0.1, visionPhotoFps)).rounded())
-      )
-      await uploader.bindUploadResultHandler { [weak self] result in
-        self?.handleVisionUploadResult(result)
-      }
-      visionFrameUploader = uploader
-    } else {
-      await visionFrameUploader?.updateSessionID(sessionID)
-      await visionFrameUploader?.bindUploadResultHandler { [weak self] result in
-        self?.handleVisionUploadResult(result)
-      }
+    guard glassesSessionPhase == .running else {
+      await stopVisionUploader(discardConfiguration: false)
+      return
     }
 
-    await visionFrameUploader?.start()
     await glassesPhotoCaptureController?.start(photoFps: visionPhotoFps)
+
+    guard isVisionStreamReady else {
+      await stopVisionUploader(discardConfiguration: false)
+      return
+    }
+
+    debugLog(
+      "Synchronizing vision capture session=\(sessionID) endpoint=\(visionEndpointURL.absoluteString) fps=\(visionPhotoFps)"
+    )
+
+    await ensureVisionFrameUploader(
+      sessionID: sessionID,
+      endpointURL: visionEndpointURL,
+      requestHeaders: visionRequestHeaders
+    )
+    await visionFrameUploader?.start()
+    debugLog("Started vision uploader for session=\(sessionID)")
   }
 
   private func stopVisionCapture(resetState: Bool) async {
     wantsVisionCapture = false
     visionSessionID = nil
     await glassesPhotoCaptureController?.stop()
-    await visionFrameUploader?.stop()
-    visionFrameUploader = nil
+    await stopVisionUploader(discardConfiguration: true)
 
     if resetState {
+      visionStreamPhase = .inactive
       visionCaptureStateText = "inactive"
       visionUploadCount = 0
       visionUploadFailureCount = 0
@@ -967,18 +987,66 @@ final class WearablesRuntimeManager: ObservableObject {
     }
   }
 
+  private func ensureVisionFrameUploader(
+    sessionID: String,
+    endpointURL: URL,
+    requestHeaders: [String: String]
+  ) async {
+    let desiredConfiguration = VisionUploaderConfiguration(
+      endpointURL: endpointURL,
+      requestHeaders: requestHeaders
+    )
+
+    if visionUploaderConfiguration != desiredConfiguration {
+      await stopVisionUploader(discardConfiguration: true)
+    }
+
+    if visionFrameUploader == nil {
+      let uploader = VisionFrameUploader(
+        endpointURL: endpointURL,
+        defaultHeaders: requestHeaders,
+        sessionID: sessionID,
+        uploadIntervalMs: Int64((1000.0 / max(0.1, visionPhotoFps)).rounded())
+      )
+      await uploader.bindUploadResultHandler { [weak self] result in
+        self?.handleVisionUploadResult(result)
+      }
+      visionFrameUploader = uploader
+      visionUploaderConfiguration = desiredConfiguration
+      debugLog("Created vision uploader for session=\(sessionID)")
+      return
+    }
+
+    await visionFrameUploader?.updateSessionID(sessionID)
+    await visionFrameUploader?.bindUploadResultHandler { [weak self] result in
+      self?.handleVisionUploadResult(result)
+    }
+    debugLog("Updated vision uploader session=\(sessionID)")
+  }
+
+  private func stopVisionUploader(discardConfiguration: Bool) async {
+    await visionFrameUploader?.stop()
+    if discardConfiguration {
+      visionFrameUploader = nil
+      visionUploaderConfiguration = nil
+    }
+  }
+
   private func handleVisionUploadResult(_ result: VisionFrameUploadResult) {
     if result.success {
       visionUploadCount += 1
       visionLastErrorText = ""
-      if visionCaptureStateText == GlassesPhotoCaptureController.Phase.failed.rawValue {
-        visionCaptureStateText = GlassesPhotoCaptureController.Phase.capturing.rawValue
-      }
+      debugLog(
+        "Vision upload succeeded frame=\(result.frameID) status=\(result.httpStatusCode ?? -1) attempts=\(result.attemptCount) latencyMs=\(result.latencyMs) payloadBytes=\(result.payloadBytes)"
+      )
       return
     }
 
     visionUploadFailureCount += 1
     visionLastErrorText = result.errorDescription ?? "Vision upload failed."
+    debugLog(
+      "Vision upload failed frame=\(result.frameID) status=\(result.httpStatusCode ?? -1) attempts=\(result.attemptCount) errorCode=\(result.errorCode ?? "-") error=\(result.errorDescription ?? "unknown")"
+    )
   }
 
   private var hasCompatibleDiscoveredDevice: Bool {
