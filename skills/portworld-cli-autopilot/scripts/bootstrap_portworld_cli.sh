@@ -77,14 +77,15 @@ cd "$PROJECT_ROOT"
 uv sync --quiet
 
 INIT_CMD=(
-  uv run python -m portworld_cli.main init
+  uv run python -m portworld_cli.main
+  --non-interactive
+  --yes
+  init
   --setup-mode "$SETUP_MODE"
   --runtime-source "$MODE"
   --project-mode local
   --without-vision
   --without-tooling
-  --yes
-  --non-interactive
   --realtime-provider "$REALTIME_PROVIDER"
   --realtime-api-key "$REALTIME_API_KEY"
 )
