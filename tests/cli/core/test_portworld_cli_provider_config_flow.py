@@ -8,7 +8,10 @@ from portworld_cli.context import CLIContext
 from portworld_cli.envfile import load_env_template, parse_env_file
 from portworld_cli.providers.types import ProviderEditOptions
 from portworld_cli.services.config.errors import ConfigUsageError, ConfigValidationError
-from portworld_cli.services.config.messages import build_init_review_lines
+from portworld_cli.services.config.messages import (
+    build_init_confirmation_lines,
+    build_init_review_lines,
+)
 from portworld_cli.services.config.persistence import write_config_artifacts
 from portworld_cli.workspace.config.providers import collect_provider_section
 from portworld_cli.workspace.discovery.paths import ProjectPaths, WorkspacePaths
@@ -211,6 +214,32 @@ class ProviderConfigFlowTests(unittest.TestCase):
             "missing_provider_config: VISION_AZURE_OPENAI_ENDPOINT",
             lines,
         )
+
+    def test_init_confirmation_lines_for_local_mode_stay_compact(self) -> None:
+        readiness = SecretReadiness(
+            selected_realtime_provider="openai",
+            selected_vision_provider=None,
+            selected_search_provider=None,
+            required_secret_keys=("OPENAI_API_KEY",),
+            optional_secret_keys=(),
+            missing_required_secret_keys=(),
+            required_config_keys=(),
+            optional_config_keys=(),
+            missing_required_config_keys=(),
+            key_presence={"OPENAI_API_KEY": True},
+            config_key_presence={},
+            bearer_token_present=False,
+        )
+
+        lines = build_init_confirmation_lines(
+            project_config=ProjectConfig(runtime_source="source"),
+            secret_readiness=readiness,
+        )
+
+        self.assertIn("project_mode: local", lines)
+        self.assertIn("missing_provider_secrets: none", lines)
+        self.assertNotIn("gcp_project_id: portworld-deploy", lines)
+        self.assertFalse(any(line.startswith("preferred_target:") for line in lines))
 
 
 if __name__ == "__main__":

@@ -106,6 +106,7 @@ class StatusCrossTargetTests(unittest.TestCase):
             )
 
             self.assertTrue(result.ok)
+            self.assertTrue(result.message.startswith("Summary\n"))
             self.assertEqual(result.data["active_target"], TARGET_GCP_CLOUD_RUN)
             self.assertEqual(result.data["deploy"]["source"], "state")
             self.assertEqual(
