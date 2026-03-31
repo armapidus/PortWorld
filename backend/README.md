@@ -209,8 +209,6 @@ Set `BACKEND_PROFILE=production` to enforce the following at startup:
 | Variable | Description |
 |---|---|
 | `BACKEND_BEARER_TOKEN` | Required in production; all protected endpoints require `Authorization: Bearer <token>` |
-| `CORS_ORIGINS` | Explicit allowed origins (not `*`) |
-| `BACKEND_ALLOWED_HOSTS` | Explicit allowed hosts (not `*`) |
 
 **Storage backends**
 

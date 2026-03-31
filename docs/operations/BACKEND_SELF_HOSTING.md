@@ -301,7 +301,7 @@ Repeat deploys reuse target-specific state files under `.portworld/state/`. Afte
 ## Notes
 
 - `BACKEND_BEARER_TOKEN` should be set for any shared or remotely reachable deployment.
-- `CORS_ORIGINS=*` is the local-dev default, not a recommended production setting.
+- `BACKEND_BEARER_TOKEN` is the main production security control for the default self-hosted posture.
 - `BACKEND_FORWARDED_ALLOW_IPS` should be set to your reverse proxy/LB peer IPs/CIDRs when deploying behind a proxy.
 - `BACKEND_RATE_LIMIT_HTTP_IP_MAX_REQUESTS` defaults to `30` and `BACKEND_RATE_LIMIT_HTTP_WINDOW_SECONDS` defaults to `60`.
 - When `BACKEND_ENABLE_IP_RATE_LIMITS=true`, the backend IP-rate-limits `GET /memory/user`, `PUT /memory/user`, `POST /memory/user/reset`, `GET /memory/export`, `GET /memory/sessions/{session_id}/status`, and `POST /memory/sessions/{session_id}/reset`.
