@@ -28,8 +28,6 @@ class AWSRuntimeEnvVarsTests(unittest.TestCase):
             ecr_repository="repo",
             image_tag="abc123",
             image_uri="123.dkr.ecr.us-east-1.amazonaws.com/repo:abc123",
-            cors_origins="https://app.example.com",
-            allowed_hosts="api.example.com",
             rds_instance_identifier="service-pg",
             rds_db_name="portworld",
             rds_master_username="portworld",

@@ -11,8 +11,8 @@ class AWSDoctorTests(unittest.TestCase):
     @mock.patch("portworld_cli.aws.doctor.aws_cli_available", return_value=False)
     def test_missing_cli_fails(self, _available: mock.Mock) -> None:
         evaluation = evaluate_aws_ecs_fargate_readiness(
+            runtime_source="source",
             explicit_region="us-east-1",
-            explicit_cluster="cluster",
             explicit_service="service",
             explicit_vpc_id="vpc-1",
             explicit_subnet_ids="subnet-a,subnet-b",
@@ -62,8 +62,8 @@ class AWSDoctorTests(unittest.TestCase):
         ]
 
         evaluation = evaluate_aws_ecs_fargate_readiness(
+            runtime_source="source",
             explicit_region="us-east-1",
-            explicit_cluster="cluster",
             explicit_service="service",
             explicit_vpc_id="vpc-1",
             explicit_subnet_ids="subnet-a,subnet-b",
@@ -71,8 +71,6 @@ class AWSDoctorTests(unittest.TestCase):
             explicit_s3_bucket="aws-bucket-123",
             env_values={
                 "BACKEND_PROFILE": "production",
-                "CORS_ORIGINS": "https://app.example.com",
-                "BACKEND_ALLOWED_HOSTS": "api.example.com",
                 "BACKEND_STORAGE_BACKEND": "managed",
                 "BACKEND_OBJECT_STORE_PROVIDER": "s3",
             },

@@ -60,18 +60,6 @@ def collect_security_section(
         else None,
         choices=("development", "production"),
     )
-    cors_origins = resolve_csv_value(
-        session.cli_context,
-        prompt="CORS origins (comma-separated)",
-        current_values=session.project_config.security.cors_origins,
-        explicit_value=options.cors_origins,
-    )
-    allowed_hosts = resolve_csv_value(
-        session.cli_context,
-        prompt="Allowed hosts (comma-separated)",
-        current_values=session.project_config.security.allowed_hosts,
-        explicit_value=options.allowed_hosts,
-    )
     bearer_token = resolve_bearer_token(
         session.cli_context,
         existing_value="" if existing_env is None else existing_env.known_values.get("BACKEND_BEARER_TOKEN", ""),
@@ -81,8 +69,6 @@ def collect_security_section(
     )
     return SecuritySectionResult(
         backend_profile=backend_profile,
-        cors_origins=cors_origins,
-        allowed_hosts=allowed_hosts,
         bearer_token=bearer_token,
     )
 
@@ -359,8 +345,6 @@ def apply_security_section(
         providers=project_config.providers,
         security=SecurityConfig(
             backend_profile=result.backend_profile,
-            cors_origins=result.cors_origins,
-            allowed_hosts=result.allowed_hosts,
         ),
         deploy=project_config.deploy,
     )

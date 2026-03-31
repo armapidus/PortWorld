@@ -5,8 +5,6 @@ from contextlib import asynccontextmanager
 import logging
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -80,21 +78,6 @@ class VisionPayloadLimitMiddleware:
         await self._app(scope, receive, send)
 
 
-class HealthAwareTrustedHostMiddleware:
-    def __init__(self, app: ASGIApp, *, allowed_hosts: list[str]) -> None:
-        self._app = app
-        self._trusted = TrustedHostMiddleware(app, allowed_hosts=allowed_hosts)
-        self._health_paths = {"/livez", "/readyz"}
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        # ALB health checks may use an IP-based Host header; bypass host checks
-        # only for explicit health endpoints and keep validation for all other paths.
-        if scope["type"] == "http" and scope["path"] in self._health_paths:
-            await self._app(scope, receive, send)
-            return
-        await self._trusted(scope, receive, send)
-
-
 async def _vision_payload_too_large_response(
     *,
     scope: Scope,
@@ -139,18 +122,6 @@ def create_app_from_settings(settings: Settings) -> FastAPI:
     settings.validate_production_posture()
     app = FastAPI(title=SERVICE_NAME, lifespan=_make_lifespan(settings))
 
-    allow_all = settings.cors_origins == ["*"]
-    app.add_middleware(
-        HealthAwareTrustedHostMiddleware,
-        allowed_hosts=settings.backend_allowed_hosts,
-    )
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins,
-        allow_credentials=not allow_all,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
     app.add_middleware(
         VisionPayloadLimitMiddleware,
         max_request_bytes=settings.backend_max_vision_request_bytes,

@@ -60,8 +60,6 @@ class DeployAWSECSFargateOptions:
     bucket: str | None
     ecr_repo: str | None
     tag: str | None
-    cors_origins: str | None
-    allowed_hosts: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,8 +76,6 @@ class _ResolvedAWSDeployConfig:
     ecr_repository: str | None
     image_tag: str
     image_uri: str
-    cors_origins: str
-    allowed_hosts: str
     rds_instance_identifier: str
     rds_db_name: str
     rds_master_username: str
@@ -376,8 +372,6 @@ def _resolve_aws_deploy_config(
             f"{ecr_repository}:{image_tag}"
         )
 
-    cors_origins = _first_non_empty(options.cors_origins, env_values.get("CORS_ORIGINS"), "*")
-    allowed_hosts = _first_non_empty(options.allowed_hosts, env_values.get("BACKEND_ALLOWED_HOSTS"), "*")
     rds_instance_identifier = _normalize_rds_identifier(f"{app_name}-pg")
     rds_db_name = "portworld"
     rds_master_username = "portworld"
@@ -396,8 +390,6 @@ def _resolve_aws_deploy_config(
         ecr_repository=ecr_repository,
         image_tag=image_tag,
         image_uri=image_uri,
-        cors_origins=cors_origins or "*",
-        allowed_hosts=allowed_hosts or "*",
         rds_instance_identifier=rds_instance_identifier,
         rds_db_name=rds_db_name,
         rds_master_username=rds_master_username,
@@ -435,8 +427,6 @@ def _build_runtime_env_vars(
     final_env["BACKEND_OBJECT_STORE_NAME"] = config.bucket_name
     final_env["BACKEND_OBJECT_STORE_PREFIX"] = config.app_name
     final_env["BACKEND_DATABASE_URL"] = database_url
-    final_env["CORS_ORIGINS"] = config.cors_origins
-    final_env["BACKEND_ALLOWED_HOSTS"] = config.allowed_hosts
     final_env["PORT"] = "8080"
     return final_env
 
@@ -495,10 +485,6 @@ def _run_aws_deploy_mutations(
         env_values,
         config,
         database_url=database_resolution.database_url,
-    )
-    runtime_env["BACKEND_ALLOWED_HOSTS"] = _compose_allowed_hosts(
-        configured_hosts=config.allowed_hosts,
-        cloudfront_domain_name=cloudfront_domain_name,
     )
     execution_role_arn = _ensure_ecs_execution_role(stage_records=stage_records)
     task_role_arn = _ensure_ecs_task_role(config=config, stage_records=stage_records)
@@ -1412,13 +1398,6 @@ def _resolve_rds_password(config: _ResolvedAWSDeployConfig) -> str:
 
 def _build_postgres_url(*, username: str, password: str, host: str, port: int, db_name: str) -> str:
     return f"postgresql://{quote(username)}:{quote(password)}@{host}:{port}/{db_name}"
-
-
-def _compose_allowed_hosts(*, configured_hosts: str, cloudfront_domain_name: str) -> str:
-    existing = [part.strip() for part in configured_hosts.split(",") if part.strip()]
-    if cloudfront_domain_name not in existing:
-        existing.append(cloudfront_domain_name)
-    return ",".join(existing)
 
 
 def _ensure_service_security_groups(

@@ -31,8 +31,6 @@ def deploy_group() -> None:
 @click.option("--sql-instance", default=None, help="Cloud SQL instance name.")
 @click.option("--database", default=None, help="Cloud SQL database name.")
 @click.option("--bucket", default=None, help="GCS bucket name for managed artifacts.")
-@click.option("--cors-origins", default=None, help="Explicit production CORS origins (comma-separated).")
-@click.option("--allowed-hosts", default=None, help="Explicit production allowed hosts (comma-separated).")
 @click.option("--tag", default=None, help="Container image tag.")
 @click.option("--min-instances", type=int, default=None, help="Minimum Cloud Run instances.")
 @click.option("--max-instances", type=int, default=None, help="Maximum Cloud Run instances.")
@@ -49,8 +47,6 @@ def deploy_gcp_cloud_run_command(
     sql_instance: str | None,
     database: str | None,
     bucket: str | None,
-    cors_origins: str | None,
-    allowed_hosts: str | None,
     tag: str | None,
     min_instances: int | None,
     max_instances: int | None,
@@ -71,8 +67,6 @@ def deploy_gcp_cloud_run_command(
                 sql_instance=sql_instance,
                 database=database,
                 bucket=bucket,
-                cors_origins=cors_origins,
-                allowed_hosts=allowed_hosts,
                 tag=tag,
                 min_instances=min_instances,
                 max_instances=max_instances,
@@ -95,8 +89,6 @@ def _run_aws_deploy(
     bucket: str | None,
     ecr_repo: str | None,
     tag: str | None,
-    cors_origins: str | None,
-    allowed_hosts: str | None,
 ) -> None:
     exit_with_result(
         cli_context,
@@ -111,8 +103,6 @@ def _run_aws_deploy(
                 bucket=bucket,
                 ecr_repo=ecr_repo,
                 tag=tag,
-                cors_origins=cors_origins,
-                allowed_hosts=allowed_hosts,
             ),
         ),
     )
@@ -127,8 +117,6 @@ def _run_aws_deploy(
 @click.option("--bucket", default=None, help="S3 bucket name for managed memory objects.")
 @click.option("--ecr-repo", default=None, help="ECR repository name.")
 @click.option("--tag", default=None, help="Container image tag.")
-@click.option("--cors-origins", default=None, help="Explicit production CORS origins (comma-separated).")
-@click.option("--allowed-hosts", default=None, help="Explicit production allowed hosts (comma-separated).")
 @click.pass_obj
 def deploy_aws_ecs_fargate_command(
     cli_context: CLIContext,
@@ -140,8 +128,6 @@ def deploy_aws_ecs_fargate_command(
     bucket: str | None,
     ecr_repo: str | None,
     tag: str | None,
-    cors_origins: str | None,
-    allowed_hosts: str | None,
 ) -> None:
     """Deploy PortWorld backend to AWS ECS/Fargate with ALB and CloudFront."""
     _run_aws_deploy(
@@ -154,8 +140,6 @@ def deploy_aws_ecs_fargate_command(
         bucket=bucket,
         ecr_repo=ecr_repo,
         tag=tag,
-        cors_origins=cors_origins,
-        allowed_hosts=allowed_hosts,
     )
 
 @deploy_group.command("azure-container-apps")
@@ -171,8 +155,6 @@ def deploy_aws_ecs_fargate_command(
 @click.option("--acr-server", default=None, help="Azure Container Registry login server.")
 @click.option("--acr-repo", default=None, help="ACR repository name.")
 @click.option("--tag", default=None, help="Container image tag.")
-@click.option("--cors-origins", default=None, help="Explicit production CORS origins (comma-separated).")
-@click.option("--allowed-hosts", default=None, help="Explicit production allowed hosts (comma-separated).")
 @click.pass_obj
 def deploy_azure_container_apps_command(
     cli_context: CLIContext,
@@ -188,8 +170,6 @@ def deploy_azure_container_apps_command(
     acr_server: str | None,
     acr_repo: str | None,
     tag: str | None,
-    cors_origins: str | None,
-    allowed_hosts: str | None,
 ) -> None:
     """Deploy PortWorld backend to Azure Container Apps."""
     exit_with_result(
@@ -209,8 +189,6 @@ def deploy_azure_container_apps_command(
                 acr_server=acr_server,
                 acr_repo=acr_repo,
                 tag=tag,
-                cors_origins=cors_origins,
-                allowed_hosts=allowed_hosts,
             ),
         ),
     )

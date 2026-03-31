@@ -870,14 +870,6 @@ def _build_production_posture_checks(
         env_values.get("BACKEND_PROFILE"),
         None if project_config is None else project_config.security.backend_profile,
     )
-    cors_origins = _first_non_empty(
-        env_values.get("CORS_ORIGINS"),
-        None if project_config is None else ",".join(project_config.security.cors_origins),
-    )
-    allowed_hosts = _first_non_empty(
-        env_values.get("BACKEND_ALLOWED_HOSTS"),
-        None if project_config is None else ",".join(project_config.security.allowed_hosts),
-    )
     return [
         DiagnosticCheck(
             id="production_backend_profile",
@@ -893,31 +885,7 @@ def _build_production_posture_checks(
                 else "The deploy path will force production settings, but recording them in config is recommended."
             ),
         ),
-        DiagnosticCheck(
-            id="production_cors_explicit",
-            status="pass" if _is_explicit_production_value(cors_origins) else "warn",
-            message=(
-                "CORS origins are explicitly configured."
-                if _is_explicit_production_value(cors_origins)
-                else "CORS origins are unset or still use a wildcard/default posture."
-            ),
-            action="Set explicit production CORS origins before deploy.",
-        ),
-        DiagnosticCheck(
-            id="production_allowed_hosts_explicit",
-            status="pass" if _is_explicit_production_value(allowed_hosts) else "warn",
-            message=(
-                "Allowed hosts are explicitly configured."
-                if _is_explicit_production_value(allowed_hosts)
-                else "Allowed hosts are unset or still use a wildcard/default posture."
-            ),
-            action="Set explicit production allowed hosts before deploy.",
-        ),
     ]
-
-
-def _is_explicit_production_value(value: str | None) -> bool:
-    return bool(value and value.strip() and value.strip() != "*")
 
 
 def _read_dict_string(payload: dict[str, object], key: str) -> str | None:

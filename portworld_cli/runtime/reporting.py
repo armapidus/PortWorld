@@ -199,20 +199,18 @@ def build_health_summary(
         host_port = session.project_config.deploy.published_runtime.host_port
         base_url = f"http://127.0.0.1:{host_port}"
         env_values = session.config_session.merged_env_values()
-        host_header = _resolve_local_probe_host_header(session)
         bearer_token = _normalize_text(env_values.get("BACKEND_BEARER_TOKEN"))
         return HealthSummary(
             source="local_probes",
             livez=probe_endpoint(
                 base_url,
                 "/livez",
-                headers=_build_probe_headers(host_header=host_header),
+                headers=_build_probe_headers(),
             ),
             readyz=probe_endpoint(
                 base_url,
                 "/readyz",
                 headers=_build_probe_headers(
-                    host_header=host_header,
                     bearer_token=bearer_token,
                 ),
             ),
@@ -257,15 +255,6 @@ def _build_probe_headers(
     if bearer_token:
         headers["Authorization"] = f"Bearer {bearer_token}"
     return headers or None
-
-
-def _resolve_local_probe_host_header(session: InspectionSession) -> str | None:
-    for candidate in session.project_config.security.allowed_hosts:
-        normalized = _normalize_text(candidate)
-        if normalized is None or normalized == "*":
-            continue
-        return normalized
-    return None
 
 
 def _normalize_text(value: object | None) -> str | None:

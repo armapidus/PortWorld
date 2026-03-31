@@ -68,8 +68,6 @@ class UpdateDeployOptions:
     sql_instance: str | None
     database: str | None
     bucket: str | None
-    cors_origins: str | None
-    allowed_hosts: str | None
     tag: str | None
     min_instances: int | None
     max_instances: int | None
@@ -202,8 +200,6 @@ def _dispatch_update_deploy(
                 sql_instance=options.sql_instance,
                 database=options.database,
                 bucket=options.bucket,
-                cors_origins=options.cors_origins,
-                allowed_hosts=options.allowed_hosts,
                 tag=options.tag,
                 min_instances=options.min_instances,
                 max_instances=options.max_instances,
@@ -225,8 +221,6 @@ def _dispatch_update_deploy(
                 bucket=options.aws_s3_bucket,
                 ecr_repo=options.aws_ecr_repo,
                 tag=options.tag,
-                cors_origins=options.cors_origins,
-                allowed_hosts=options.allowed_hosts,
             ),
         )
     if active_target == TARGET_AZURE_CONTAINER_APPS:
@@ -246,8 +240,6 @@ def _dispatch_update_deploy(
                 acr_server=options.azure_acr_server,
                 acr_repo=options.azure_acr_repo,
                 tag=options.tag,
-                cors_origins=options.cors_origins,
-                allowed_hosts=options.allowed_hosts,
             ),
         )
     raise UpdateUsageError(f"Managed deploy target '{active_target}' is not supported.")

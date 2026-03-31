@@ -267,7 +267,6 @@ class Settings:
     portworld_extensions_manifest: Path | None
     portworld_extensions_python_path: Path | None
     backend_profile: str
-    backend_allowed_hosts: list[str]
     backend_forwarded_allow_ips: list[str]
     backend_enable_ip_rate_limits: bool
     backend_rate_limit_ws_ip_max_attempts: int
@@ -281,7 +280,6 @@ class Settings:
     host: str
     port: int
     log_level: str
-    cors_origins: list[str]
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -309,15 +307,6 @@ class Settings:
         if not self.backend_bearer_token:
             raise RuntimeError(
                 "BACKEND_BEARER_TOKEN must be set when BACKEND_PROFILE=production."
-            )
-        if self.cors_origins == ["*"]:
-            raise RuntimeError(
-                "CORS_ORIGINS must be explicit (not '*') when BACKEND_PROFILE=production."
-            )
-        if self.backend_allowed_hosts == ["*"]:
-            raise RuntimeError(
-                "BACKEND_ALLOWED_HOSTS must be explicit (not '*') when "
-                "BACKEND_PROFILE=production."
             )
         if self.backend_debug_trace_ws_messages:
             raise RuntimeError(
@@ -844,7 +833,6 @@ def _load_tooling_settings(
 def _load_server_settings(*, backend_profile: str) -> dict[str, str | int | list[str]]:
     return {
         "backend_profile": backend_profile,
-        "backend_allowed_hosts": _parse_csv_env("BACKEND_ALLOWED_HOSTS", default="*"),
         "backend_forwarded_allow_ips": _parse_csv_env(
             "BACKEND_FORWARDED_ALLOW_IPS",
             default="127.0.0.1,::1",
@@ -852,7 +840,6 @@ def _load_server_settings(*, backend_profile: str) -> dict[str, str | int | list
         "host": _get_env("HOST") or "0.0.0.0",
         "port": _parse_int_env("PORT", default=8080),
         "log_level": _get_env("LOG_LEVEL") or "INFO",
-        "cors_origins": _parse_csv_env("CORS_ORIGINS", default="*"),
     }
 
 

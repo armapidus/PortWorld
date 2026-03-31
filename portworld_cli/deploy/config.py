@@ -50,7 +50,6 @@ DEFAULT_MEMORY = DEFAULT_GCP_MEMORY
 DEFAULT_MIN_INSTANCES = DEFAULT_GCP_MIN_INSTANCES
 DEFAULT_MAX_INSTANCES = DEFAULT_GCP_MAX_INSTANCES
 DEFAULT_CONCURRENCY = DEFAULT_GCP_CONCURRENCY
-DEFAULT_ALLOWED_HOSTS = "*.a.run.app"
 DEFAULT_BUCKET_SUFFIX = "portworld-artifacts"
 
 
@@ -74,8 +73,6 @@ class DeployGCPCloudRunOptions:
     sql_instance: str | None
     database: str | None
     bucket: str | None
-    cors_origins: str | None
-    allowed_hosts: str | None
     tag: str | None
     min_instances: int | None
     max_instances: int | None
@@ -96,8 +93,6 @@ class ResolvedDeployConfig:
     sql_instance_name: str
     database_name: str
     bucket_name: str
-    cors_origins: str
-    allowed_hosts: str
     image_tag: str
     deploy_image_uri: str
     published_release_tag: str | None
@@ -213,32 +208,6 @@ def resolve_deploy_config(
         default=_default_bucket_name(project_id),
     )
 
-    existing_cors = _explicit_csv_or_none(env_values.get("CORS_ORIGINS"))
-    configured_cors = None if project_config is None else _csv_or_none(project_config.security.cors_origins)
-    cors_origins = _prompt_or_require_text(
-        cli_context,
-        prompt="Production CORS origins (comma-separated)",
-        value=_first_non_empty(options.cors_origins, configured_cors, existing_cors),
-        error_message="Explicit production CORS origins are required for deploy.",
-    )
-    if cors_origins.strip() == "*":
-        raise DeployUsageError("CORS_ORIGINS cannot be '*' for production deploy.")
-
-    existing_allowed_hosts = _explicit_csv_or_none(env_values.get("BACKEND_ALLOWED_HOSTS"))
-    configured_allowed_hosts = (
-        None if project_config is None else _csv_or_none(project_config.security.allowed_hosts)
-    )
-    allowed_hosts = _first_non_empty(
-        options.allowed_hosts,
-        configured_allowed_hosts,
-        existing_allowed_hosts,
-        DEFAULT_ALLOWED_HOSTS,
-    )
-    if allowed_hosts is None:
-        raise DeployUsageError("Explicit allowed hosts could not be resolved for deploy.")
-    if allowed_hosts.strip() == "*":
-        raise DeployUsageError("BACKEND_ALLOWED_HOSTS cannot be '*' for production deploy.")
-
     published_release_tag = None
     published_image_ref = None
     image_source_mode = IMAGE_SOURCE_MODE_SOURCE_BUILD
@@ -318,8 +287,6 @@ def resolve_deploy_config(
         sql_instance_name=sql_instance_name,
         database_name=database_name,
         bucket_name=bucket_name,
-        cors_origins=cors_origins,
-        allowed_hosts=allowed_hosts,
         image_tag=image_tag,
         deploy_image_uri=build_image_uri(
             project_id=project_id,
@@ -371,20 +338,6 @@ def _first_non_empty(*values: str | None) -> str | None:
         if value is not None and value.strip():
             return value.strip()
     return None
-
-
-def _explicit_csv_or_none(raw_value: str | None) -> str | None:
-    normalized = _first_non_empty(raw_value)
-    if normalized is None or normalized == "*":
-        return None
-    return normalized
-
-
-def _csv_or_none(values: tuple[str, ...]) -> str | None:
-    normalized = _first_non_empty(*values)
-    if normalized is None:
-        return None
-    return ",".join(value.strip() for value in values if value.strip())
 
 
 def _default_bucket_name(project_id: str) -> str:

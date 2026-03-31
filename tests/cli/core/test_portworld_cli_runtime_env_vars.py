@@ -16,11 +16,7 @@ class RuntimeEnvVarsTests(unittest.TestCase):
                 ("FOO", "bar"),
             ]
         )
-        config = SimpleNamespace(
-            service_name="portworld-api",
-            cors_origins="https://app.example.com",
-            allowed_hosts="api.example.com",
-        )
+        config = SimpleNamespace(service_name="portworld-api")
 
         env_vars = build_runtime_env_vars(
             env_values=env_values,
@@ -43,11 +39,7 @@ class RuntimeEnvVarsTests(unittest.TestCase):
                 ("BACKEND_DATA_DIR", "backend/var"),
             ]
         )
-        config = SimpleNamespace(
-            service_name="portworld-api",
-            cors_origins="https://app.example.com",
-            allowed_hosts="api.example.com",
-        )
+        config = SimpleNamespace(service_name="portworld-api")
 
         env_vars = build_runtime_env_vars(
             env_values=env_values,

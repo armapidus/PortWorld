@@ -68,8 +68,6 @@ from portworld_cli.services.init import InitOptions, run_init
     default=None,
     help="Default backend profile.",
 )
-@click.option("--cors-origins", default=None, help="Explicit CORS origins (comma-separated).")
-@click.option("--allowed-hosts", default=None, help="Explicit allowed hosts (comma-separated).")
 @click.option("--bearer-token", default=None, help="Explicit bearer token to store in backend/.env.")
 @click.option("--generate-bearer-token", is_flag=True, default=False, help="Generate a new bearer token.")
 @click.option("--clear-bearer-token", is_flag=True, default=False, help="Clear the bearer token.")
@@ -140,8 +138,6 @@ def init_command(
     vision_api_key: str | None,
     search_api_key: str | None,
     backend_profile: str | None,
-    cors_origins: str | None,
-    allowed_hosts: str | None,
     bearer_token: str | None,
     generate_bearer_token: bool,
     clear_bearer_token: bool,
@@ -192,8 +188,6 @@ def init_command(
                 vision_api_key=vision_api_key,
                 search_api_key=search_api_key,
                 backend_profile=backend_profile,
-                cors_origins=cors_origins,
-                allowed_hosts=allowed_hosts,
                 bearer_token=bearer_token,
                 generate_bearer_token=generate_bearer_token,
                 clear_bearer_token=clear_bearer_token,

@@ -23,8 +23,6 @@ class DeployProviderRuntimeTests(unittest.TestCase):
             sql_instance_name="portworld-pg",
             database_name="portworld",
             bucket_name="portworld-artifacts",
-            cors_origins="https://app.example.com",
-            allowed_hosts="api.example.com",
             image_tag="test",
             deploy_image_uri="image",
             published_release_tag=None,

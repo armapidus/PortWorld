@@ -139,8 +139,6 @@ def run_deploy_gcp_cloud_run(
                 "sql_instance_name": config.sql_instance_name,
                 "database_name": config.database_name,
                 "bucket_name": config.bucket_name,
-                "cors_origins": config.cors_origins,
-                "allowed_hosts": config.allowed_hosts,
                 "runtime_source": config.runtime_source,
                 "image_source_mode": config.image_source_mode,
                 "image_tag": config.image_tag,

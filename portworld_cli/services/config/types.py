@@ -14,8 +14,6 @@ from portworld_cli.workspace.session import SecretReadiness
 @dataclass(frozen=True, slots=True)
 class SecurityEditOptions:
     backend_profile: str | None
-    cors_origins: str | None
-    allowed_hosts: str | None
     bearer_token: str | None
     generate_bearer_token: bool
     clear_bearer_token: bool
@@ -53,8 +51,6 @@ class CloudEditOptions:
 @dataclass(frozen=True, slots=True)
 class SecuritySectionResult:
     backend_profile: str
-    cors_origins: tuple[str, ...]
-    allowed_hosts: tuple[str, ...]
     bearer_token: str
 
 

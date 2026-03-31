@@ -33,8 +33,6 @@ def _base_config(*, image_source_mode: str = IMAGE_SOURCE_MODE_SOURCE_BUILD) -> 
         ecr_repository="service-backend",
         image_tag="abc123",
         image_uri="123456789012.dkr.ecr.us-east-1.amazonaws.com/service-backend:abc123",
-        cors_origins="https://app.example.com",
-        allowed_hosts="app.example.com",
         rds_instance_identifier="service-pg",
         rds_db_name="portworld",
         rds_master_username="portworld",
@@ -52,14 +50,12 @@ class AWSDeployTests(unittest.TestCase):
                     ("BACKEND_DATABASE_URL", "postgresql://user:pass@db:5432/app"),
                     ("BACKEND_BEARER_TOKEN", "secret-token"),
                     ("OPENAI_API_KEY", "sk-test"),
-                    ("CORS_ORIGINS", "https://app.example.com"),
                 ]
             )
         )
         self.assertEqual(payload["BACKEND_DATABASE_URL"], "***REDACTED***")
         self.assertEqual(payload["BACKEND_BEARER_TOKEN"], "***REDACTED***")
         self.assertEqual(payload["OPENAI_API_KEY"], "***REDACTED***")
-        self.assertEqual(payload["CORS_ORIGINS"], "https://app.example.com")
 
     @mock.patch("portworld_cli.aws.deploy.write_deploy_state")
     @mock.patch("portworld_cli.aws.deploy._probe_ws", return_value=True)
@@ -95,7 +91,6 @@ class AWSDeployTests(unittest.TestCase):
             CLIContext(project_root_override=None, verbose=False, json_output=False, non_interactive=True, yes=True),
             DeployAWSECSFargateOptions(
                 region=None,
-                cluster=None,
                 service=None,
                 vpc_id=None,
                 subnet_ids=None,
@@ -103,8 +98,6 @@ class AWSDeployTests(unittest.TestCase):
                 bucket=None,
                 ecr_repo=None,
                 tag=None,
-                cors_origins=None,
-                allowed_hosts=None,
             ),
         )
 
@@ -148,7 +141,6 @@ class AWSDeployTests(unittest.TestCase):
             CLIContext(project_root_override=None, verbose=False, json_output=False, non_interactive=True, yes=True),
             DeployAWSECSFargateOptions(
                 region=None,
-                cluster=None,
                 service=None,
                 vpc_id=None,
                 subnet_ids=None,
@@ -156,8 +148,6 @@ class AWSDeployTests(unittest.TestCase):
                 bucket=None,
                 ecr_repo=None,
                 tag=None,
-                cors_origins=None,
-                allowed_hosts=None,
             ),
         )
 
@@ -333,8 +323,8 @@ class AWSDeployTests(unittest.TestCase):
                 project_root=Path("/tmp/project"),
             )
 
-        ensure_repo.assert_called_once()
-        docker_login.assert_called_once()
+        ensure_repo.assert_not_called()
+        docker_login.assert_not_called()
         build_push.assert_not_called()
         upsert_service.assert_called_once()
         self.assertTrue(any(stage.get("stage") == "publish_image" for stage in stage_records))

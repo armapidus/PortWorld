@@ -69,16 +69,12 @@ class GCPDoctorSecretReadiness:
 class GCPDoctorProductionPosture:
     backend_profile: str
     profile_is_production: bool
-    cors_origins_explicit: bool
-    allowed_hosts_explicit: bool
     debug_trace_disabled: bool
 
     def to_dict(self) -> dict[str, object]:
         return {
             "backend_profile": self.backend_profile,
             "profile_is_production": self.profile_is_production,
-            "cors_origins_explicit": self.cors_origins_explicit,
-            "allowed_hosts_explicit": self.allowed_hosts_explicit,
             "debug_trace_disabled": self.debug_trace_disabled,
         }
 
@@ -645,8 +641,6 @@ def _build_production_posture(settings: Settings) -> GCPDoctorProductionPosture:
     return GCPDoctorProductionPosture(
         backend_profile=settings.backend_profile,
         profile_is_production=settings.is_production_profile,
-        cors_origins_explicit=settings.cors_origins != ["*"],
-        allowed_hosts_explicit=settings.backend_allowed_hosts != ["*"],
         debug_trace_disabled=not settings.backend_debug_trace_ws_messages,
     )
 
@@ -779,30 +773,6 @@ def _build_production_posture_checks(
                 else f"BACKEND_PROFILE is '{posture.backend_profile}'; deploy will override it to production."
             ),
             action=None if posture.profile_is_production else "No local change is required; deploy will set BACKEND_PROFILE=production.",
-        )
-    )
-    checks.append(
-        DiagnosticCheck(
-            id="cors_origins_ready",
-            status="pass" if posture.cors_origins_explicit else "warn",
-            message=(
-                "CORS_ORIGINS is explicit for production use."
-                if posture.cors_origins_explicit
-                else "CORS_ORIGINS is '*' in backend/.env."
-            ),
-            action=None if posture.cors_origins_explicit else "Provide explicit production CORS origins during deploy.",
-        )
-    )
-    checks.append(
-        DiagnosticCheck(
-            id="allowed_hosts_ready",
-            status="pass" if posture.allowed_hosts_explicit else "warn",
-            message=(
-                "BACKEND_ALLOWED_HOSTS is explicit for production use."
-                if posture.allowed_hosts_explicit
-                else "BACKEND_ALLOWED_HOSTS is '*' in backend/.env."
-            ),
-            action=None if posture.allowed_hosts_explicit else "Provide explicit production allowed hosts during deploy.",
         )
     )
     checks.append(

@@ -57,8 +57,6 @@ class DeployAzureContainerAppsOptions:
     acr_server: str | None
     acr_repo: str | None
     tag: str | None
-    cors_origins: str | None
-    allowed_hosts: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,8 +81,6 @@ class _ResolvedAzureDeployConfig:
     postgres_admin_username: str
     image_tag: str
     image_uri: str
-    cors_origins: str
-    allowed_hosts: str
     published_release_tag: str | None
     published_image_ref: str | None
 
@@ -392,9 +388,6 @@ def _resolve_azure_deploy_config(
 
     image_uri = f"{acr_server}/{acr_repo}:{image_tag}"
 
-    cors_origins = _first_non_empty(options.cors_origins, env_values.get("CORS_ORIGINS"), "*")
-    allowed_hosts = _first_non_empty(options.allowed_hosts, env_values.get("BACKEND_ALLOWED_HOSTS"), "*")
-
     return _ResolvedAzureDeployConfig(
         runtime_source=runtime_source,
         image_source_mode=image_source_mode,
@@ -416,8 +409,6 @@ def _resolve_azure_deploy_config(
         postgres_admin_username=DEFAULT_POSTGRES_ADMIN_USERNAME,
         image_tag=image_tag,
         image_uri=image_uri,
-        cors_origins=cors_origins or "*",
-        allowed_hosts=allowed_hosts or "*",
         published_release_tag=published_release_tag,
         published_image_ref=published_image_ref,
     )
@@ -1307,8 +1298,6 @@ def _build_runtime_env_vars(
     final_env["BACKEND_OBJECT_STORE_ENDPOINT"] = config.blob_endpoint
     final_env["BACKEND_OBJECT_STORE_PREFIX"] = config.app_name
     final_env["BACKEND_DATABASE_URL"] = database_url
-    final_env["CORS_ORIGINS"] = config.cors_origins
-    final_env["BACKEND_ALLOWED_HOSTS"] = config.allowed_hosts
     return final_env
 
 

@@ -40,8 +40,6 @@ def _base_config() -> _ResolvedAzureDeployConfig:
         postgres_admin_username="pwadmin",
         image_tag="abc123",
         image_uri="pw.azurecr.io/app-backend:abc123",
-        cors_origins="https://app.example.com",
-        allowed_hosts="app.example.com",
         published_release_tag=None,
         published_image_ref=None,
     )
@@ -99,8 +97,6 @@ class AzureDeployTests(unittest.TestCase):
                 acr_server=None,
                 acr_repo=None,
                 tag=None,
-                cors_origins=None,
-                allowed_hosts=None,
             ),
         )
 
@@ -154,8 +150,6 @@ class AzureDeployTests(unittest.TestCase):
                 acr_server=None,
                 acr_repo=None,
                 tag=None,
-                cors_origins=None,
-                allowed_hosts=None,
             ),
         )
 
@@ -198,7 +192,6 @@ class AzureDeployTests(unittest.TestCase):
             {
                 "OPENAI_API_KEY": "secret",
                 "BACKEND_BEARER_TOKEN": "token",
-                "CORS_ORIGINS": "https://app.example.com",
             }
         )
         result = _run_azure_deploy_mutations(config=_base_config(), env_values=env_values, stage_records=stages)

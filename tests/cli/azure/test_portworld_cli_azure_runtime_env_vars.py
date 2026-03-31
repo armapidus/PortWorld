@@ -36,8 +36,6 @@ class AzureRuntimeEnvVarsTests(unittest.TestCase):
             postgres_admin_username="pwadmin",
             image_tag="abc123",
             image_uri="example.azurecr.io/pw-api-backend:abc123",
-            cors_origins="https://app.example.com",
-            allowed_hosts="api.example.com",
             published_release_tag=None,
             published_image_ref=None,
         )

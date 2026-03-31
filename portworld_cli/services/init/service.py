@@ -71,8 +71,6 @@ class InitOptions:
     vision_api_key: str | None
     search_api_key: str | None
     backend_profile: str | None
-    cors_origins: str | None
-    allowed_hosts: str | None
     bearer_token: str | None
     generate_bearer_token: bool
     clear_bearer_token: bool
@@ -442,8 +440,6 @@ def _collect_init_sections(
         _session_with_project_config(session, project_config),
         SecurityEditOptions(
             backend_profile=options.backend_profile,
-            cors_origins=options.cors_origins,
-            allowed_hosts=options.allowed_hosts,
             bearer_token=options.bearer_token,
             generate_bearer_token=options.generate_bearer_token,
             clear_bearer_token=options.clear_bearer_token,

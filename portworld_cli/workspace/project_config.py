@@ -34,8 +34,6 @@ DEFAULT_REALTIME_PROVIDER = "openai"
 DEFAULT_VISION_PROVIDER = "mistral"
 DEFAULT_WEB_SEARCH_PROVIDER = "tavily"
 DEFAULT_BACKEND_PROFILE = "development"
-DEFAULT_CORS_ORIGINS: tuple[str, ...] = ("*",)
-DEFAULT_ALLOWED_HOSTS: tuple[str, ...] = ("*",)
 
 DEFAULT_GCP_REGION = "us-central1"
 DEFAULT_GCP_SERVICE_NAME = "portworld-backend"
@@ -122,15 +120,9 @@ class ProvidersConfig:
 @dataclass(frozen=True, slots=True)
 class SecurityConfig:
     backend_profile: str = DEFAULT_BACKEND_PROFILE
-    cors_origins: tuple[str, ...] = DEFAULT_CORS_ORIGINS
-    allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS
 
     def to_payload(self) -> dict[str, Any]:
-        return {
-            "backend_profile": self.backend_profile,
-            "cors_origins": list(self.cors_origins),
-            "allowed_hosts": list(self.allowed_hosts),
-        }
+        return {"backend_profile": self.backend_profile}
 
 
 @dataclass(frozen=True, slots=True)
@@ -343,16 +335,6 @@ class ProjectConfig:
                     "backend_profile",
                     default=DEFAULT_BACKEND_PROFILE,
                 ),
-                cors_origins=_read_string_list(
-                    security_payload,
-                    "cors_origins",
-                    default=DEFAULT_CORS_ORIGINS,
-                ),
-                allowed_hosts=_read_string_list(
-                    security_payload,
-                    "allowed_hosts",
-                    default=DEFAULT_ALLOWED_HOSTS,
-                ),
             ),
             deploy=DeployConfig(
                 preferred_target=preferred_target,
@@ -563,14 +545,6 @@ def derive_project_config(
                 _coerce_optional_text(env_values.get("BACKEND_PROFILE"))
                 or DEFAULT_BACKEND_PROFILE
             ),
-            cors_origins=_parse_csv_values(
-                env_values.get("CORS_ORIGINS"),
-                default=DEFAULT_CORS_ORIGINS,
-            ),
-            allowed_hosts=_parse_csv_values(
-                env_values.get("BACKEND_ALLOWED_HOSTS"),
-                default=DEFAULT_ALLOWED_HOSTS,
-            ),
         ),
         deploy=DeployConfig(
             preferred_target=(
@@ -606,8 +580,6 @@ def build_env_overrides_from_project_config(
         "REALTIME_TOOLING_ENABLED": _bool_env_value(config.providers.tooling.enabled),
         "REALTIME_WEB_SEARCH_PROVIDER": config.providers.tooling.web_search_provider,
         "BACKEND_PROFILE": config.security.backend_profile,
-        "CORS_ORIGINS": ",".join(config.security.cors_origins),
-        "BACKEND_ALLOWED_HOSTS": ",".join(config.security.allowed_hosts),
     }
 
 

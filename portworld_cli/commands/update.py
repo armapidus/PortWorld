@@ -54,8 +54,6 @@ def update_cli_command(cli_context: CLIContext, json_output: bool) -> None:
 @click.option("--azure-blob-endpoint", default=None, help="Azure Blob endpoint URL.")
 @click.option("--azure-acr-server", default=None, help="Azure Container Registry login server.")
 @click.option("--azure-acr-repo", default=None, help="ACR repository name.")
-@click.option("--cors-origins", default=None, help="Explicit production CORS origins (comma-separated).")
-@click.option("--allowed-hosts", default=None, help="Explicit production allowed hosts (comma-separated).")
 @click.option("--tag", default=None, help="Container image tag.")
 @click.pass_obj
 def update_deploy_command(
@@ -90,8 +88,6 @@ def update_deploy_command(
     azure_blob_endpoint: str | None,
     azure_acr_server: str | None,
     azure_acr_repo: str | None,
-    cors_origins: str | None,
-    allowed_hosts: str | None,
     tag: str | None,
 ) -> None:
     """Redeploy the active managed target using the current public deploy path."""
@@ -107,8 +103,6 @@ def update_deploy_command(
                 sql_instance=sql_instance,
                 database=database,
                 bucket=bucket,
-                cors_origins=cors_origins,
-                allowed_hosts=allowed_hosts,
                 tag=tag,
                 min_instances=min_instances,
                 max_instances=max_instances,
