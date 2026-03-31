@@ -156,6 +156,8 @@ class AzureDeployTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertEqual(result.exit_code, 1)
         self.assertIn("container_app_update", result.message or "")
+        self.assertIn("problem:", result.message or "")
+        self.assertIn("next:", result.message or "")
         write_state.assert_not_called()
 
     @mock.patch("portworld_cli.azure.deploy._wait_for_container_app_readiness", return_value="app.westeurope.azurecontainerapps.io")

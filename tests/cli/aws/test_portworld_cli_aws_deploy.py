@@ -152,6 +152,8 @@ class AWSDeployTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertEqual(result.exit_code, 1)
         self.assertIn("ecs_service_update", result.message or "")
+        self.assertIn("problem:", result.message or "")
+        self.assertIn("next:", result.message or "")
         write_state.assert_not_called()
 
     def test_run_mutations_source_build_runs_image_publish(self) -> None:

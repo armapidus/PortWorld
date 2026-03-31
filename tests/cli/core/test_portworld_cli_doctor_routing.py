@@ -46,6 +46,8 @@ class DoctorRoutingTests(unittest.TestCase):
         result = run_doctor(self.cli_context, options)
         self.assertFalse(result.ok)
         self.assertEqual(result.exit_code, 2)
+        self.assertIn("problem:", result.message or "")
+        self.assertIn("next:", result.message or "")
 
     def test_azure_target_rejects_aws_flags(self) -> None:
         options = self._base_options("azure-container-apps")
@@ -53,6 +55,8 @@ class DoctorRoutingTests(unittest.TestCase):
         result = run_doctor(self.cli_context, options)
         self.assertFalse(result.ok)
         self.assertEqual(result.exit_code, 2)
+        self.assertIn("problem:", result.message or "")
+        self.assertIn("next:", result.message or "")
 
 
 if __name__ == "__main__":
