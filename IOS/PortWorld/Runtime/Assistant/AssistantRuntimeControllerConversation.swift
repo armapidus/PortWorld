@@ -45,6 +45,7 @@ extension AssistantRuntimeController {
     publishStatus()
 
     guard let activeSessionID else { return }
+    debugLog("Starting guided backend connect for session \(activeSessionID)")
     await backendSessionClient.connect(sessionID: activeSessionID)
 
     do {

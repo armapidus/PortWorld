@@ -41,6 +41,16 @@ struct ProfileInterviewView: View {
               .frame(maxWidth: 320)
           }
 
+          if let startupBlockerMessage = viewModel.startupBlockerMessage {
+            PWStatusRow(
+              title: "Interview blocked",
+              value: startupBlockerMessage,
+              tone: .warning,
+              systemImage: "pause.circle"
+            )
+            .frame(maxWidth: 320, alignment: .leading)
+          }
+
           if viewModel.status.errorText.isEmpty == false {
             PWStatusRow(
               title: "Interview issue",
@@ -71,6 +81,10 @@ struct ProfileInterviewView: View {
 
 private extension ProfileInterviewView {
   var headline: String {
+    if viewModel.startupBlockerMessage != nil {
+      return "Interview blocked"
+    }
+
     if viewModel.status.errorText.isEmpty == false && viewModel.isProfileReadyForReview == false {
       return "Interview interrupted"
     }
@@ -87,6 +101,10 @@ private extension ProfileInterviewView {
   }
 
   var detailText: String {
+    if let startupBlockerMessage = viewModel.startupBlockerMessage {
+      return startupBlockerMessage
+    }
+
     if viewModel.status.errorText.isEmpty == false && viewModel.isProfileReadyForReview == false {
       return "The onboarding interview stopped before it could finish. Start it again once your glasses audio is ready."
     }
@@ -103,6 +121,10 @@ private extension ProfileInterviewView {
   }
 
   var headlineColor: Color {
+    if viewModel.startupBlockerMessage != nil {
+      return PWColor.warning
+    }
+
     if viewModel.status.errorText.isEmpty == false && viewModel.isProfileReadyForReview == false {
       return PWColor.error
     }
@@ -132,12 +154,21 @@ private extension ProfileInterviewView {
 
   func primaryAction() {
     guard viewModel.canRetry else { return }
-    Task { await viewModel.retryInterview() }
+    Task {
+      let startResult = await viewModel.retryInterview()
+      guard startResult == .started else { return }
+      await viewModel.waitUntilProfileReadyForReview()
+      guard Task.isCancelled == false else { return }
+      await MainActor.run {
+        continueIfNeeded()
+      }
+    }
   }
 
   func runInterviewFlow() async {
     await withTaskCancellationHandler(operation: {
-      await viewModel.startInterviewIfNeeded()
+      let startResult = await viewModel.startInterviewIfNeeded()
+      guard startResult == .started else { return }
       await viewModel.waitUntilProfileReadyForReview()
       guard Task.isCancelled == false else { return }
       continueIfNeeded()

@@ -3,6 +3,9 @@ import Foundation
 
 @MainActor
 final class GlassesAudioIO: AssistantAudioIOControlling {
+  private static let hfpRouteSelectionTimeoutNs: UInt64 = 2_000_000_000
+  private static let hfpRouteSelectionPollIntervalNs: UInt64 = 100_000_000
+
   enum Error: LocalizedError {
     case sessionPreparationFailed(String)
     case startFailed(String)
@@ -93,20 +96,17 @@ final class GlassesAudioIO: AssistantAudioIOControlling {
   }
 
   var isHFPRouteReady: Bool {
-    let currentRoute = audioSession.currentRoute
-    let inputReady = currentRoute.inputs.contains { $0.portType == .bluetoothHFP }
-    let outputReady = currentRoute.outputs.contains { $0.portType == .bluetoothHFP }
-    return inputReady && outputReady
+    hfpAudioManager.hfpRouteAvailability().isActive
+  }
+
+  var isHFPRouteSelectable: Bool {
+    let routeAvailability = hfpAudioManager.hfpRouteAvailability()
+    return routeAvailability.isSelectable || routeAvailability.isActive
   }
 
   func prepareForArmedListening() async throws {
     await stopActivePipelineIfNeeded(resetMode: false)
-
-    if try await prepareHFPPipelineIfPossible() {
-      return
-    }
-
-    throw Error.startFailed("Glasses audio requires a live Bluetooth HFP route.")
+    try await prepareHFPPipeline()
   }
 
   func appendAssistantPCMData(_ pcmData: Data) throws {
@@ -215,7 +215,7 @@ private extension GlassesAudioIO {
     await stopActivePipelineIfNeeded(resetMode: true)
   }
 
-  func prepareHFPPipelineIfPossible() async throws -> Bool {
+  func prepareHFPPipeline() async throws {
     try await hfpAudioSessionLeaseManager.acquire(configuration: .playAndRecordHFP)
     await hfpAudioManager.prepareAudioSession()
 
@@ -226,18 +226,31 @@ private extension GlassesAudioIO {
       )
     }
 
-    guard isHFPRouteReady else {
+    hfpAudioManager.logRouteDiagnostics(context: "after_audio_session_prepare")
+
+    guard isHFPRouteSelectable else {
+      hfpAudioManager.logRouteDiagnostics(context: "no_selectable_hfp_input")
       await hfpAudioManager.stop()
-      await releaseHFPAudioSessionLease(context: "route_not_ready")
-      return false
+      await releaseHFPAudioSessionLease(context: "no_selectable_hfp_input")
+      throw Error.startFailed("No Bluetooth HFP glasses audio route is available on this phone right now.")
     }
 
     do {
-      try hfpPlaybackEngine.configureBluetoothHFPRoute()
+      _ = try hfpAudioManager.selectBluetoothHFPInputIfAvailable()
     } catch {
+      hfpAudioManager.logRouteDiagnostics(context: "preferred_input_selection_failed")
       await hfpAudioManager.stop()
-      await releaseHFPAudioSessionLease(context: "route_configuration_failed")
+      await releaseHFPAudioSessionLease(context: "preferred_input_selection_failed")
       throw error
+    }
+
+    hfpAudioManager.logRouteDiagnostics(context: "after_preferred_input_selection")
+
+    if try await waitForHFPRouteActivation() == false {
+      hfpAudioManager.logRouteDiagnostics(context: "hfp_route_activation_timeout")
+      await hfpAudioManager.stop()
+      await releaseHFPAudioSessionLease(context: "hfp_route_activation_timeout")
+      throw Error.startFailed("Glasses audio route did not become active. Make sure your glasses are connected for calls and audio on iPhone.")
     }
 
     await hfpAudioManager.start()
@@ -245,23 +258,43 @@ private extension GlassesAudioIO {
     case .recording:
       activePipeline = .hfp
       publishAudioModeChange()
-      return true
+      return
 
     case .waitingForDevice:
+      hfpAudioManager.logRouteDiagnostics(context: "audio_manager_waiting_for_device")
       await hfpAudioManager.stop()
       await releaseHFPAudioSessionLease(context: "waiting_for_device")
-      return false
+      throw Error.startFailed("Glasses audio route is selectable, but iOS did not activate it in time.")
 
     case .failed(let message):
+      hfpAudioManager.logRouteDiagnostics(context: "audio_manager_failed")
       await hfpAudioManager.stop()
       await releaseHFPAudioSessionLease(context: "audio_manager_failed")
       throw Error.startFailed(message)
 
     default:
+      hfpAudioManager.logRouteDiagnostics(context: "unexpected_audio_manager_state")
       await hfpAudioManager.stop()
       await releaseHFPAudioSessionLease(context: "unexpected_audio_manager_state")
       throw Error.startFailed("Audio manager entered unexpected state: \(hfpStateDescription())")
     }
+  }
+
+  func waitForHFPRouteActivation() async throws -> Bool {
+    if isHFPRouteReady {
+      return true
+    }
+
+    let clock = ContinuousClock()
+    let deadline = clock.now + .nanoseconds(Int64(Self.hfpRouteSelectionTimeoutNs))
+    while clock.now < deadline {
+      try await Task.sleep(nanoseconds: Self.hfpRouteSelectionPollIntervalNs)
+      if isHFPRouteReady {
+        return true
+      }
+    }
+
+    return isHFPRouteReady
   }
 
   func stopActivePipelineIfNeeded(resetMode: Bool) async {

@@ -7,6 +7,11 @@ import OSLog
 
 @MainActor
 final class AudioCollectionManager: ObservableObject {
+    struct HFPRouteAvailability: Equatable {
+        let isSelectable: Bool
+        let isActive: Bool
+    }
+
     @Published private(set) var state: AudioCollectionState = .idle
     @Published private(set) var stats: AudioCollectionStats = .default
     @Published private(set) var isAudioSessionReady: Bool = false
@@ -208,6 +213,29 @@ final class AudioCollectionManager: ObservableObject {
         state = .idle
     }
 
+    func hfpRouteAvailability() -> HFPRouteAvailability {
+        let routeDiagnostics = audioSessionClient.routeDiagnostics()
+        return HFPRouteAvailability(
+            isSelectable: routeDiagnostics.hasSelectableBluetoothHFPInput,
+            isActive: routeDiagnostics.isCurrentRouteBluetoothHFP
+        )
+    }
+
+    func selectBluetoothHFPInputIfAvailable() throws -> Bool {
+        try audioSessionClient.selectBluetoothHFPInputIfAvailable()
+    }
+
+    func logRouteDiagnostics(context: String) {
+        let routeDiagnostics = audioSessionClient.routeDiagnostics()
+        let preferredInput = routeDiagnostics.preferredInput ?? "-"
+        let currentInputs = routeDiagnostics.currentInputs.joined(separator: ", ")
+        let currentOutputs = routeDiagnostics.currentOutputs.joined(separator: ", ")
+        let availableInputs = routeDiagnostics.availableInputs.joined(separator: ", ")
+        logger.debug(
+            "Route diagnostics (\(context, privacy: .public)): category=\(routeDiagnostics.category, privacy: .public), mode=\(routeDiagnostics.mode, privacy: .public), selectable=\(routeDiagnostics.hasSelectableBluetoothHFPInput, privacy: .public), active=\(routeDiagnostics.isCurrentRouteBluetoothHFP, privacy: .public), preferredInput=\(preferredInput, privacy: .public), currentInputs=[\(currentInputs, privacy: .public)], currentOutputs=[\(currentOutputs, privacy: .public)], availableInputs=[\(availableInputs, privacy: .public)]"
+        )
+    }
+
     private func configureVoiceProcessingIfNeeded() {
         guard preferSpeakerOutput else { return }
 
@@ -266,7 +294,7 @@ final class AudioCollectionManager: ObservableObject {
             return
         }
 
-        state = hasRequiredInputRoute() ? .idle : .waitingForDevice
+        state = hasRequiredInputAvailable() ? .idle : .waitingForDevice
     }
 
     private func handleInterruption(_ interruptionType: AVAudioSession.InterruptionType?) {
@@ -305,7 +333,14 @@ final class AudioCollectionManager: ObservableObject {
     }
 
     private func hasBluetoothHFPInput() -> Bool {
-        audioSessionClient.hasBluetoothHFPInput()
+        audioSessionClient.hasCurrentBluetoothHFPInput()
+    }
+
+    private func hasRequiredInputAvailable() -> Bool {
+        if allowBuiltInMicInput || preferSpeakerOutput {
+            return true
+        }
+        return audioSessionClient.hasSelectableBluetoothHFPInput()
     }
 
     private func hasRequiredInputRoute() -> Bool {
@@ -529,7 +564,21 @@ protocol AudioSessionControlling {
         options: AVAudioSession.CategoryOptions
     ) throws
     func setActive(_ active: Bool, options: AVAudioSession.SetActiveOptions) throws
-    func hasBluetoothHFPInput() -> Bool
+    func hasCurrentBluetoothHFPInput() -> Bool
+    func hasSelectableBluetoothHFPInput() -> Bool
+    func selectBluetoothHFPInputIfAvailable() throws -> Bool
+    func routeDiagnostics() -> AudioSessionRouteDiagnostics
+}
+
+struct AudioSessionRouteDiagnostics {
+    let category: String
+    let mode: String
+    let currentInputs: [String]
+    let currentOutputs: [String]
+    let availableInputs: [String]
+    let preferredInput: String?
+    let hasSelectableBluetoothHFPInput: Bool
+    let isCurrentRouteBluetoothHFP: Bool
 }
 
 private final class SystemAudioSessionClient: AudioSessionControlling {
@@ -559,10 +608,55 @@ private final class SystemAudioSessionClient: AudioSessionControlling {
         try session.setActive(active, options: options)
     }
 
-    func hasBluetoothHFPInput() -> Bool {
+    func hasCurrentBluetoothHFPInput() -> Bool {
         session.currentRoute.inputs.contains { input in
             input.portType == .bluetoothHFP
         }
+    }
+
+    func hasSelectableBluetoothHFPInput() -> Bool {
+        guard let availableInputs = session.availableInputs else { return false }
+        return availableInputs.contains { input in
+            input.portType == .bluetoothHFP
+        }
+    }
+
+    func selectBluetoothHFPInputIfAvailable() throws -> Bool {
+        guard let availableInputs = session.availableInputs else { return false }
+        guard let bluetoothInput = availableInputs.first(where: { $0.portType == .bluetoothHFP }) else {
+            return false
+        }
+
+        if session.preferredInput?.uid != bluetoothInput.uid {
+            try session.setPreferredInput(bluetoothInput)
+        }
+
+        return true
+    }
+
+    func routeDiagnostics() -> AudioSessionRouteDiagnostics {
+        let currentRoute = session.currentRoute
+        let currentInputs = currentRoute.inputs.map { "\($0.portType.rawValue):\($0.portName)" }
+        let currentOutputs = currentRoute.outputs.map { "\($0.portType.rawValue):\($0.portName)" }
+        let availableInputs = session.availableInputs ?? []
+        let availableInputDescriptions = availableInputs.map { "\($0.portType.rawValue):\($0.portName)" }
+        let preferredInput = session.preferredInput.map { "\($0.portType.rawValue):\($0.portName)" }
+        let hasSelectableBluetoothHFPInput =
+            availableInputs.contains(where: { $0.portType == .bluetoothHFP })
+        let isCurrentRouteBluetoothHFP =
+            currentRoute.inputs.contains(where: { $0.portType == .bluetoothHFP }) &&
+            currentRoute.outputs.contains(where: { $0.portType == .bluetoothHFP })
+
+        return AudioSessionRouteDiagnostics(
+            category: session.category.rawValue,
+            mode: session.mode.rawValue,
+            currentInputs: currentInputs,
+            currentOutputs: currentOutputs,
+            availableInputs: availableInputDescriptions,
+            preferredInput: preferredInput,
+            hasSelectableBluetoothHFPInput: hasSelectableBluetoothHFPInput,
+            isCurrentRouteBluetoothHFP: isCurrentRouteBluetoothHFP
+        )
     }
 }
 

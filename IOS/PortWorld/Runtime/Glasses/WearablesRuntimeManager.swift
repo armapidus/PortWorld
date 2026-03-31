@@ -14,6 +14,56 @@ final class WearablesRuntimeManager: ObservableObject {
     case failed
   }
 
+  enum DiscoveryPermissionState: Equatable {
+    case unknown
+    case requesting
+    case granted
+    case needsApproval
+    case failed(String)
+  }
+
+  enum HFPRouteAvailability: Equatable {
+    case unknown
+    case unavailable
+    case selectable
+    case active
+  }
+
+  enum ActivationBlocker: Equatable {
+    case initializing
+    case configurationFailed(String)
+    case registrationRequired
+    case cameraPermissionRequired
+    case cameraPermissionFailed(String)
+    case glassesNotDiscovered
+    case compatibilityIssue(String)
+    case hfpAudioUnavailable
+    case sessionFailed(String)
+
+    var message: String {
+      switch self {
+      case .initializing:
+        return "Preparing Meta wearables support for the app."
+      case .configurationFailed(let message):
+        return message
+      case .registrationRequired:
+        return "Authorize PortWorld in the Meta AI app before starting the assistant."
+      case .cameraPermissionRequired:
+        return "Grant Meta camera access in the Meta AI app so your glasses can appear in PortWorld."
+      case .cameraPermissionFailed(let message):
+        return message
+      case .glassesNotDiscovered:
+        return "Bring your paired glasses nearby and reconnect."
+      case .compatibilityIssue(let message):
+        return message
+      case .hfpAudioUnavailable:
+        return "Connect the glasses audio route before activating the assistant."
+      case .sessionFailed(let message):
+        return message
+      }
+    }
+  }
+
   private enum DATConfigurationMode: String {
     case developerMode
     case registeredProject
@@ -156,12 +206,13 @@ final class WearablesRuntimeManager: ObservableObject {
   @Published private(set) var configurationErrorMessage: String?
   @Published private(set) var configurationDiagnostics: [String] = []
   @Published private(set) var registrationState: RegistrationState?
+  @Published private(set) var discoveryPermissionState: DiscoveryPermissionState = .unknown
   @Published private(set) var devices: [DeviceIdentifier] = []
   @Published private(set) var activeCompatibilityMessage: String?
   @Published private(set) var glassesSessionPhase: GlassesSessionPhase = .inactive
   @Published private(set) var glassesSessionState: SessionState?
   @Published private(set) var activeGlassesDeviceName: String = "-"
-  @Published private(set) var isHFPRouteAvailable: Bool = false
+  @Published private(set) var hfpRouteAvailability: HFPRouteAvailability = .unknown
   @Published private(set) var glassesAudioMode: AssistantAudioMode = .inactive
   @Published private(set) var glassesAudioDetailText: String = "No glasses audio path is active."
   @Published private(set) var isGlassesSessionRequested: Bool = false
@@ -175,14 +226,65 @@ final class WearablesRuntimeManager: ObservableObject {
   @Published var showError: Bool = false
   @Published var errorMessage: String = ""
 
+  var activationBlocker: ActivationBlocker? {
+    switch configurationState {
+    case .idle, .configuring:
+      return .initializing
+    case .failed:
+      return .configurationFailed(configurationErrorMessage ?? "Meta wearables support failed to initialize.")
+    case .ready:
+      break
+    }
+
+    if let activeCompatibilityMessage {
+      return .compatibilityIssue(activeCompatibilityMessage)
+    }
+
+    guard registrationState == .registered else {
+      return .registrationRequired
+    }
+
+    if hasSatisfiedDiscoveryPermission == false {
+      switch discoveryPermissionState {
+      case .unknown, .requesting, .needsApproval:
+        return .cameraPermissionRequired
+      case .failed(let message):
+        return .cameraPermissionFailed(message)
+      case .granted:
+        break
+      }
+    }
+
+    if glassesSessionPhase == .failed {
+      return .sessionFailed(glassesSessionErrorMessage ?? "The glasses session could not start.")
+    }
+
+    guard devices.isEmpty == false else {
+      return .glassesNotDiscovered
+    }
+
+    return nil
+  }
+
   var isGlassesActivationReady: Bool {
-    guard configurationState == .ready else { return false }
-    guard registrationState == .registered else { return false }
-    guard devices.isEmpty == false else { return false }
-    guard activeCompatibilityMessage == nil else { return false }
-    guard glassesSessionPhase != .failed else { return false }
-    guard isHFPRouteAvailable else { return false }
-    return true
+    activationBlocker == nil
+  }
+
+  var hasSatisfiedDiscoveryPermission: Bool {
+    discoveryPermissionState == .granted || devices.isEmpty == false
+  }
+
+  var isHFPRouteSelectable: Bool {
+    switch hfpRouteAvailability {
+    case .selectable, .active:
+      return true
+    case .unknown, .unavailable:
+      return false
+    }
+  }
+
+  var isHFPRouteActive: Bool {
+    hfpRouteAvailability == .active
   }
 
   private let configure: () throws -> Void
@@ -262,7 +364,7 @@ final class WearablesRuntimeManager: ObservableObject {
       } catch let error as RegistrationError {
         if error == .alreadyRegistered {
           self.registrationState = .registered
-          await self.ensureDiscoveryPermissionIfNeeded(using: wearables)
+          await self.refreshDiscoveryPermissionStatus(using: wearables)
         } else {
           self.presentError(error.description)
         }
@@ -307,6 +409,8 @@ final class WearablesRuntimeManager: ObservableObject {
       let handled = try await wearables.handleUrl(url)
       if handled == false {
         debugLog("Ignoring DAT callback URL because the SDK did not claim it: \(url.absoluteString)")
+      } else {
+        await refreshDiscoveryPermissionStatus(using: wearables)
       }
     } catch {
       presentError(error.localizedDescription)
@@ -323,6 +427,39 @@ final class WearablesRuntimeManager: ObservableObject {
     refreshDevelopmentReadiness()
   }
 
+  func requestDiscoveryPermissionFromMetaOnboarding() async {
+    if configurationState != .ready {
+      await startIfNeeded()
+    }
+
+    guard configurationState == .ready, let wearables else {
+      discoveryPermissionState = .failed(configurationErrorMessage ?? "Wearables SDK is not configured.")
+      refreshDevelopmentReadiness()
+      return
+    }
+
+    guard registrationState == .registered else {
+      discoveryPermissionState = .unknown
+      refreshDevelopmentReadiness()
+      return
+    }
+
+    discoveryPermissionState = .requesting
+    refreshDevelopmentReadiness()
+
+    do {
+      let requestStatus = try await wearables.requestPermission(.camera)
+      discoveryPermissionState = requestStatus == .granted ? .granted : .needsApproval
+    } catch {
+      let message = "Unable to request Meta camera access. Open the Meta AI app and grant camera permission for PortWorld."
+      discoveryPermissionState = .failed(message)
+      presentError(message)
+    }
+
+    refreshDevelopmentReadiness()
+    await reconcileActiveGlassesSession()
+  }
+
   func startGlassesSession() async {
     if configurationState != .ready {
       await startIfNeeded()
@@ -336,6 +473,23 @@ final class WearablesRuntimeManager: ObservableObject {
     guard registrationState == .registered else {
       glassesSessionErrorMessage = "Meta registration is not complete yet."
       return
+    }
+
+    if hasSatisfiedDiscoveryPermission == false, let wearables {
+      await refreshDiscoveryPermissionStatus(using: wearables)
+    }
+
+    if hasSatisfiedDiscoveryPermission == false {
+      switch discoveryPermissionState {
+      case .granted:
+        break
+      case .failed(let message):
+        glassesSessionErrorMessage = message
+        return
+      case .unknown, .requesting, .needsApproval:
+        glassesSessionErrorMessage = ActivationBlocker.cameraPermissionRequired.message
+        return
+      }
     }
 
     guard devices.isEmpty == false else {
@@ -441,13 +595,14 @@ final class WearablesRuntimeManager: ObservableObject {
       let wearables = wearablesProvider()
       self.wearables = wearables
       registrationState = wearables.registrationState
+      discoveryPermissionState = .unknown
       devices = wearables.devices
       configurationState = .ready
       observeWearablesStreams(using: wearables)
       monitorDeviceCompatibility(devices: wearables.devices)
       ensureGlassesSessionCoordinator(using: wearables)
       ensureGlassesPhotoCaptureController(using: wearables)
-      await ensureDiscoveryPermissionIfNeeded(using: wearables)
+      await refreshDiscoveryPermissionStatus(using: wearables)
       refreshDevelopmentReadiness()
     } catch {
       failConfiguration(
@@ -464,7 +619,9 @@ final class WearablesRuntimeManager: ObservableObject {
       for await state in wearables.registrationStateStream() {
         self.registrationState = state
         if state == .registered {
-          await self.ensureDiscoveryPermissionIfNeeded(using: wearables)
+          await self.refreshDiscoveryPermissionStatus(using: wearables)
+        } else {
+          self.discoveryPermissionState = .unknown
         }
         self.refreshDevelopmentReadiness()
         await self.reconcileActiveGlassesSession()
@@ -520,9 +677,12 @@ final class WearablesRuntimeManager: ObservableObject {
     }
   }
 
-  private func ensureDiscoveryPermissionIfNeeded(using wearables: WearablesInterface) async {
-    guard registrationState == .registered else { return }
-    guard devices.isEmpty else { return }
+  private func refreshDiscoveryPermissionStatus(using wearables: WearablesInterface) async {
+    guard registrationState == .registered else {
+      discoveryPermissionState = .unknown
+      refreshDevelopmentReadiness()
+      return
+    }
     guard isEnsuringDiscoveryPermission == false else { return }
 
     isEnsuringDiscoveryPermission = true
@@ -530,15 +690,20 @@ final class WearablesRuntimeManager: ObservableObject {
 
     do {
       let status = try await wearables.checkPermissionStatus(.camera)
-      guard status != .granted else { return }
-
-      let requestStatus = try await wearables.requestPermission(.camera)
-      if requestStatus != .granted {
-        presentError("Grant camera access in the Meta AI app so your glasses can appear in PortWorld.")
+      if status == .granted || devices.isEmpty == false {
+        discoveryPermissionState = .granted
+      } else {
+        discoveryPermissionState = .needsApproval
       }
     } catch {
-      presentError("Unable to request Meta camera access. Open the Meta AI app and grant camera permission for PortWorld.")
+      if hasSatisfiedDiscoveryPermission {
+        discoveryPermissionState = .granted
+      } else {
+        discoveryPermissionState = .failed("Unable to check Meta camera access right now.")
+      }
     }
+
+    refreshDevelopmentReadiness()
   }
 
   private func updateActiveCompatibilityMessage() {
@@ -638,6 +803,7 @@ final class WearablesRuntimeManager: ObservableObject {
   private func failConfiguration(message: String, diagnostics: [String]) {
     wearables = nil
     registrationState = nil
+    discoveryPermissionState = .unknown
     devices = []
     configurationState = .failed
     configurationErrorMessage = message
@@ -666,17 +832,30 @@ final class WearablesRuntimeManager: ObservableObject {
     let currentRoute = audioSession.currentRoute
     let inputReady = currentRoute.inputs.contains { $0.portType == .bluetoothHFP }
     let outputReady = currentRoute.outputs.contains { $0.portType == .bluetoothHFP }
-    isHFPRouteAvailable = inputReady && outputReady
+    if inputReady && outputReady {
+      hfpRouteAvailability = .active
+    } else if let availableInputs = audioSession.availableInputs {
+      hfpRouteAvailability = availableInputs.contains(where: { $0.portType == .bluetoothHFP })
+        ? .selectable
+        : .unavailable
+    } else {
+      hfpRouteAvailability = .unknown
+    }
     refreshDevelopmentReadiness()
   }
 
   private func refreshDevelopmentReadiness() {
     switch glassesAudioMode {
     case .inactive:
-      if isHFPRouteAvailable {
-        glassesAudioDetailText = "Bidirectional Bluetooth HFP is available on this phone for the next glasses activation."
-      } else {
-        glassesAudioDetailText = "No live Bluetooth HFP route is detected. Connect the glasses audio route before activating the assistant."
+      switch hfpRouteAvailability {
+      case .active:
+        glassesAudioDetailText = "Bidirectional Bluetooth HFP is active on this phone now."
+      case .selectable:
+        glassesAudioDetailText = "Glasses audio is available and PortWorld can request it during the next activation."
+      case .unknown:
+        glassesAudioDetailText = "PortWorld will request the glasses audio route when activation starts."
+      case .unavailable:
+        glassesAudioDetailText = "No Bluetooth HFP glasses audio route is available right now. Connect the glasses audio route before activating the assistant."
       }
     case .glassesHFP:
       glassesAudioDetailText = "Glasses lifecycle and Bluetooth HFP audio are both active."
@@ -690,36 +869,17 @@ final class WearablesRuntimeManager: ObservableObject {
       glassesDevelopmentReadinessDetail = "Wearables SDK initialization failed. The glasses runtime cannot activate until DAT is configured."
 
     case .ready:
-      if let activeCompatibilityMessage {
-        glassesDevelopmentReadinessDetail = activeCompatibilityMessage
-        return
-      }
-
-      if registrationState != .registered {
-        glassesDevelopmentReadinessDetail =
-          "Complete Meta registration before the glasses runtime can activate."
-        return
-      }
-
-      if devices.isEmpty {
-        glassesDevelopmentReadinessDetail =
-          "Registration is complete, but no compatible glasses are currently discovered."
-        return
-      }
-
       if glassesSessionPhase == .running {
         glassesDevelopmentReadinessDetail = glassesAudioDetailText
         return
       }
 
-      if isHFPRouteAvailable {
-        glassesDevelopmentReadinessDetail =
-          "Glasses runtime can activate now. Bidirectional Bluetooth HFP is currently available on this phone."
+      if let activationBlocker {
+        glassesDevelopmentReadinessDetail = activationBlocker.message
         return
       }
 
-      glassesDevelopmentReadinessDetail =
-        "Glasses are connected, but a live Bluetooth HFP route is still required before the assistant can activate."
+      glassesDevelopmentReadinessDetail = glassesAudioDetailText
     }
   }
 
@@ -732,6 +892,11 @@ final class WearablesRuntimeManager: ObservableObject {
     }
 
     guard registrationState == .registered else {
+      await stopGlassesSession()
+      return
+    }
+
+    guard hasSatisfiedDiscoveryPermission else {
       await stopGlassesSession()
       return
     }

@@ -7,14 +7,17 @@ final class ProfileInterviewSessionViewModel: ObservableObject {
   @Published private(set) var isStarting = false
   @Published private(set) var didAttemptStart = false
   @Published private(set) var isProfileReadyForReview = false
+  @Published private(set) var startupBlockerMessage: String?
 
   private let runtimeViewModel: AssistantRuntimeViewModel
+  private let settings: AppSettingsStore.Settings
   private var cancellables = Set<AnyCancellable>()
 
   init(
     wearablesRuntimeManager: WearablesRuntimeManager,
     settings: AppSettingsStore.Settings
   ) {
+    self.settings = settings
     let config = AssistantRuntimeConfig.load(
       backendBaseURLOverride: settings.backendBaseURL,
       bearerTokenOverride: settings.bearerToken
@@ -54,15 +57,15 @@ final class ProfileInterviewSessionViewModel: ObservableObject {
     didAttemptStart &&
       isInterviewRunning == false &&
       isProfileReadyForReview == false &&
-      status.errorText.isEmpty == false
+      (startupBlockerMessage != nil || status.errorText.isEmpty == false)
   }
 
-  func startInterviewIfNeeded() async {
-    guard didAttemptStart == false else { return }
-    await startInterview()
+  func startInterviewIfNeeded() async -> AssistantRuntimeViewModel.GuidedConversationStartResult {
+    guard didAttemptStart == false else { return .blocked(.runtimeUnavailable("The onboarding interview has already been attempted.")) }
+    return await startInterview()
   }
 
-  func retryInterview() async {
+  func retryInterview() async -> AssistantRuntimeViewModel.GuidedConversationStartResult {
     await startInterview()
   }
 
@@ -84,12 +87,20 @@ final class ProfileInterviewSessionViewModel: ObservableObject {
     }
   }
 
-  private func startInterview() async {
-    guard isStarting == false else { return }
+  private func startInterview() async -> AssistantRuntimeViewModel.GuidedConversationStartResult {
+    guard isStarting == false else { return .blocked(.runtimeUnavailable("The onboarding interview is already starting.")) }
     isStarting = true
     didAttemptStart = true
     isProfileReadyForReview = false
-    await runtimeViewModel.startGuidedConversation()
+    startupBlockerMessage = nil
+    let result = await runtimeViewModel.startGuidedConversation(
+      backendValidationState: settings.validationState,
+      backendReadinessDetail: settings.backendReadinessDetail
+    )
+    if case .blocked(let blocker) = result {
+      startupBlockerMessage = blocker.message
+    }
     isStarting = false
+    return result
   }
 }

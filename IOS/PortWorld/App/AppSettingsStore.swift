@@ -153,3 +153,23 @@ final class AppSettingsStore: ObservableObject {
     }
   }
 }
+
+extension AppSettingsStore.Settings {
+  var isBackendReady: Bool {
+    validationState == .valid
+  }
+
+  var backendReadinessDetail: String {
+    switch validationState {
+    case .valid:
+      return "Your backend was verified and is ready to use."
+    case .invalid:
+      return "Backend validation failed. Check your URL or token."
+    case .unknown:
+      if backendBaseURL.isEmpty {
+        return "Add your self-hosted PortWorld backend to continue."
+      }
+      return "Re-check your backend connection before starting the assistant."
+    }
+  }
+}

@@ -3,6 +3,7 @@ import SwiftUI
 
 struct MetaConnectionView: View {
   @ObservedObject var wearablesRuntimeManager: WearablesRuntimeManager
+  @State private var hasAutoRequestedMetaPermission = false
 
   let onContinue: () -> Void
   let onSkip: () -> Void
@@ -28,9 +29,18 @@ struct MetaConnectionView: View {
     wearablesRuntimeManager.devices.isEmpty == false
   }
 
+  private var isRequestingDiscoveryPermission: Bool {
+    wearablesRuntimeManager.discoveryPermissionState == .requesting
+  }
+
+  private var hasGrantedDiscoveryPermission: Bool {
+    wearablesRuntimeManager.hasSatisfiedDiscoveryPermission
+  }
+
   private var isReadyToContinue: Bool {
     wearablesRuntimeManager.configurationState == .ready &&
-      isRegistered
+      isRegistered &&
+      hasGrantedDiscoveryPermission
   }
 
   var body: some View {
@@ -76,6 +86,12 @@ struct MetaConnectionView: View {
     )
     .task {
       await wearablesRuntimeManager.startIfNeeded()
+      await maybeAutoRequestMetaPermission()
+    }
+    .onChange(of: wearablesRuntimeManager.registrationState) { _, _ in
+      Task {
+        await maybeAutoRequestMetaPermission()
+      }
     }
     .alert("Error", isPresented: Binding(
       get: { wearablesRuntimeManager.showError },
@@ -124,10 +140,24 @@ private extension MetaConnectionView {
       )
 
       PWStatusRow(
+        title: "Meta camera access",
+        value: cameraAccessStatusDetail,
+        tone: cameraAccessStatusTone,
+        systemImage: cameraAccessStatusSymbol
+      )
+
+      PWStatusRow(
         title: "Glasses discovery",
         value: discoveryStatusDetail,
         tone: discoveryStatusTone,
         systemImage: discoveryStatusSymbol
+      )
+
+      PWStatusRow(
+        title: "Glasses audio",
+        value: audioRouteStatusDetail,
+        tone: audioRouteStatusTone,
+        systemImage: audioRouteStatusSymbol
       )
     }
   }
@@ -157,6 +187,7 @@ private extension MetaConnectionView {
   var primaryButtonTitle: String {
     if isInitializationFailed { return "Retry initialization" }
     if isReadyToContinue { return "Continue" }
+    if shouldRequestCameraAccess { return cameraAccessButtonTitle }
     if isRegistering { return "Connecting..." }
     if isInitializing { return "Preparing..." }
     return "Connect my glasses"
@@ -171,7 +202,7 @@ private extension MetaConnectionView {
   }
 
   var primaryButtonDisabled: Bool {
-    isInitializing || isRegistering
+    isInitializing || isRegistering || isRequestingDiscoveryPermission
   }
 
   func primaryAction() {
@@ -185,7 +216,52 @@ private extension MetaConnectionView {
       return
     }
 
+    if shouldRequestCameraAccess {
+      Task {
+        await wearablesRuntimeManager.requestDiscoveryPermissionFromMetaOnboarding()
+      }
+      return
+    }
+
     wearablesRuntimeManager.connectGlasses()
+  }
+
+  func maybeAutoRequestMetaPermission() async {
+    guard hasAutoRequestedMetaPermission == false else { return }
+    guard wearablesRuntimeManager.configurationState == .ready else { return }
+    guard isRegistered else { return }
+
+    switch wearablesRuntimeManager.discoveryPermissionState {
+    case .unknown, .needsApproval, .failed:
+      hasAutoRequestedMetaPermission = true
+      await wearablesRuntimeManager.requestDiscoveryPermissionFromMetaOnboarding()
+    case .requesting, .granted:
+      return
+    }
+  }
+
+  var shouldRequestCameraAccess: Bool {
+    guard wearablesRuntimeManager.configurationState == .ready else { return false }
+    guard isRegistered else { return false }
+    switch wearablesRuntimeManager.discoveryPermissionState {
+    case .unknown, .needsApproval, .failed:
+      return true
+    case .requesting, .granted:
+      return false
+    }
+  }
+
+  var cameraAccessButtonTitle: String {
+    switch wearablesRuntimeManager.discoveryPermissionState {
+    case .failed:
+      return "Retry camera access"
+    case .unknown, .needsApproval:
+      return "Grant camera access"
+    case .requesting:
+      return "Opening Meta AI..."
+    case .granted:
+      return "Continue"
+    }
   }
 
   var sdkStatusDetail: String {
@@ -241,25 +317,107 @@ private extension MetaConnectionView {
     return isRegistered ? "checkmark.circle" : "iphone.gen3.radiowaves.left.and.right"
   }
 
+  var cameraAccessStatusDetail: String {
+    switch wearablesRuntimeManager.discoveryPermissionState {
+    case .unknown:
+      if isRegistered {
+        return "PortWorld still needs Meta camera access so the glasses can appear here."
+      }
+      return "Camera access starts after Meta authorization completes."
+    case .requesting:
+      return "Confirm camera access in the Meta AI app now."
+    case .granted:
+      return "Meta camera access is granted."
+    case .needsApproval:
+      return "Open the Meta AI app and approve camera access for PortWorld."
+    case .failed(let message):
+      return message
+    }
+  }
+
+  var cameraAccessStatusTone: PWStatusTone {
+    switch wearablesRuntimeManager.discoveryPermissionState {
+    case .granted:
+      return .success
+    case .requesting:
+      return .neutral
+    case .unknown, .needsApproval:
+      return isRegistered ? .warning : .neutral
+    case .failed:
+      return .error
+    }
+  }
+
+  var cameraAccessStatusSymbol: String {
+    switch wearablesRuntimeManager.discoveryPermissionState {
+    case .granted:
+      return "checkmark.circle"
+    case .requesting:
+      return "camera.viewfinder"
+    case .unknown, .needsApproval:
+      return "camera"
+    case .failed:
+      return "xmark.octagon"
+    }
+  }
+
   var discoveryStatusDetail: String {
     if hasDiscoveredDevice {
       let suffix = wearablesRuntimeManager.devices.count == 1 ? "device" : "devices"
       return "\(wearablesRuntimeManager.devices.count) compatible \(suffix) available."
     }
+    if hasGrantedDiscoveryPermission == false {
+      return "Glasses discovery begins after Meta camera access is approved."
+    }
     if isRegistered {
-      return "Registration is complete. Grant Meta camera access and keep your glasses nearby so they appear here."
+      return "Keep your paired glasses nearby so they appear here."
     }
     return "Discovery begins after Meta authorization completes."
   }
 
   var discoveryStatusTone: PWStatusTone {
     if hasDiscoveredDevice { return .success }
-    return isRegistered ? .warning : .neutral
+    return hasGrantedDiscoveryPermission ? .warning : .neutral
   }
 
   var discoveryStatusSymbol: String {
     if hasDiscoveredDevice { return "eyeglasses" }
     return isRegistered ? "antenna.radiowaves.left.and.right" : "dot.radiowaves.left.and.right"
+  }
+
+  var audioRouteStatusDetail: String {
+    switch wearablesRuntimeManager.hfpRouteAvailability {
+    case .active:
+      return "Your glasses audio route is active now."
+    case .selectable:
+      return "Your glasses audio route is available and PortWorld can request it when onboarding starts."
+    case .unknown:
+      return "PortWorld will request the glasses audio route when onboarding starts."
+    case .unavailable:
+      return "Connect the glasses audio route before starting the onboarding interview."
+    }
+  }
+
+  var audioRouteStatusTone: PWStatusTone {
+    switch wearablesRuntimeManager.hfpRouteAvailability {
+    case .active, .selectable:
+      return .success
+    case .unknown:
+      return .neutral
+    case .unavailable:
+      return .warning
+    }
+  }
+
+  var audioRouteStatusSymbol: String {
+    switch wearablesRuntimeManager.hfpRouteAvailability {
+    case .active, .selectable:
+      return "checkmark.circle"
+    case .unknown:
+      return "dot.radiowaves.left.and.right"
+    case .unavailable:
+      return "waveform.badge.exclamationmark"
+    }
   }
 }
 

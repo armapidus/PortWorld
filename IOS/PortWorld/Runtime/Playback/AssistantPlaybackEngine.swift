@@ -274,13 +274,6 @@ public final class AssistantPlaybackEngine: AssistantPlaybackControlling {
     }
   }
 
-  public func configureBluetoothHFPRoute() throws {
-    // AudioCollectionManager owns AVAudioSession lifecycle/category for capture+playback.
-    // Playback intentionally avoids mutating shared AVAudioSession state.
-    // Log current routing state for diagnostics.
-    logCurrentRouteState(context: "configureBluetoothHFPRoute")
-  }
-
   public func currentRouteDescription() -> String {
     let outputs = audioSession.currentRoute.outputs.map(\.portType.rawValue)
     return outputs.joined(separator: ",")

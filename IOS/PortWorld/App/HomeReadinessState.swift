@@ -70,7 +70,7 @@ private extension HomeReadinessState {
     runtimeStatus: AssistantRuntimeStatus,
     wearablesRuntimeManager: WearablesRuntimeManager
   ) -> Bool {
-    guard settings.validationState == .valid else { return false }
+    guard settings.isBackendReady else { return false }
     guard runtimeStatus.assistantRuntimeState != .deactivating else { return false }
     return wearablesRuntimeManager.isGlassesActivationReady
   }
@@ -109,7 +109,7 @@ private extension HomeReadinessState {
       return HomeStatusRowState(
         title: "Backend",
         label: "Ready",
-        detail: "Your backend was verified and is ready to use.",
+        detail: settings.backendReadinessDetail,
         tone: .success,
         systemImage: "checkmark.circle",
         action: nil
@@ -119,24 +119,17 @@ private extension HomeReadinessState {
       return HomeStatusRowState(
         title: "Backend",
         label: "Needs attention",
-        detail: "Backend validation failed. Check your URL or token.",
+        detail: settings.backendReadinessDetail,
         tone: .error,
         systemImage: "exclamationmark.triangle",
         action: .openBackendSettings
       )
 
     case .unknown:
-      let detail: String
-      if settings.backendBaseURL.isEmpty {
-        detail = "Add your self-hosted PortWorld backend to continue."
-      } else {
-        detail = "Re-check your backend connection before starting the assistant."
-      }
-
       return HomeStatusRowState(
         title: "Backend",
         label: "Needs setup",
-        detail: detail,
+        detail: settings.backendReadinessDetail,
         tone: .warning,
         systemImage: "gearshape",
         action: .openBackendSettings
@@ -148,86 +141,6 @@ private extension HomeReadinessState {
     runtimeStatus: AssistantRuntimeStatus,
     wearablesRuntimeManager: WearablesRuntimeManager
   ) -> HomeStatusRowState {
-    if let compatibilityMessage = wearablesRuntimeManager.activeCompatibilityMessage {
-      return HomeStatusRowState(
-        title: "Glasses",
-        label: "Needs attention",
-        detail: compatibilityMessage,
-        tone: .warning,
-        systemImage: "exclamationmark.triangle",
-        action: .openGlassesSettings
-      )
-    }
-
-    switch wearablesRuntimeManager.configurationState {
-    case .idle, .configuring:
-      return HomeStatusRowState(
-        title: "Glasses",
-        label: "Connecting",
-        detail: "Preparing Meta wearables support for the app.",
-        tone: .neutral,
-        systemImage: "gearshape",
-        action: .openGlassesSettings
-      )
-
-    case .failed:
-      return HomeStatusRowState(
-        title: "Glasses",
-        label: "Needs attention",
-        detail: wearablesRuntimeManager.configurationErrorMessage ?? "Meta wearables support failed to initialize.",
-        tone: .error,
-        systemImage: "xmark.octagon",
-        action: .openGlassesSettings
-      )
-
-    case .ready:
-      break
-    }
-
-    if runtimeStatus.assistantRuntimeState == .pausedByHardware {
-      return HomeStatusRowState(
-        title: "Glasses",
-        label: "Needs attention",
-        detail: "Your glasses session paused. Reconnect your glasses or deactivate the assistant.",
-        tone: .warning,
-        systemImage: "pause.circle",
-        action: .openGlassesSettings
-      )
-    }
-
-    if wearablesRuntimeManager.registrationState != .registered {
-      return HomeStatusRowState(
-        title: "Glasses",
-        label: "Not connected",
-        detail: "Authorize PortWorld in the Meta app before starting the assistant.",
-        tone: .warning,
-        systemImage: "eyeglasses",
-        action: .openGlassesSettings
-      )
-    }
-
-    if wearablesRuntimeManager.devices.isEmpty {
-      return HomeStatusRowState(
-        title: "Glasses",
-        label: "Not connected",
-        detail: "Bring your paired glasses nearby and reconnect.",
-        tone: .warning,
-        systemImage: "antenna.radiowaves.left.and.right",
-        action: .openGlassesSettings
-      )
-    }
-
-    if wearablesRuntimeManager.isHFPRouteAvailable == false {
-      return HomeStatusRowState(
-        title: "Glasses",
-        label: "Audio unavailable",
-        detail: "Connect the glasses audio route before activating the assistant.",
-        tone: .warning,
-        systemImage: "waveform.badge.exclamationmark",
-        action: .openGlassesSettings
-      )
-    }
-
     switch wearablesRuntimeManager.glassesSessionPhase {
     case .starting:
       return HomeStatusRowState(
@@ -280,14 +193,89 @@ private extension HomeReadinessState {
       )
 
     case .inactive, .stopping:
+      break
+    }
+
+    if runtimeStatus.assistantRuntimeState == .pausedByHardware {
       return HomeStatusRowState(
         title: "Glasses",
-        label: "Ready",
-        detail: "Your glasses are connected and available.",
-        tone: .success,
-        systemImage: "checkmark.circle",
-        action: nil
+        label: "Needs attention",
+        detail: "Your glasses session paused. Reconnect your glasses or deactivate the assistant.",
+        tone: .warning,
+        systemImage: "pause.circle",
+        action: .openGlassesSettings
       )
+    }
+
+    if let activationBlocker = wearablesRuntimeManager.activationBlocker {
+      return HomeStatusRowState(
+        title: "Glasses",
+        label: glassesStatusLabel(for: activationBlocker),
+        detail: activationBlocker.message,
+        tone: glassesStatusTone(for: activationBlocker),
+        systemImage: glassesStatusSymbol(for: activationBlocker),
+        action: .openGlassesSettings
+      )
+    }
+
+    return HomeStatusRowState(
+      title: "Glasses",
+      label: "Ready",
+      detail: "Your glasses are connected and available.",
+      tone: .success,
+      systemImage: "checkmark.circle",
+      action: nil
+    )
+  }
+
+  static func glassesStatusLabel(
+    for blocker: WearablesRuntimeManager.ActivationBlocker
+  ) -> String {
+    switch blocker {
+    case .initializing:
+      return "Connecting"
+    case .registrationRequired, .glassesNotDiscovered:
+      return "Not connected"
+    case .hfpAudioUnavailable:
+      return "Audio unavailable"
+    case .configurationFailed, .cameraPermissionFailed, .sessionFailed, .compatibilityIssue:
+      return "Needs attention"
+    case .cameraPermissionRequired:
+      return "Needs permission"
+    }
+  }
+
+  static func glassesStatusTone(
+    for blocker: WearablesRuntimeManager.ActivationBlocker
+  ) -> PWStatusTone {
+    switch blocker {
+    case .initializing:
+      return .neutral
+    case .configurationFailed, .cameraPermissionFailed, .sessionFailed:
+      return .error
+    case .registrationRequired, .cameraPermissionRequired, .glassesNotDiscovered, .compatibilityIssue, .hfpAudioUnavailable:
+      return .warning
+    }
+  }
+
+  static func glassesStatusSymbol(
+    for blocker: WearablesRuntimeManager.ActivationBlocker
+  ) -> String {
+    switch blocker {
+    case .initializing:
+      return "gearshape"
+    case .registrationRequired:
+      return "eyeglasses"
+    case .cameraPermissionRequired:
+      return "camera"
+    case .cameraPermissionFailed, .configurationFailed, .sessionFailed:
+      return "xmark.octagon"
+    case .glassesNotDiscovered:
+      return "antenna.radiowaves.left.and.right"
+    case .compatibilityIssue:
+      return "exclamationmark.triangle"
+    case .hfpAudioUnavailable:
+      return "waveform.badge.exclamationmark"
     }
   }
 

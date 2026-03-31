@@ -5,6 +5,24 @@ import SwiftUI
 
 @MainActor
 final class AssistantRuntimeViewModel: ObservableObject {
+  enum GuidedConversationStartBlocker: Equatable {
+    case backendNotReady(String)
+    case glassesNotReady(String)
+    case runtimeUnavailable(String)
+
+    var message: String {
+      switch self {
+      case .backendNotReady(let message), .glassesNotReady(let message), .runtimeUnavailable(let message):
+        return message
+      }
+    }
+  }
+
+  enum GuidedConversationStartResult: Equatable {
+    case started
+    case blocked(GuidedConversationStartBlocker)
+  }
+
   @Published private(set) var status: AssistantRuntimeStatus
   @Published private(set) var isProfileOnboardingReady = false
 
@@ -58,11 +76,28 @@ final class AssistantRuntimeViewModel: ObservableObject {
     publishMergedStatus()
   }
 
-  func startGuidedConversation() async {
-    guard controllerStatus.assistantRuntimeState == .inactive else { return }
-    guard canActivateGlassesRoute else {
+  func startGuidedConversation(
+    backendValidationState: AppSettingsStore.BackendValidationState,
+    backendReadinessDetail: String
+  ) async -> GuidedConversationStartResult {
+    debugLog("Guided onboarding start requested")
+    guard controllerStatus.assistantRuntimeState == .inactive else {
+      let blocker = GuidedConversationStartBlocker.runtimeUnavailable("The onboarding interview is already running.")
+      debugLog("Guided onboarding blocked before backend: \(blocker.message)")
+      return .blocked(blocker)
+    }
+
+    guard backendValidationState == .valid else {
+      let blocker = GuidedConversationStartBlocker.backendNotReady(backendReadinessDetail)
+      debugLog("Guided onboarding blocked before backend: \(blocker.message)")
+      return .blocked(blocker)
+    }
+
+    if let activationBlocker = wearablesRuntimeManager.activationBlocker {
+      let blocker = GuidedConversationStartBlocker.glassesNotReady(activationBlocker.message)
+      debugLog("Guided onboarding blocked before backend: \(blocker.message)")
       publishMergedStatus()
-      return
+      return .blocked(blocker)
     }
 
     isProfileOnboardingReady = false
@@ -72,6 +107,19 @@ final class AssistantRuntimeViewModel: ObservableObject {
     await wearablesRuntimeManager.startGlassesSession()
     await synchronizeGlassesRouteIfNeeded()
     publishMergedStatus()
+
+    switch controllerStatus.assistantRuntimeState {
+    case .connectingConversation, .activeConversation:
+      return .started
+    case .inactive, .armedListening, .pausedByHardware, .deactivating:
+      let message =
+        controllerStatus.errorText.isEmpty == false
+        ? controllerStatus.errorText
+        : (wearablesRuntimeManager.glassesSessionErrorMessage ?? "Interview unavailable.")
+      let blocker = GuidedConversationStartBlocker.runtimeUnavailable(message)
+      debugLog("Guided onboarding blocked before backend: \(blocker.message)")
+      return .blocked(blocker)
+    }
   }
 
   func stopGuidedConversation() async {
@@ -131,6 +179,10 @@ final class AssistantRuntimeViewModel: ObservableObject {
       .sink { [weak self] _ in self?.handleWearablesRuntimeManagerChange() }
       .store(in: &cancellables)
 
+    wearablesRuntimeManager.$discoveryPermissionState
+      .sink { [weak self] _ in self?.handleWearablesRuntimeManagerChange() }
+      .store(in: &cancellables)
+
     wearablesRuntimeManager.$devices
       .sink { [weak self] _ in self?.handleWearablesRuntimeManagerChange() }
       .store(in: &cancellables)
@@ -155,7 +207,7 @@ final class AssistantRuntimeViewModel: ObservableObject {
       .sink { [weak self] _ in self?.handleWearablesRuntimeManagerChange() }
       .store(in: &cancellables)
 
-    wearablesRuntimeManager.$isHFPRouteAvailable
+    wearablesRuntimeManager.$hfpRouteAvailability
       .sink { [weak self] _ in self?.handleWearablesRuntimeManagerChange() }
       .store(in: &cancellables)
   }
@@ -294,5 +346,11 @@ final class AssistantRuntimeViewModel: ObservableObject {
       return "Starting Glasses Session..."
     }
     return "Activate Assistant"
+  }
+
+  private func debugLog(_ message: String) {
+    #if DEBUG
+      print("[AssistantRuntimeViewModel] \(message)")
+    #endif
   }
 }
