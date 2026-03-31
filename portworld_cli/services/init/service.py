@@ -172,6 +172,7 @@ def _run_source_init(cli_context: CLIContext, options: InitOptions) -> CommandRe
             project_config_path=session.workspace_paths.project_config_file,
             summary_lines=outcome.review_lines,
             force=options.force,
+            include_paths=False,
         )
         write_outcome = write_config_artifacts(session, project_config, outcome.env_updates)
     except ProjectRootResolutionError as exc:
@@ -307,6 +308,7 @@ def _run_published_init(
                 f"host_port: {host_port}",
             ),
             force=options.force,
+            include_paths=False,
         )
         env_write_result, compose_backup_path = write_published_workspace_artifacts(
             workspace_paths=workspace_paths,
@@ -564,16 +566,7 @@ def _resolve_setup_mode(cli_context: CLIContext, options: InitOptions) -> str:
         return str(options.setup_mode)
     if cli_context.non_interactive:
         return SETUP_MODE_MANUAL
-    return prompt_choice(
-        cli_context,
-        message="Setup mode",
-        choices=(SETUP_MODE_QUICKSTART, SETUP_MODE_MANUAL),
-        default=SETUP_MODE_QUICKSTART,
-        labels={
-            SETUP_MODE_QUICKSTART: "Quickstart (recommended)",
-            SETUP_MODE_MANUAL: "Manual (full control)",
-        },
-    )
+    return SETUP_MODE_QUICKSTART
 
 
 def _resolve_published_target(

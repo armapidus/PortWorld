@@ -15,7 +15,6 @@ from portworld_cli.workspace.project_config import (
     VisionProviderConfig,
 )
 from portworld_cli.providers.types import ProviderEditOptions, ProviderSectionResult
-from portworld_cli.ux.prompts import prompt_confirm
 from portworld_cli.workspace.session import WorkspaceSession as ConfigSession
 
 
@@ -45,6 +44,7 @@ def collect_provider_section(
         ),
         explicit_value=options.realtime_provider,
         choices=supported_provider_ids(PROVIDER_KIND_REALTIME),
+        prompt_when_unspecified=not quickstart,
     )
 
     vision_provider = _default_choice(
@@ -69,12 +69,8 @@ def collect_provider_section(
         )
     )
     configure_advanced = True
-    if quickstart and not session.cli_context.non_interactive and not explicit_advanced:
-        configure_advanced = prompt_confirm(
-            session.cli_context,
-            message="Configure advanced provider features now? (vision memory + realtime tooling)",
-            default=False,
-        )
+    if quickstart and not explicit_advanced:
+        configure_advanced = False
     if configure_advanced:
         vision_enabled = resolve_toggle(
             session.cli_context,

@@ -75,6 +75,7 @@ def confirm_apply(
     project_config_path: Path,
     summary_lines: tuple[str, ...],
     force: bool = False,
+    include_paths: bool = True,
 ) -> None:
     if cli_context.non_interactive:
         if env_path is not None and env_path.exists() and not force and not cli_context.yes:
@@ -84,13 +85,11 @@ def confirm_apply(
         return
     if cli_context.yes:
         return
-    prompt_lines = [
-        f"Apply {command_name} changes?",
-        f"project_config_path: {project_config_path}",
-        *summary_lines,
-    ]
-    if env_path is not None:
-        prompt_lines.insert(2, f"env_path: {env_path}")
+    prompt_lines = [f"Apply {command_name} changes?", *summary_lines]
+    if include_paths:
+        prompt_lines.insert(1, f"project_config_path: {project_config_path}")
+        if env_path is not None:
+            prompt_lines.insert(2, f"env_path: {env_path}")
     confirmed = prompt_confirm(
         cli_context,
         message="\n".join(prompt_lines),
