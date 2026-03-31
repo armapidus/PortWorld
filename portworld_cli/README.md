@@ -50,6 +50,18 @@ portworld doctor --target local
 portworld status
 ```
 
+`portworld init` now supports two interactive modes:
+
+- `quickstart` (default): minimal questions with safe defaults
+- `manual`: full explicit configuration flow
+
+You can force either mode:
+
+```bash
+portworld init --setup-mode quickstart
+portworld init --setup-mode manual
+```
+
 This flow:
 
 - creates a local published workspace

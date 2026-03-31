@@ -87,8 +87,8 @@ available locally, it installs a managed Python runtime before installing the CL
 It also bootstraps Node.js/npm/npx in user space when required for MCP stdio
 extensions.
 After install, the default interactive onboarding path is the operator-friendly
-zero-clone workspace flow. Contributor/source-checkout setup remains available
-from within portworld init.
+zero-clone workspace flow via `portworld init` Quickstart mode.
+Manual setup remains available via `portworld init --setup-mode manual`.
 
 Options:
   --help                 Show this help text.
@@ -553,19 +553,19 @@ run_install() {
 run_init() {
   if [[ "$NO_INIT" == "1" ]]; then
     log_info "Skipping portworld init because --no-init was set"
-    log_info "Next step: portworld init"
+    log_info "Next step: portworld init --setup-mode quickstart"
     return
   fi
 
   if [[ "$NON_INTERACTIVE" == "1" ]]; then
     log_info "Skipping portworld init because --non-interactive was set"
-    log_info "Next step: portworld init"
+    log_info "Next step: portworld init --setup-mode quickstart"
     return
   fi
 
   if [[ -r /dev/tty && -w /dev/tty ]]; then
     section "Launching setup"
-    log_info "portworld init will offer the operator workspace flow by default and keep source checkout setup available."
+    log_info "Starting interactive setup (Quickstart default, Manual available)."
     if portworld init </dev/tty >/dev/tty 2>&1; then
       log_success "PortWorld CLI installed and initialized"
       return
@@ -578,7 +578,7 @@ run_init() {
 
   log_info "PortWorld CLI installed successfully"
   log_info "No interactive terminal was available, so setup was not started automatically"
-  log_info "Next step: portworld init"
+  log_info "Next step: portworld init --setup-mode quickstart"
 }
 
 main() {
