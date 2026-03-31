@@ -170,7 +170,9 @@ Legacy provider alias keys are not supported. Use canonical provider-scoped keys
 | `REALTIME_PROVIDER` | Realtime provider id (`openai` or `gemini_live`) |
 | `VISION_MEMORY_ENABLED` | Set `true` to enable the vision provider pipeline |
 | `VISION_MEMORY_PROVIDER` | Vision provider id when vision is enabled (`mistral`, `nvidia_integrate`, `openai`, `azure_openai`, `gemini`, `claude`, `bedrock`, or `groq`) |
+| `VISION_PROVIDER_TIMEOUT_SECONDS` | Vision provider request timeout budget in seconds. Applies to vision analysis across providers; default `45` |
 | `MEMORY_CONSOLIDATION_ENABLED` | Enables durable-memory rewrite at session close; reuses `VISION_MEMORY_PROVIDER` and that provider's credentials/model. Defaults to the current `VISION_MEMORY_ENABLED` value when unset |
+| `MEMORY_CONSOLIDATION_TIMEOUT_MS` | Durable-memory consolidation timeout budget in milliseconds; default `30000` |
 | `REALTIME_TOOLING_ENABLED` | Set `true` to enable realtime tooling |
 | `REALTIME_WEB_SEARCH_PROVIDER` | Search provider id when tooling is enabled (currently `tavily`) |
 
