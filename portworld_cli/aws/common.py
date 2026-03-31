@@ -1,18 +1,11 @@
 from __future__ import annotations
 
 import ipaddress
-import json
 import re
 import shutil
-import subprocess
-from dataclasses import dataclass
 
-
-@dataclass(frozen=True, slots=True)
-class AWSCommandResult:
-    ok: bool
-    value: object | None
-    message: str | None = None
+from portworld_cli.aws.executor import AWSExecutor
+from portworld_cli.aws.types import AWSCommandResult
 
 
 def aws_cli_available() -> bool:
@@ -20,41 +13,11 @@ def aws_cli_available() -> bool:
 
 
 def run_aws_json(args: list[str]) -> AWSCommandResult:
-    completed = subprocess.run(
-        ["aws", *args, "--output", "json"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        return AWSCommandResult(
-            ok=False,
-            value=None,
-            message=(completed.stderr or completed.stdout).strip() or "AWS CLI command failed.",
-        )
-    text = (completed.stdout or "").strip()
-    if not text:
-        return AWSCommandResult(ok=True, value={})
-    try:
-        return AWSCommandResult(ok=True, value=json.loads(text))
-    except json.JSONDecodeError:
-        return AWSCommandResult(ok=False, value=None, message="AWS CLI returned non-JSON output.")
+    return AWSExecutor().run_json(args)
 
 
 def run_aws_text(args: list[str]) -> AWSCommandResult:
-    completed = subprocess.run(
-        ["aws", *args],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        return AWSCommandResult(
-            ok=False,
-            value=None,
-            message=(completed.stderr or completed.stdout).strip() or "AWS CLI command failed.",
-        )
-    return AWSCommandResult(ok=True, value=(completed.stdout or "").strip())
+    return AWSExecutor().run_text(args)
 
 
 def normalize_optional_text(value: str | None) -> str | None:
