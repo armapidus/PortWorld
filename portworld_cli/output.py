@@ -7,6 +7,7 @@ from typing import Any
 import click
 
 from portworld_cli.context import CLIContext
+from portworld_cli.ux.rendering import emit_command_result
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +61,9 @@ def emit_result(cli_context: CLIContext, result: CommandResult) -> None:
         click.echo(json.dumps(result.to_dict(), ensure_ascii=True, indent=2, sort_keys=True))
         return
 
+    if emit_command_result(result):
+        return
+
     status_label = "OK" if result.ok else "FAIL"
     click.echo(f"{status_label}: {result.command}")
     if result.message:
@@ -76,7 +80,8 @@ def exit_with_result(cli_context: CLIContext, result: CommandResult) -> None:
 
 
 def format_key_value_lines(*pairs: tuple[str, object | None]) -> str:
-    lines: list[str] = []
+    normalized: list[tuple[str, str]] = []
+    key_width = 0
     for key, value in pairs:
         if value is None:
             continue
@@ -84,5 +89,10 @@ def format_key_value_lines(*pairs: tuple[str, object | None]) -> str:
             rendered = "yes" if value else "no"
         else:
             rendered = str(value)
-        lines.append(f"{key}: {rendered}")
+        normalized.append((key, rendered))
+        key_width = max(key_width, len(key))
+
+    lines: list[str] = []
+    for key, rendered in normalized:
+        lines.append(f"{key.ljust(key_width)} : {rendered}")
     return "\n".join(lines)

@@ -5,8 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 
-import click
-
 from portworld_cli.context import CLIContext
 from portworld_cli.deploy_artifacts import (
     IMAGE_NAME,
@@ -38,6 +36,7 @@ from portworld_cli.workspace.session import load_workspace_session
 
 from portworld_cli.deploy.published import resolve_published_image_selection
 from portworld_cli.deploy.source import resolve_source_image_tag
+from portworld_cli.ux.prompts import prompt_text
 
 
 DEFAULT_REGION = DEFAULT_GCP_REGION
@@ -326,7 +325,12 @@ def _prompt_or_require_text(
         return value.strip()
     if cli_context.non_interactive:
         raise DeployUsageError(error_message)
-    response = click.prompt(prompt, default=default, show_default=default is not None, type=str)
+    response = prompt_text(
+        cli_context,
+        message=prompt,
+        default=default or "",
+        show_default=default is not None,
+    )
     normalized = response.strip()
     if not normalized:
         raise DeployUsageError(error_message)

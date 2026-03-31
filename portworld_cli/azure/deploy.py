@@ -32,6 +32,7 @@ from portworld_cli.deploy_artifacts import IMAGE_SOURCE_MODE_SOURCE_BUILD
 from portworld_cli.deploy_state import DeployState, write_deploy_state
 from portworld_cli.output import CommandResult
 from portworld_cli.targets import TARGET_AZURE_CONTAINER_APPS
+from portworld_cli.ux.prompts import prompt_confirm, prompt_text
 from portworld_cli.workspace.project_config import RUNTIME_SOURCE_PUBLISHED
 
 COMMAND_NAME = "portworld deploy azure-container-apps"
@@ -1432,8 +1433,9 @@ def _stage_ok(stage: str, message: str) -> dict[str, object]:
 def _confirm_mutations(cli_context: CLIContext, config: _ResolvedAzureDeployConfig) -> None:
     if cli_context.non_interactive or cli_context.yes:
         return
-    confirmed = click.confirm(
-        "\n".join(
+    confirmed = prompt_confirm(
+        cli_context,
+        message="\n".join(
             [
                 "Proceed with Azure Container Apps deploy recording and validation?",
                 f"subscription_id: {config.subscription_id}",
@@ -1447,7 +1449,6 @@ def _confirm_mutations(cli_context: CLIContext, config: _ResolvedAzureDeployConf
             ]
         ),
         default=True,
-        show_default=True,
     )
     if not confirmed:
         raise click.Abort()
@@ -1459,7 +1460,12 @@ def _require_value(cli_context: CLIContext, *, value: str | None, prompt: str, e
         return normalized
     if cli_context.non_interactive:
         raise DeployUsageError(error)
-    prompted = click.prompt(prompt, default="", show_default=False)
+    prompted = prompt_text(
+        cli_context,
+        message=prompt,
+        default="",
+        show_default=False,
+    )
     normalized = normalize_optional_text(prompted)
     if normalized is None:
         raise DeployUsageError(error)

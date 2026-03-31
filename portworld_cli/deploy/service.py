@@ -53,6 +53,7 @@ from portworld_cli.workspace.project_config import (
     ProjectConfigError,
 )
 from portworld_cli.services.config.errors import ConfigRuntimeError
+from portworld_cli.ux.prompts import prompt_confirm
 from portworld_cli.workspace.discovery.paths import ProjectRootResolutionError
 from portworld_cli.workspace.state.state_store import CLIStateDecodeError, CLIStateTypeError
 
@@ -552,7 +553,11 @@ def _confirm_mutations(cli_context: CLIContext, *, config: ResolvedDeployConfig)
             f"bucket: {config.bucket_name}",
         ]
     )
-    confirmed = click.confirm(message, default=True, show_default=True)
+    confirmed = prompt_confirm(
+        cli_context,
+        message=message,
+        default=True,
+    )
     if not confirmed:
         raise click.Abort()
 

@@ -5,6 +5,7 @@ import click
 from portworld_cli.context import CLIContext
 from portworld_cli.deploy.config import DeployStageError, ResolvedDeployConfig
 from portworld_cli.gcp import GCPAdapters, build_service_account_email
+from portworld_cli.ux.prompts import prompt_text
 
 
 def ensure_required_apis(*, adapters: GCPAdapters, config: ResolvedDeployConfig, required_services: tuple[str, ...]):
@@ -135,9 +136,11 @@ def ensure_gcs_bucket(
                     "Provide --bucket with an alternative globally unique bucket name and retry.",
                 ),
             )
-        bucket_name = click.prompt(
-            "Default bucket name is unavailable. Enter an alternative GCS bucket name",
-            type=str,
+        bucket_name = prompt_text(
+            cli_context,
+            message="Default bucket name is unavailable. Enter an alternative GCS bucket name",
+            default="",
+            show_default=False,
         ).strip()
         if not bucket_name:
             raise click.Abort()

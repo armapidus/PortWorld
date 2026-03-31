@@ -13,6 +13,7 @@ from portworld_cli.workspace.project_config import ProjectConfig
 from portworld_cli.workspace.session import WorkspaceSession as ConfigSession
 from portworld_cli.workspace.session import load_workspace_session, require_source_workspace_session
 from portworld_cli.services.common import ErrorMappingPolicy, map_command_exception
+from portworld_cli.ux.prompts import prompt_confirm
 
 from portworld_cli.services.config.errors import ConfigUsageError
 from portworld_cli.services.config.messages import (
@@ -90,7 +91,11 @@ def confirm_apply(
     ]
     if env_path is not None:
         prompt_lines.insert(2, f"env_path: {env_path}")
-    confirmed = click.confirm("\n".join(prompt_lines), default=True, show_default=True)
+    confirmed = prompt_confirm(
+        cli_context,
+        message="\n".join(prompt_lines),
+        default=True,
+    )
     if not confirmed:
         raise click.Abort()
 
