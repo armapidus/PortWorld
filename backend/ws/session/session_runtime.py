@@ -10,7 +10,7 @@ from backend.core.storage import BackendStorage
 from backend.memory.consolidation import DurableMemoryConsolidationRuntime
 from backend.vision.runtime import VisionMemoryRuntime
 from backend.ws.session.session_registry import SessionRecord, session_registry
-from backend.ws.session.transport_contracts import SendControl
+from backend.ws.session.transport_contracts import ClientTransportClosedError, SendControl
 
 MAX_TRACE_TEXT_PREVIEW = 120
 _BACKGROUND_FINALIZATION_TASKS: set[asyncio.Task[str]] = set()
@@ -26,11 +26,17 @@ async def deactivate_session(
     vision_memory_runtime: VisionMemoryRuntime | None = None,
     durable_memory_runtime: DurableMemoryConsolidationRuntime | None = None,
 ) -> None:
-    await send_control(
-        "session.state",
-        {"state": "ended"},
-        target=active_session,
-    )
+    try:
+        await send_control(
+            "session.state",
+            {"state": "ended"},
+            target=active_session,
+        )
+    except ClientTransportClosedError:
+        logger.info(
+            "Skipping session ended message on closed websocket session=%s",
+            active_session.session_id,
+        )
     await _close_finalize_and_mark_ended(
         active_session=active_session,
         storage=storage,

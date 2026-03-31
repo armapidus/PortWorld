@@ -13,6 +13,7 @@ from backend.ws.session.session_context import SessionConnectionContext
 from backend.ws.handlers.session_loop import process_next_websocket_message
 from backend.ws.session.session_runtime import deactivate_and_unregister_session
 from backend.ws.session.session_transport import make_send_control, make_send_server_audio
+from backend.ws.session.transport_contracts import ClientTransportClosedError
 from backend.ws.telemetry import SessionTelemetry
 
 router = APIRouter()
@@ -67,6 +68,8 @@ async def ws_session(websocket: WebSocket) -> None:
             pass
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
+    except ClientTransportClosedError:
+        logger.info("WebSocket closed during server send connection_id=%s", connection_id)
     except Exception:
         logger.exception("Unhandled websocket session loop failure connection_id=%s", connection_id)
     finally:

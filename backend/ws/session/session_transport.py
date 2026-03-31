@@ -7,9 +7,49 @@ from backend.ws.protocol.contracts import make_envelope
 from backend.ws.protocol.frame_codec import encode_frame
 from backend.ws.session.session_context import SessionConnectionContext
 from backend.ws.session.session_registry import SessionRecord
-from backend.ws.session.transport_contracts import SendBinary, SendControl
+from backend.ws.session.transport_contracts import (
+    ClientTransportClosedError,
+    SendBinary,
+    SendControl,
+)
 
 logger = logging.getLogger(__name__)
+
+_CLOSED_SOCKET_ERROR_MESSAGES = (
+    'Cannot call "send" once a close message has been sent.',
+)
+_CLOSED_SOCKET_EXCEPTION_TYPES = {
+    "WebSocketDisconnect",
+    "ClientDisconnected",
+    "ConnectionClosed",
+    "ConnectionClosedError",
+    "ConnectionClosedOK",
+}
+
+
+def _iter_exception_chain(exc: BaseException) -> tuple[BaseException, ...]:
+    chain: list[BaseException] = []
+    pending: list[BaseException] = [exc]
+    while pending:
+        current = pending.pop()
+        if any(current is seen for seen in chain):
+            continue
+        chain.append(current)
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
+    return tuple(chain)
+
+
+def _is_expected_transport_close(exc: BaseException) -> bool:
+    for candidate in _iter_exception_chain(exc):
+        if candidate.__class__.__name__ in _CLOSED_SOCKET_EXCEPTION_TYPES:
+            return True
+        message = str(candidate)
+        if any(fragment in message for fragment in _CLOSED_SOCKET_ERROR_MESSAGES):
+            return True
+    return False
 
 
 def make_send_control(context: SessionConnectionContext) -> SendControl:
@@ -56,7 +96,17 @@ def make_send_control(context: SessionConnectionContext) -> SendControl:
             )
         try:
             await context.websocket.send_json(envelope.model_dump())
-        except Exception:
+        except Exception as exc:
+            if _is_expected_transport_close(exc):
+                logger.info(
+                    "WS_SEND_CONTROL_CLOSED connection_id=%s session=%s type=%s",
+                    context.connection_id,
+                    envelope.session_id,
+                    message_type,
+                )
+                raise ClientTransportClosedError(
+                    f"Client websocket closed while sending control message {message_type}"
+                ) from exc
             logger.exception(
                 "WS_SEND_CONTROL_FAILED connection_id=%s session=%s type=%s",
                 context.connection_id,
@@ -90,12 +140,22 @@ def make_send_server_audio(context: SessionConnectionContext) -> SendBinary:
             )
         try:
             await context.websocket.send_bytes(encoded)
-        except Exception:
+        except Exception as exc:
             session_id = (
                 context.active_session.session_id
                 if context.active_session is not None
                 else "unknown"
             )
+            if _is_expected_transport_close(exc):
+                logger.info(
+                    "WS_SEND_SERVER_AUDIO_CLOSED connection_id=%s session=%s frame=%s",
+                    context.connection_id,
+                    session_id,
+                    context.server_audio_frame_count,
+                )
+                raise ClientTransportClosedError(
+                    "Client websocket closed while sending server audio"
+                ) from exc
             logger.exception(
                 "WS_SEND_SERVER_AUDIO_FAILED connection_id=%s session=%s frame=%s",
                 context.connection_id,

@@ -20,6 +20,7 @@ from backend.realtime.turn_state import TurnConfig, TurnManager, TurnState
 from backend.tools.runtime import RealtimeToolingRuntime
 from backend.ws.protocol.contracts import now_ms
 from backend.ws.protocol.frame_codec import SERVER_AUDIO_FRAME_TYPE
+from backend.ws.session.transport_contracts import ClientTransportClosedError
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +182,11 @@ class IOSRealtimeBridge:
                 await self._handle_upstream_event(event)
         except asyncio.CancelledError:
             raise
+        except ClientTransportClosedError:
+            logger.info(
+                "Stopping upstream loop after client websocket closed session=%s",
+                self._session_id,
+            )
         except RealtimeClientError as exc:
             logger.warning("Upstream loop closed for %s: %s", self._session_id, exc)
             self._mark_session_init_failed(

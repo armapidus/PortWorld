@@ -6,6 +6,10 @@ if TYPE_CHECKING:
     from backend.ws.session.session_registry import SessionRecord
 
 
+class ClientTransportClosedError(RuntimeError):
+    """Raised when the client websocket has already closed."""
+
+
 class SendControl(Protocol):
     async def __call__(
         self,
