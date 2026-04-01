@@ -1,23 +1,26 @@
 # PortWorld CLI
 
-`portworld` is the command-line interface for bootstrapping PortWorld, validating local or cloud environments, and deploying PortWorld to supported managed targets.
+Command-line interface for bootstrapping, validating, and deploying [PortWorld](https://github.com/portworld/PortWorld) — the open-source runtime for voice-and-vision AI assistants.
 
-For first-time setup, start with [../docs/operations/GETTING_STARTED.md](../docs/operations/GETTING_STARTED.md).
-This README is the CLI/operator reference after the initial happy path is working.
+## Install
 
-It supports two primary workflows:
+**Recommended** (with [uv](https://docs.astral.sh/uv/)):
 
-- published workspace: run PortWorld locally from a released backend image without cloning the repo
-- source checkout: work from a PortWorld repository clone for development and repo-backed changes
+```bash
+uv tool install portworld
+```
 
-## Who This Is For
+With pipx:
 
-Use `portworld` if you want to:
+```bash
+pipx install portworld
+```
 
-- start a local PortWorld workspace quickly
-- validate local or managed deployment readiness
-- deploy PortWorld to GCP Cloud Run, AWS ECS/Fargate, or Azure Container Apps
-- inspect current workspace state, providers, extensions, and managed logs
+Bootstrap installer (installs `uv`, Python 3.11+, and Node.js tooling if missing):
+
+```bash
+curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/portworld/PortWorld/main/install.sh | bash
+```
 
 ## Requirements
 
@@ -25,167 +28,139 @@ Use `portworld` if you want to:
 - Python 3.11+
 - Docker for local published-workspace runs
 
-## Install
-
-Recommended:
-
-```bash
-uv tool install portworld
-```
-
-Alternative with `pipx`:
-
-```bash
-pipx install portworld
-```
-
-Bootstrap installer:
-
-```bash
-curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/portworld/PortWorld/main/install.sh | bash
-```
-
-The bootstrap installer can install `uv`, provision Python 3.11+ when needed, and bootstrap Node.js tooling for MCP launchers.
-
 ## Quickstart
 
-The canonical quickstart lives in [../docs/operations/GETTING_STARTED.md](../docs/operations/GETTING_STARTED.md).
-Use that document for:
+Initialize a local workspace and start the backend:
 
-- the default published-workspace operator path
-- source-checkout contributor setup
-- backend-only setup and first-success validation
-- the summarized iOS onboarding path
+```bash
+portworld init
+cd ~/.portworld/stacks/default
+docker compose up -d
+```
+
+Validate and inspect:
+
+```bash
+portworld doctor --target local
+portworld status
+```
 
 `portworld init` supports two setup modes:
 
-- `quickstart`: minimal prompts with safe defaults
-- `manual`: fuller explicit setup flow
+- `quickstart` — minimal prompts with safe defaults
+- `manual` — full explicit setup flow
 
-You can force either mode:
+Force either mode with `--setup-mode quickstart` or `--setup-mode manual`.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `portworld init` | Initialize or refresh a workspace (published or source checkout) |
+| `portworld doctor` | Validate local or managed deployment readiness |
+| `portworld deploy` | Deploy to a managed cloud target |
+| `portworld status` | Inspect workspace and deploy state |
+| `portworld logs` | Read managed deployment logs |
+| `portworld config` | Inspect or edit project configuration |
+| `portworld providers` | Browse supported realtime, vision, search, and cloud providers |
+| `portworld extensions` | Manage extension manifests and install state |
+| `portworld update cli` | Show the recommended CLI upgrade command |
+| `portworld update deploy` | Redeploy the active managed target |
+| `portworld ops` | Lower-level operator tasks (see below) |
+
+### Operator Tasks
 
 ```bash
-portworld init --setup-mode quickstart
-portworld init --setup-mode manual
+portworld ops check-config                   # validate local config
+portworld ops check-config --full-readiness  # full preflight with provider validation
+portworld ops bootstrap-storage              # initialize storage
+portworld ops export-memory --output /tmp/portworld-memory-export.zip
 ```
 
-Example extension manifests for the filesystem MCP server:
+## Deploy Workflows
 
-- local/source runtime: [docs/operations/examples/mcp-filesystem-local.extensions.json](https://github.com/portworld/PortWorld/blob/main/docs/operations/examples/mcp-filesystem-local.extensions.json)
-- published/container runtime: [docs/operations/examples/mcp-filesystem-published.extensions.json](https://github.com/portworld/PortWorld/blob/main/docs/operations/examples/mcp-filesystem-published.extensions.json)
+Supported managed targets: **GCP Cloud Run**, **AWS ECS/Fargate**, **Azure Container Apps**.
 
-## Source Checkout Workflow
-
-Use a repo checkout when you are developing PortWorld itself.
-The source-checkout happy path is documented in [../docs/operations/GETTING_STARTED.md](../docs/operations/GETTING_STARTED.md).
-This README focuses on CLI behavior after that setup is complete.
-
-## Managed Deploys
-
-Supported managed targets:
-
-- `gcp-cloud-run`
-- `aws-ecs-fargate`
-- `azure-container-apps`
-
-Typical readiness flow:
+### Readiness Check
 
 ```bash
-portworld doctor --target gcp-cloud-run --gcp-project <project> --gcp-region <region>
-portworld doctor --target aws-ecs-fargate --aws-region <region>
-portworld doctor --target azure-container-apps --azure-subscription <subscription> --azure-resource-group <resource-group> --azure-region <region>
+portworld doctor --target gcp-cloud-run    --gcp-project <project> --gcp-region <region>
+portworld doctor --target aws-ecs-fargate  --aws-region <region>
+portworld doctor --target azure-container-apps --azure-subscription <sub> --azure-resource-group <rg> --azure-region <region>
 ```
 
-Typical deploy flow:
+### Deploy
 
 ```bash
-portworld deploy gcp-cloud-run --project <project> --region <region>
+portworld deploy gcp-cloud-run   --project <project> --region <region>
 portworld deploy aws-ecs-fargate --region <region>
-portworld deploy azure-container-apps --subscription <subscription> --resource-group <resource-group> --region <region>
+portworld deploy azure-container-apps --subscription <sub> --resource-group <rg> --region <region>
 ```
 
-Managed log examples:
+### Logs
 
 ```bash
-portworld logs gcp-cloud-run --since 24h --limit 50
-portworld logs aws-ecs-fargate --since 24h --limit 50
+portworld logs gcp-cloud-run       --since 24h --limit 50
+portworld logs aws-ecs-fargate     --since 24h --limit 50
 portworld logs azure-container-apps --since 24h --limit 50
 ```
 
-To redeploy the active managed target from current workspace state:
+### Redeploy
 
 ```bash
 portworld update deploy
+portworld update deploy --tag <image-tag>
 ```
 
-## Main Commands
+## Source Checkout
 
-- `portworld init`: initialize or refresh a published workspace or source checkout
-- `portworld doctor`: validate local or managed readiness
-- `portworld deploy`: deploy PortWorld to a managed target
-- `portworld status`: inspect workspace and deploy state
-- `portworld logs`: read managed deployment logs
-- `portworld config`: inspect or edit project configuration
-- `portworld providers`: inspect supported realtime, vision, search, and cloud providers
-- `portworld extensions`: manage official or local extension manifests and install state
-- `portworld update cli`: show the recommended CLI upgrade command for the current install mode
-- `portworld update deploy`: redeploy the active managed target
-- `portworld ops`: run lower-level operator tasks
-
-Common low-level operator tasks:
+Use a repo checkout when developing PortWorld itself:
 
 ```bash
-portworld ops check-config
-portworld ops check-config --full-readiness
-portworld ops bootstrap-storage
-portworld ops export-memory --output /tmp/portworld-memory-export.zip
+git clone https://github.com/portworld/PortWorld.git
+cd PortWorld
+pipx install . --force
+portworld init
 ```
 
 ## Updating
 
-Upgrade an installed CLI:
+Upgrade the CLI:
 
 ```bash
 uv tool upgrade portworld
 ```
 
-Install a pinned release:
+Install a pinned version:
 
 ```bash
 uv tool install "portworld==<version>"
 ```
 
-Run the bootstrap installer for a specific tag:
+Upgrade via the bootstrap installer:
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/portworld/PortWorld/main/install.sh | bash -s -- --version v<version>
 ```
 
-## TestPyPI
-
-For TestPyPI validation:
-
-```bash
-pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "portworld==<version>"
-```
-
-```bash
-uv tool install --default-index https://test.pypi.org/simple --index https://pypi.org/simple "portworld==<version>"
-```
-
-The bare install snippet shown on TestPyPI may be incomplete if not every transitive dependency is hosted there.
-
 ## Production Caution
 
-The managed cloud workflows are supported, but some infrastructure defaults still favor bring-up over locked-down internet posture:
+Managed cloud workflows are supported, but some infrastructure defaults favor quick bring-up over locked-down security:
 
-- AWS one-click deploy currently provisions RDS with public accessibility and broad ingress
-- Azure one-click deploy currently provisions PostgreSQL with public access
+- **AWS**: one-click deploy provisions RDS with public accessibility and broad ingress
+- **Azure**: one-click deploy provisions PostgreSQL with public access
 
-Review and harden those defaults before exposing a deployment to the public internet.
+Review and harden these defaults before exposing a deployment to the public internet.
 
-## More Documentation
+## Links
 
-- Backend runtime and self-hosting: [backend/README.md](https://github.com/portworld/PortWorld/blob/main/backend/README.md)
-- CLI release process: [docs/operations/CLI_RELEASE_PROCESS.md](https://github.com/portworld/PortWorld/blob/main/docs/operations/CLI_RELEASE_PROCESS.md)
-- Changelog: [CHANGELOG.md](https://github.com/portworld/PortWorld/blob/main/CHANGELOG.md)
+- [Repository](https://github.com/portworld/PortWorld)
+- [Backend README](https://github.com/portworld/PortWorld/blob/main/backend/README.md) — runtime, API reference, configuration
+- [iOS README](https://github.com/portworld/PortWorld/blob/main/IOS/README.md) — iOS app setup, Meta DAT, permissions
+- [Getting Started](https://github.com/portworld/PortWorld/blob/main/docs/operations/GETTING_STARTED.md) — extended onboarding guide
+- [Changelog](https://github.com/portworld/PortWorld/blob/main/CHANGELOG.md)
+- [CLI Release Process](https://github.com/portworld/PortWorld/blob/main/docs/operations/CLI_RELEASE_PROCESS.md)
+
+## License
+
+MIT — see [LICENSE](https://github.com/portworld/PortWorld/blob/main/LICENSE).

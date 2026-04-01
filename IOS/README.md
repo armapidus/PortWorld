@@ -1,57 +1,80 @@
 # PortWorld iOS App
 
-This directory contains the active iOS client for PortWorld.
+SwiftUI iOS client that connects Meta Ray-Ban smart glasses to a self-hosted PortWorld AI backend. Streams audio, captures vision frames, and manages the full assistant lifecycle — from onboarding through realtime conversation.
 
-For first-time setup, start with [../docs/operations/GETTING_STARTED.md](../docs/operations/GETTING_STARTED.md).
-This README keeps the iOS-specific runtime, Meta DAT, permissions, and validation details.
+## Prerequisites
 
-The current app centers on:
+| Requirement | Details |
+|-------------|---------|
+| **Xcode** | With iOS 17 SDK support |
+| **Deployment target** | iOS 17.0+ |
+| **PortWorld backend** | A reachable instance (local Docker or remote) |
+| **Meta glasses** *(optional)* | Ray-Ban Meta glasses with the Meta AI app installed |
 
-- onboarding contributors and testers into a working runtime
-- connecting PortWorld to Meta smart glasses
-- validating a self-hosted backend
-- running the assistant through the glasses route once setup is complete
+You can build the app and explore most flows without glasses hardware. Meta integration is required only for the full glasses runtime path.
 
-The source of truth for active iOS code is `IOS/PortWorld/`.
+## Quickstart
 
-## What Contributors Should Know First
+### 1. Start the backend
 
-- Open `IOS/PortWorld.xcodeproj` in Xcode.
-- Use the `PortWorld` scheme by default. `PortWorldDev` is also shared, but both schemes build the same app target.
-- The app targets iOS 17.0.
-- A reachable PortWorld backend is required for meaningful runtime validation.
-- Meta integration is active product surface. You can still inspect code, build the app, and review most onboarding flows without glasses hardware.
+From the repository root:
 
-## Current App Flow
+```bash
+cp backend/.env.example backend/.env
+# Edit backend/.env — set OPENAI_API_KEY or GEMINI_LIVE_API_KEY
+docker compose up --build
+```
 
-At launch, the app shows a startup/loading state while shared wearables support initializes.
+Verify the backend is running:
 
-The onboarding flow then advances through these steps:
+```bash
+curl http://127.0.0.1:8080/livez
+```
 
-1. Welcome
-2. Feature overview
-3. Backend introduction
-4. Backend setup and validation
-5. Meta connection
-6. Wake practice
-7. Profile interview
+### 2. Open the project
 
-After onboarding, the app enters a tab-based shell with:
+```bash
+open IOS/PortWorld.xcodeproj
+```
 
-- `Home`
-- `Agent`
-- `Settings`
+1. Let Xcode resolve Swift Package dependencies.
+2. Select the **PortWorld** scheme.
+3. Build and run on a device or simulator.
 
-From the `Agent` tab, the assistant can be activated once both of these are ready:
+### 3. Configure the backend
 
-- the backend has been validated
-- the glasses route is ready for activation
+In the app's onboarding flow:
 
-When active, the runtime listens for the configured wake phrase, opens a backend session, and returns to an idle or listening state when the configured sleep phrase ends the interaction.
+1. Enter your backend base URL (e.g. `http://<your-ip>:8080`).
+2. The app validates the connection by calling `/livez` and `/readyz`.
+3. If using bearer auth, enter the token — it is stored securely in Keychain.
+
+## App Flow
+
+```mermaid
+graph TD
+  Launch["App Launch"] --> Splash["Splash / SDK Init"]
+  Splash --> Onboarding
+  subgraph Onboarding
+    Welcome --> Features["Feature Overview"]
+    Features --> BackendIntro["Backend Intro"]
+    BackendIntro --> BackendSetup["Backend Setup & Validation"]
+    BackendSetup --> MetaConnect["Meta Connection"]
+    MetaConnect --> WakePractice["Wake Practice"]
+    WakePractice --> Profile["Profile Interview"]
+  end
+  Onboarding --> Shell["Home Shell"]
+  subgraph Shell ["Post-Onboarding Shell"]
+    HomeTab["Home"]
+    AgentTab["Agent"]
+    SettingsTab["Settings"]
+  end
+  AgentTab -->|"Backend ready + glasses ready"| Active["Assistant Active"]
+```
+
+When the assistant is active, it listens for the configured wake phrase, opens a backend session for the conversation, and returns to idle when the sleep phrase is detected.
 
 ## Project Layout
-
-The active app code lives under `IOS/PortWorld/`:
 
 ```text
 IOS/PortWorld/
@@ -60,7 +83,7 @@ IOS/PortWorld/
 ├── ViewModels/           # thin view-model bridge into runtime state
 ├── Runtime/
 │   ├── Assistant/        # assistant state machine and conversation lifecycle
-│   ├── Transport/        # backend websocket client and wire types
+│   ├── Transport/        # backend WebSocket client and wire types
 │   ├── Playback/         # assistant playback engine
 │   ├── Wake/             # wake and sleep phrase detection
 │   ├── AudioIO/          # audio route control for phone and glasses paths
@@ -71,107 +94,80 @@ IOS/PortWorld/
 └── StartupLaunchScreen.storyboard
 ```
 
-## Setup
-
-The canonical contributor happy path is in [../docs/operations/GETTING_STARTED.md](../docs/operations/GETTING_STARTED.md).
-
-Use this README for the iOS-specific pieces that remain after that setup:
-
-1. Open `IOS/PortWorld.xcodeproj`.
-2. Let Xcode resolve Swift Package dependencies.
-3. Review `IOS/Config/Config.xcconfig.template` before changing local build settings.
-4. Configure a backend base URL and, if needed, a bearer token for your local environment.
-5. Build the `PortWorld` scheme.
-
-Notes:
-
-- Do not copy real local secrets into repo-tracked files or docs.
-- The checked-in config template is the reference for expected local values.
-- The app reads backend defaults from the preprocessed `IOS/Info.plist`, then lets users override and validate them in the app.
-- The bearer token is stored securely in Keychain once entered or loaded.
-
-### Meta DAT Configuration
+## Meta DAT Configuration
 
 The project supports two DAT setup modes:
 
-- developer mode
-  The default template path. This is the least demanding setup for local development.
-- registered-project mode
-  Requires `MetaAppID`, `ClientToken`, and `TeamID`.
+- **Developer mode** — the default template path, least demanding for local development
+- **Registered-project mode** — requires `MetaAppID`, `ClientToken`, and `TeamID`
 
-The app also expects:
+Additional requirements:
 
-- the `portworld` callback URL scheme to stay aligned with DAT callback configuration
-- the Meta AI app to be installed for registration and permission handoff
+- The `portworld` callback URL scheme must stay aligned with DAT callback configuration.
+- The Meta AI app must be installed on the device for registration and permission handoff.
 
-## Configuration And Permissions
+Review `IOS/Config/Config.xcconfig.template` for expected local config values.
 
-### Runtime Configuration
+## Runtime Configuration
 
-The app currently derives runtime behavior from `Info.plist`, local xcconfig values, and persisted in-app settings.
+The app derives runtime behavior from `Info.plist`, local xcconfig values, and persisted in-app settings.
 
-Key runtime inputs include:
+### Key Inputs
 
-- `SON_BACKEND_BASE_URL`
-- optional bearer token
-- optional explicit websocket URL
-- optional explicit vision upload URL
-- wake phrase and sleep phrase settings
-- wake detection mode, locale, and cooldown values
-
-If explicit websocket or vision URLs are not supplied, the app derives them from the configured backend base URL using the current runtime defaults.
+| Setting | Description |
+|---------|-------------|
+| `SON_BACKEND_BASE_URL` | Backend base URL |
+| Bearer token | Optional; stored in Keychain |
+| WebSocket URL | Optional override; defaults to `<base>/ws/session` |
+| Vision upload URL | Optional override; defaults to `<base>/vision/frame` |
+| Wake phrase / sleep phrase | Configurable in-app |
+| Wake detection mode, locale, cooldown | Advanced wake settings |
 
 ### Backend Endpoints
 
-During setup, the app validates the configured backend by calling:
-
-- `GET /livez`
-- `GET /readyz`
-
-At runtime, the assistant uses the websocket session endpoint derived from the configured backend, currently `/ws/session` by default. Vision uploads are derived from the backend as `/vision/frame` by default.
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /livez` | Liveness check during setup validation |
+| `GET /readyz` | Readiness check during setup validation |
+| `WS /ws/session` | Realtime voice session (derived from base URL) |
+| `POST /vision/frame` | Vision frame upload (derived from base URL) |
 
 ### Required Permissions
 
-The app currently declares and uses these permissions/capabilities:
+| Permission | Usage |
+|------------|-------|
+| Microphone | Voice capture |
+| Speech recognition | Wake phrase detection |
+| Camera | Vision frame capture |
+| Bluetooth | Meta glasses communication |
+| Local network | Backend discovery and access |
+| Photo library (add) | Photo capture from glasses |
 
-- microphone
-- speech recognition
-- camera
-- Bluetooth
-- local network access
-- photo library add access
+The app also enables background audio, external accessory support, and Meta app interoperability capabilities.
 
-It also enables the capabilities needed for local-network backend access, background audio, external accessory support, and Meta app interoperability.
+## Build and Validate
 
-## Build And Validate Changes
+For non-trivial changes:
 
-Use build-first verification for non-trivial iOS changes.
+1. Open `IOS/PortWorld.xcodeproj`.
+2. Select the **PortWorld** scheme.
+3. Build the app and confirm it compiles cleanly.
 
-Recommended baseline:
+If you changed backend-facing behavior, validate the backend setup flow in-app against a reachable deployment. If you changed Meta or glasses flows, validate only the paths your setup supports.
 
-1. Open `IOS/PortWorld.xcodeproj`
-2. Select the `PortWorld` scheme
-3. Build the app
+> **Note:** The shared Xcode schemes do not currently provide a maintained test action. The `PortWorldDev` scheme is also shared but builds the same app target.
 
-For contributor validation:
-
-- Confirm the app still builds cleanly after your change.
-- If you changed backend-facing behavior, validate the backend setup flow in-app and confirm backend readiness still succeeds with a reachable deployment.
-- If you changed Meta or glasses flows, validate only the paths your setup actually supports.
-
-Constraints:
-
-- Do not default to simulator UI smoke instructions unless they are explicitly needed.
-- Do not assume an active maintained Xcode test suite. Shared schemes currently do not provide meaningful test actions for the app.
-
-## Contributor Constraints
+## Contributor Guidelines
 
 - Treat `IOS/PortWorld/` as the source of truth for the active app.
-- Preserve the current ownership boundaries between views, view models, assistant runtime, and wearables runtime.
-- Keep contributor-facing docs grounded in shipped behavior, not roadmap promises.
-- Never commit secrets, private tokens, or environment-specific screenshots/artifacts.
+- Preserve the ownership boundaries between views, view models, assistant runtime, and wearables runtime.
+- Keep docs grounded in shipped behavior, not roadmap promises.
+- Never commit secrets, private tokens, or environment-specific artifacts.
 
-## Related Docs
+## More Documentation
 
-- `IOS/AGENTS.md` for iOS-specific implementation and verification guidance
-- `../backend/README.md` for backend runtime and local backend setup context
+- [Root README](../README.md) — project overview, quickstart, provider tables
+- [Backend README](../backend/README.md) — backend runtime, API reference, configuration
+- [CLI README](../portworld_cli/README.md) — CLI commands, deploy, update
+- [Getting Started](../docs/operations/GETTING_STARTED.md) — extended onboarding for all setup paths
+- [IOS/AGENTS.md](AGENTS.md) — iOS-specific implementation and verification guidance
