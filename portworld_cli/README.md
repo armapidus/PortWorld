@@ -1,39 +1,48 @@
 # PortWorld CLI
 
-`portworld` is the command-line interface for setting up PortWorld locally, validating environments, and deploying PortWorld to supported cloud targets.
+`portworld` is the command-line interface for bootstrapping PortWorld, validating local or cloud environments, and deploying PortWorld to supported managed targets.
 
-It supports two workflows:
+It supports two primary workflows:
 
-- published workspace: run PortWorld locally without cloning the repo
-- source checkout: work from a PortWorld repository clone for development
+- published workspace: run PortWorld locally from a released backend image without cloning the repo
+- source checkout: work from a PortWorld repository clone for development and repo-backed changes
 
-Supported environments:
+## Who This Is For
 
-- macOS and Linux
+Use `portworld` if you want to:
+
+- start a local PortWorld workspace quickly
+- validate local or managed deployment readiness
+- deploy PortWorld to GCP Cloud Run, AWS ECS/Fargate, or Azure Container Apps
+- inspect current workspace state, providers, extensions, and managed logs
+
+## Requirements
+
+- macOS or Linux
 - Python 3.11+
 - Docker for local published-workspace runs
 
 ## Install
 
-Recommended install:
+Recommended:
 
 ```bash
 uv tool install portworld
 ```
 
-Alternative install with `pipx`:
+Alternative with `pipx`:
 
 ```bash
 pipx install portworld
 ```
 
-Convenience bootstrap installer:
+Bootstrap installer:
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/portworld/PortWorld/main/install.sh | bash
 ```
 
-The bootstrap can install `uv`, provision Python 3.11+ when needed, and bootstrap Node.js tooling for MCP launchers.
+The bootstrap installer can install `uv`, provision Python 3.11+ when needed, and bootstrap Node.js tooling for MCP launchers.
 
 ## Quickstart
 
@@ -50,7 +59,7 @@ portworld status
 `portworld init` supports two setup modes:
 
 - `quickstart`: minimal prompts with safe defaults
-- `manual`: full explicit setup flow
+- `manual`: fuller explicit setup flow
 
 You can force either mode:
 
@@ -59,20 +68,20 @@ portworld init --setup-mode quickstart
 portworld init --setup-mode manual
 ```
 
-This flow creates a local workspace, pins a released backend image, and lets you run PortWorld without cloning the repository.
-
 ## Source Checkout Workflow
 
 Use a repo checkout when you are developing PortWorld itself:
 
 ```bash
+git clone https://github.com/portworld/PortWorld.git
+cd PortWorld
 pipx install . --force
 portworld init
 ```
 
-Source-checkout installs are intended for contributors, local development, and repo-backed changes.
+Source-checkout installs are intended for contributors, local development, and repo-backed debugging.
 
-## Managed Cloud Deploys
+## Managed Deploys
 
 Supported managed targets:
 
@@ -80,17 +89,20 @@ Supported managed targets:
 - `aws-ecs-fargate`
 - `azure-container-apps`
 
-Typical readiness and deploy flow:
+Typical readiness flow:
 
 ```bash
 portworld doctor --target gcp-cloud-run --gcp-project <project> --gcp-region <region>
-portworld deploy gcp-cloud-run --project <project> --region <region> --cors-origins https://app.example.com
-
 portworld doctor --target aws-ecs-fargate --aws-region <region>
-portworld deploy aws-ecs-fargate --region <region> --cors-origins https://app.example.com
-
 portworld doctor --target azure-container-apps --azure-subscription <subscription> --azure-resource-group <resource-group> --azure-region <region>
-portworld deploy azure-container-apps --subscription <subscription> --resource-group <resource-group> --region <region> --cors-origins https://app.example.com
+```
+
+Typical deploy flow:
+
+```bash
+portworld deploy gcp-cloud-run --project <project> --region <region>
+portworld deploy aws-ecs-fargate --region <region>
+portworld deploy azure-container-apps --subscription <subscription> --resource-group <resource-group> --region <region>
 ```
 
 Managed log examples:
@@ -101,13 +113,11 @@ portworld logs aws-ecs-fargate --since 24h --limit 50
 portworld logs azure-container-apps --since 24h --limit 50
 ```
 
-`portworld update deploy` redeploys the currently active managed target from workspace state and config.
+To redeploy the active managed target from current workspace state:
 
-Current MVP hardening notes:
-
-- AWS one-click deploy currently provisions RDS with public accessibility and broad ingress
-- Azure one-click deploy currently provisions PostgreSQL with public access
-- treat these defaults as validation-only until production hardening is complete
+```bash
+portworld update deploy
+```
 
 ## Main Commands
 
@@ -117,8 +127,10 @@ Current MVP hardening notes:
 - `portworld status`: inspect workspace and deploy state
 - `portworld logs`: read managed deployment logs
 - `portworld config`: inspect or edit project configuration
-- `portworld providers`: list supported providers
-- `portworld update`: upgrade the CLI or redeploy the active managed target
+- `portworld providers`: inspect supported realtime, vision, search, and cloud providers
+- `portworld extensions`: manage official or local extension manifests and install state
+- `portworld update cli`: show the recommended CLI upgrade command for the current install mode
+- `portworld update deploy`: redeploy the active managed target
 - `portworld ops`: run lower-level operator tasks
 
 ## Updating
@@ -143,7 +155,7 @@ curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/portworl
 
 ## TestPyPI
 
-For TestPyPI validation, use one of these commands:
+For TestPyPI validation:
 
 ```bash
 pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "portworld==<version>"
@@ -153,7 +165,16 @@ pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/
 uv tool install --default-index https://test.pypi.org/simple --index https://pypi.org/simple "portworld==<version>"
 ```
 
-The bare install snippet shown on TestPyPI may be incomplete because not every transitive dependency is necessarily hosted there.
+The bare install snippet shown on TestPyPI may be incomplete if not every transitive dependency is hosted there.
+
+## Production Caution
+
+The managed cloud workflows are usable, but some infrastructure defaults are still MVP-oriented:
+
+- AWS one-click deploy currently provisions RDS with public accessibility and broad ingress
+- Azure one-click deploy currently provisions PostgreSQL with public access
+
+Treat those defaults as validation-oriented until production hardening is complete.
 
 ## More Documentation
 
