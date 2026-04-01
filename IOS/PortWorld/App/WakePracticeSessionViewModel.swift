@@ -41,6 +41,7 @@ final class WakePracticeSessionViewModel: ObservableObject {
   let sleepPhrase: String
 
   private let wearablesRuntimeManager: WearablesRuntimeManager
+  private let sessionObserver: OnboardingGlassesSessionObserver
   private let glassesAudioIO: GlassesAudioIO
   private let wakePhraseDetector: WakePhraseDetector
   private var cancellables = Set<AnyCancellable>()
@@ -49,9 +50,11 @@ final class WakePracticeSessionViewModel: ObservableObject {
 
   init(
     wearablesRuntimeManager: WearablesRuntimeManager,
-    config: AssistantRuntimeConfig
+    settings: AppSettingsStore.Settings
   ) {
+    let config = OnboardingSessionSupport.makeConfig(from: settings)
     self.wearablesRuntimeManager = wearablesRuntimeManager
+    self.sessionObserver = OnboardingGlassesSessionObserver(wearablesRuntimeManager: wearablesRuntimeManager)
     self.glassesAudioIO = GlassesAudioIO()
     self.wakePhraseDetector = WakePhraseDetector(config: config)
     self.wakePhrase = config.wakePhrase
@@ -85,21 +88,21 @@ final class WakePracticeSessionViewModel: ObservableObject {
       }
     }
 
-    wearablesRuntimeManager.$glassesAudioDetailText
+    sessionObserver.$audioRouteDetail
       .receive(on: RunLoop.main)
       .sink { [weak self] in
         self?.audioRouteDetail = $0
       }
       .store(in: &cancellables)
 
-    wearablesRuntimeManager.$glassesSessionPhase
+    sessionObserver.$sessionPhase
       .receive(on: RunLoop.main)
       .sink { [weak self] in
         self?.sessionPhase = $0
       }
       .store(in: &cancellables)
 
-    wearablesRuntimeManager.$glassesSessionErrorMessage
+    sessionObserver.$sessionErrorMessage
       .receive(on: RunLoop.main)
       .sink { [weak self] in
         self?.sessionErrorMessage = $0
@@ -345,17 +348,10 @@ final class WakePracticeSessionViewModel: ObservableObject {
   }
 
   private var displayWakePhrase: String {
-    formattedPhrase(wakePhrase)
+    OnboardingSessionSupport.formattedPhrase(wakePhrase)
   }
 
   private var displaySleepPhrase: String {
-    formattedPhrase(sleepPhrase)
-  }
-
-  private func formattedPhrase(_ phrase: String) -> String {
-    phrase
-      .split(separator: " ")
-      .map { $0.prefix(1).uppercased() + $0.dropFirst().lowercased() }
-      .joined(separator: " ")
+    OnboardingSessionSupport.formattedPhrase(sleepPhrase)
   }
 }

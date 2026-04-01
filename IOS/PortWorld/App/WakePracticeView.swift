@@ -14,15 +14,10 @@ struct WakePracticeView: View {
     onContinue: @escaping () -> Void
   ) {
     self.onContinue = onContinue
-
-    let config = AssistantRuntimeConfig.load(
-      backendBaseURLOverride: settings.backendBaseURL,
-      bearerTokenOverride: settings.bearerToken
-    )
     _viewModel = StateObject(
       wrappedValue: WakePracticeSessionViewModel(
         wearablesRuntimeManager: wearablesRuntimeManager,
-        config: config
+        settings: settings
       )
     )
   }
@@ -112,9 +107,9 @@ private extension WakePracticeView {
   var stageTitle: String {
     switch viewModel.stage {
     case .wake:
-      return "Say \"\(formattedPhrase(viewModel.wakePhrase))\""
+      return "Say \"\(OnboardingSessionSupport.formattedPhrase(viewModel.wakePhrase))\""
     case .sleep:
-      return "Say \"\(formattedPhrase(viewModel.sleepPhrase))\""
+      return "Say \"\(OnboardingSessionSupport.formattedPhrase(viewModel.sleepPhrase))\""
     case .completed:
       return "Voice commands are ready"
     }
@@ -272,13 +267,6 @@ private extension WakePracticeView {
     Task {
       await viewModel.startListening()
     }
-  }
-
-  func formattedPhrase(_ phrase: String) -> String {
-    phrase
-      .split(separator: " ")
-      .map { $0.prefix(1).uppercased() + $0.dropFirst().lowercased() }
-      .joined(separator: " ")
   }
 }
 

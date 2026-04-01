@@ -18,13 +18,9 @@ final class ProfileInterviewSessionViewModel: ObservableObject {
     settings: AppSettingsStore.Settings
   ) {
     self.settings = settings
-    let config = AssistantRuntimeConfig.load(
-      backendBaseURLOverride: settings.backendBaseURL,
-      bearerTokenOverride: settings.bearerToken
-    )
-    let runtimeViewModel = AssistantRuntimeViewModel(
+    let runtimeViewModel = OnboardingSessionSupport.makeAssistantRuntimeViewModel(
       wearablesRuntimeManager: wearablesRuntimeManager,
-      config: config
+      settings: settings
     )
     self.runtimeViewModel = runtimeViewModel
     self.status = runtimeViewModel.status
