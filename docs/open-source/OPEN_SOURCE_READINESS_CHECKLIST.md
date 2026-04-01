@@ -11,31 +11,31 @@ The CLI and `install.sh` should be reviewed separately after this baseline is in
 - [ ] Confirm you have the right to publish all code, assets, diagrams, screenshots, and copied snippets.
 - [ ] Remove or replace any third-party assets that cannot be redistributed.
 - [ ] Check dependency licenses for anything that would conflict with your chosen license.
-- [ ] Decide whether model/provider names in docs are factual references or imply endorsement.
+- [x] Decide whether model/provider names in docs are factual references or imply endorsement.
 
 ## 2. Secrets And Sensitive Data
 
 - [ ] Search the repo history and current tree for API keys, tokens, passwords, private URLs, and internal IDs.
 - [ ] Remove accidental secrets from tracked files, examples, screenshots, and test artifacts.
 - [x] Verify `.env`, `.xcconfig`, local build products, and generated data are gitignored where needed.
-- [ ] Check for personal emails, phone numbers, IPs, machine names, and local filesystem paths in docs and logs.
-- [ ] Review issue templates, sample configs, and exported JSON for private/internal values.
+- [x] Check for personal emails, phone numbers, IPs, machine names, and local filesystem paths in docs and logs.
+- [x] Review issue templates, sample configs, and exported JSON for private/internal values.
 
 ## 3. Repository Shape And First Impression
 
-- [ ] Rewrite the root `README.md` so it matches the current repo, architecture, and supported workflows.
-- [ ] Make the root README the real entrypoint for new users:
+- [x] Rewrite the root `README.md` so it matches the current repo, architecture, and supported workflows.
+- [x] Make the root README the real entrypoint for new users:
   - what this repo is
   - who it is for
   - what works today
   - what is intentionally incomplete
-- [ ] Ensure the repo layout described in docs matches the actual filesystem.
-- [ ] Remove stale hackathon-only or obsolete setup instructions, or clearly label them as historical context.
-- [ ] Add a short status section that distinguishes stable paths from experimental ones.
+- [x] Ensure the repo layout described in docs matches the actual filesystem.
+- [x] Remove stale hackathon-only or obsolete setup instructions, or clearly label them as historical context.
+- [x] Add a short status section that distinguishes stable paths from experimental ones.
 
 ## 4. Developer Onboarding
 
-- [ ] Document the minimum supported platforms and tool versions.
+- [x] Document the minimum supported platforms and tool versions.
 - [x] Document the fastest working local path for backend-only contributors.
 - [x] Document the fastest working local path for iOS contributors.
 - [ ] Make sure all required environment variables and setup steps are documented in one place.
@@ -46,8 +46,8 @@ The CLI and `install.sh` should be reviewed separately after this baseline is in
 - [ ] Ensure the default local run path actually works on a clean machine.
 - [ ] Ensure the default verification path is documented and reproducible.
 - [ ] Confirm the repo can be built without private/internal services unless clearly documented.
-- [ ] Remove or label flows that only work in the original hackathon/dev environment.
-- [ ] Decide what “supported” means for:
+- [x] Remove or label flows that only work in the original hackathon/dev environment.
+- [x] Decide what “supported” means for:
   - local backend
   - managed deploy
   - iOS app
@@ -99,13 +99,13 @@ The CLI and `install.sh` should be reviewed separately after this baseline is in
 
 ## 10. Project Positioning
 
-- [ ] Be explicit about what this project is today:
+- [x] Be explicit about what this project is today:
   - hackathon prototype
   - early alpha
   - experimental framework
   - production-ready for some slice
-- [ ] State major limitations honestly.
-- [ ] State which parts are maintained first and which parts are secondary.
+- [x] State major limitations honestly.
+- [x] State which parts are maintained first and which parts are secondary.
 - [ ] Avoid promising platform/provider support that is not actually tested.
 
 ## 11. Final Pre-Public Pass
