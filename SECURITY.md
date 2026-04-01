@@ -24,6 +24,7 @@ Use a clear title prefix such as `security:` and include:
 
 Do not include secrets or private data in issues.
 Redact API keys, bearer tokens, internal URLs, personal data, and full production logs before posting.
+Do not upload screenshots, diagrams, or copied snippets unless you have the right to share them publicly.
 
 If you accidentally expose a secret while reporting, rotate/revoke it immediately and update the issue with redacted content.
 
