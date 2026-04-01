@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from backend.core.provider_requirements import build_provider_requirement_diagnostics
+from dotenv import dotenv_values
+
 from portworld_cli.deploy_artifacts import (
     IMAGE_NAME,
     IMAGE_SOURCE_MODE_PUBLISHED_RELEASE,
@@ -24,10 +25,12 @@ from portworld_cli.workspace.project_config import (
     RUNTIME_SOURCE_PUBLISHED,
     ProjectConfig,
 )
-from backend.core.settings import Settings, load_environment_files
-from backend.realtime.factory import RealtimeProviderFactory
-from backend.tools.runtime import SearchProviderFactory
-from backend.vision.factory import VisionAnalyzerFactory
+from portworld_cli.runtime.source_backend import (
+    coerce_source_backend_payload,
+    run_source_backend_cli,
+)
+from portworld_shared.backend_env import build_backend_env_contract
+from portworld_shared.providers import build_provider_requirement_diagnostics
 
 
 DEFAULT_ARTIFACT_REPOSITORY = DEFAULT_GCP_ARTIFACT_REPOSITORY
@@ -124,7 +127,8 @@ def evaluate_gcp_cloud_run_readiness(
 ) -> GCPDoctorEvaluation:
     adapters = GCPAdapters.create()
     checks: list[DiagnosticCheck] = []
-    settings: Settings | None = None
+    env_values: dict[str, str] | None = None
+    backend_contract = None
     account: str | None = None
     project_id: str | None = None
     project_source: str | None = None
@@ -298,30 +302,42 @@ def evaluate_gcp_cloud_run_readiness(
     )
 
     if env_exists and source_project_paths is not None:
-        try:
-            settings = _build_settings(source_project_paths)
-            checks.append(
-                DiagnosticCheck(
-                    id="settings_loaded",
-                    status="pass",
-                    message=f"Loaded backend settings from {source_project_paths.env_file}",
-                )
+        env_values = _load_env_values(source_project_paths)
+        backend_contract = build_backend_env_contract(env_values)
+        checks.append(
+            DiagnosticCheck(
+                id="settings_loaded",
+                status="pass",
+                message=f"Using backend settings from {source_project_paths.env_file}",
             )
-        except Exception as exc:
+        )
+        runtime_payload = _collect_runtime_validation_payload(
+            source_project_paths=source_project_paths,
+            full=full,
+        )
+        if runtime_payload is None:
             checks.append(
                 DiagnosticCheck(
-                    id="settings_loaded",
+                    id="backend_config_valid",
                     status="fail",
-                    message=str(exc),
-                    action="Fix backend/.env so the CLI can parse the backend settings.",
+                    message="Backend config validation did not return a result.",
+                    action="Fix the backend profile or provider settings in backend/.env.",
                 )
             )
-
-    if settings is not None:
-        checks.extend(_build_runtime_validation_checks(settings))
-        secrets = _build_secret_readiness(settings)
-        production_posture = _build_production_posture(settings)
-        checks.extend(_build_secret_checks(settings=settings, secrets=secrets))
+        elif runtime_payload.get("status") == "error":
+            checks.append(
+                DiagnosticCheck(
+                    id="backend_config_valid",
+                    status="fail",
+                    message=str(runtime_payload.get("message") or "Backend config validation failed."),
+                    action="Fix the backend profile or provider settings in backend/.env.",
+                )
+            )
+        else:
+            checks.extend(_build_runtime_validation_checks(runtime_payload))
+        secrets = _build_secret_readiness(env_values)
+        production_posture = _build_production_posture(backend_contract)
+        checks.extend(_build_secret_checks(secrets=secrets))
         checks.extend(_build_production_posture_checks(production_posture))
     elif source_project_paths is None:
         checks.append(
@@ -516,54 +532,72 @@ def _get_configured_region(*, adapters: GCPAdapters, gcloud_available: bool) -> 
     )
 
 
-def _build_settings(paths: ProjectPaths) -> Settings:
-    load_environment_files(paths.env_file)
-    return Settings.from_env()
+def _load_env_values(paths: ProjectPaths) -> dict[str, str]:
+    return {
+        key: "" if value is None else str(value)
+        for key, value in dotenv_values(paths.env_file).items()
+        if key is not None
+    }
 
 
-def _build_runtime_validation_checks(settings: Settings) -> tuple[DiagnosticCheck, ...]:
+def _collect_runtime_validation_payload(
+    *,
+    source_project_paths: ProjectPaths,
+    full: bool,
+) -> dict[str, object] | None:
+    backend_args = ["check-config"]
+    if full:
+        backend_args.append("--full-readiness")
+    completed = run_source_backend_cli(
+        source_project_paths,
+        backend_args=backend_args,
+    )
+    payload = coerce_source_backend_payload(
+        completed,
+        default_message="Backend config validation did not return structured JSON output.",
+    )
+    return payload
+
+
+def _build_runtime_validation_checks(payload: dict[str, object]) -> tuple[DiagnosticCheck, ...]:
     checks: list[DiagnosticCheck] = []
-    try:
-        realtime_provider_factory = RealtimeProviderFactory(settings=settings)
-        realtime_provider_factory.validate_configuration()
-        if settings.vision_memory_enabled:
-            vision_factory = VisionAnalyzerFactory(settings=settings)
-            vision_factory.validate_configuration()
-            vision_summary = f"; vision provider '{vision_factory.provider_name}' is configured"
-        else:
-            vision_summary = "; visual memory is disabled"
-        if settings.realtime_tooling_enabled:
-            search_provider_factory = SearchProviderFactory(settings=settings)
-            tooling_summary = (
-                f"; realtime tooling uses web search provider '{search_provider_factory.provider_name}'"
-            )
-        else:
-            tooling_summary = "; realtime tooling is disabled"
-        checks.append(
-            DiagnosticCheck(
-                id="backend_config_valid",
-                status="pass",
-                message=(
-                    f"Backend config is valid for realtime provider '{realtime_provider_factory.provider_name}'"
-                    f"{vision_summary}{tooling_summary}"
-                ),
-            )
+    realtime_provider = _coerce_text(payload.get("realtime_provider")) or "unknown"
+    vision_provider = _coerce_text(payload.get("vision_provider"))
+    realtime_tooling_enabled = bool(payload.get("realtime_tooling_enabled"))
+    web_search_provider = _coerce_text(payload.get("web_search_provider"))
+    vision_summary = (
+        f"; vision provider '{vision_provider}' is configured"
+        if vision_provider is not None
+        else "; visual memory is disabled"
+    )
+    tooling_summary = (
+        f"; realtime tooling uses web search provider '{web_search_provider}'"
+        if realtime_tooling_enabled and web_search_provider is not None
+        else "; realtime tooling is enabled"
+        if realtime_tooling_enabled
+        else "; realtime tooling is disabled"
+    )
+    checks.append(
+        DiagnosticCheck(
+            id="backend_config_valid",
+            status="pass",
+            message=(
+                f"Backend config is valid for realtime provider '{realtime_provider}'"
+                f"{vision_summary}{tooling_summary}"
+            ),
         )
-    except Exception as exc:
-        checks.append(
-            DiagnosticCheck(
-                id="backend_config_valid",
-                status="fail",
-                message=str(exc),
-                action="Fix the backend provider or feature settings in backend/.env.",
-            )
-        )
-    checks.extend(_build_managed_storage_architecture_checks(settings))
+    )
+    checks.extend(_build_managed_storage_architecture_checks(payload))
     return tuple(checks)
 
 
-def _build_managed_storage_architecture_checks(settings: Settings) -> tuple[DiagnosticCheck, ...]:
+def _build_managed_storage_architecture_checks(payload: dict[str, object]) -> tuple[DiagnosticCheck, ...]:
     checks: list[DiagnosticCheck] = []
+    backend_storage_backend = _coerce_text(payload.get("storage_backend")) or "local"
+    storage_details = payload.get("storage_details")
+    object_store_provider = None
+    if isinstance(storage_details, dict):
+        object_store_provider = _coerce_text(storage_details.get("object_store_provider"))
     checks.append(
         DiagnosticCheck(
             id="managed_memory_architecture",
@@ -577,18 +611,18 @@ def _build_managed_storage_architecture_checks(settings: Settings) -> tuple[Diag
     checks.append(
         DiagnosticCheck(
             id="managed_storage_backend_shape",
-            status="pass" if settings.backend_storage_backend == "managed" else "warn",
+            status="pass" if backend_storage_backend == "managed" else "warn",
             message=(
                 "BACKEND_STORAGE_BACKEND is already managed."
-                if settings.backend_storage_backend == "managed"
+                if backend_storage_backend == "managed"
                 else (
-                    f"BACKEND_STORAGE_BACKEND is '{settings.backend_storage_backend}'; "
+                    f"BACKEND_STORAGE_BACKEND is '{backend_storage_backend}'; "
                     "deploy will override it to managed."
                 )
             ),
             action=(
                 None
-                if settings.backend_storage_backend == "managed"
+                if backend_storage_backend == "managed"
                 else "No local change is required; deploy will set BACKEND_STORAGE_BACKEND=managed."
             ),
         )
@@ -596,18 +630,18 @@ def _build_managed_storage_architecture_checks(settings: Settings) -> tuple[Diag
     checks.append(
         DiagnosticCheck(
             id="managed_object_store_provider_shape",
-            status="pass" if settings.backend_object_store_provider == "gcs" else "warn",
+            status="pass" if object_store_provider == "gcs" else "warn",
             message=(
                 "BACKEND_OBJECT_STORE_PROVIDER is already gcs."
-                if settings.backend_object_store_provider == "gcs"
+                if object_store_provider == "gcs"
                 else (
-                    f"BACKEND_OBJECT_STORE_PROVIDER is '{settings.backend_object_store_provider}'; "
+                    f"BACKEND_OBJECT_STORE_PROVIDER is '{object_store_provider or 'filesystem'}'; "
                     "deploy will override it to gcs."
                 )
             ),
             action=(
                 None
-                if settings.backend_object_store_provider == "gcs"
+                if object_store_provider == "gcs"
                 else "No local change is required; deploy will set BACKEND_OBJECT_STORE_PROVIDER=gcs."
             ),
         )
@@ -615,8 +649,8 @@ def _build_managed_storage_architecture_checks(settings: Settings) -> tuple[Diag
     return tuple(checks)
 
 
-def _build_secret_readiness(settings: Settings) -> GCPDoctorSecretReadiness:
-    diagnostics = build_provider_requirement_diagnostics(settings)
+def _build_secret_readiness(env_values: dict[str, str]) -> GCPDoctorSecretReadiness:
+    diagnostics = build_provider_requirement_diagnostics(env_values)
     return GCPDoctorSecretReadiness(
         selected_realtime_provider=diagnostics.selected.realtime_provider,
         selected_vision_provider=diagnostics.selected.vision_provider,
@@ -633,21 +667,20 @@ def _build_secret_readiness(settings: Settings) -> GCPDoctorSecretReadiness:
             key: diagnostics.non_secret_key_presence.get(key, False)
             for key in diagnostics.required_non_secret_env_keys
         },
-        backend_bearer_token_present=bool((settings.backend_bearer_token or "").strip()),
+        backend_bearer_token_present=bool((env_values.get("BACKEND_BEARER_TOKEN", "") or "").strip()),
     )
 
 
-def _build_production_posture(settings: Settings) -> GCPDoctorProductionPosture:
+def _build_production_posture(backend_contract) -> GCPDoctorProductionPosture:
     return GCPDoctorProductionPosture(
-        backend_profile=settings.backend_profile,
-        profile_is_production=settings.is_production_profile,
-        debug_trace_disabled=not settings.backend_debug_trace_ws_messages,
+        backend_profile=backend_contract.backend_profile,
+        profile_is_production=backend_contract.is_production_profile,
+        debug_trace_disabled=not backend_contract.backend_debug_trace_ws_messages,
     )
 
 
 def _build_secret_checks(
     *,
-    settings: Settings,
     secrets: GCPDoctorSecretReadiness,
 ) -> tuple[DiagnosticCheck, ...]:
     checks: list[DiagnosticCheck] = []
@@ -700,49 +733,73 @@ def _build_secret_checks(
                 )
             )
 
-    if settings.vision_memory_enabled:
-        try:
-            settings.validate_vision_provider_credentials(provider=settings.vision_memory_provider)
-            checks.append(
-                DiagnosticCheck(
-                    id="vision_provider_credentials_ready",
-                    status="pass",
-                    message=(
-                        f"Vision provider '{settings.vision_memory_provider}' credential shape validation passed."
-                    ),
+    if secrets.selected_vision_provider is not None:
+        checks.append(
+            DiagnosticCheck(
+                id="vision_provider_credentials_ready",
+                status="pass"
+                if not any(
+                    key.startswith("VISION_")
+                    for key in (
+                        *secrets.missing_required_secret_keys,
+                        *secrets.missing_required_non_secret_config_keys,
+                    )
                 )
+                else "fail",
+                message=(
+                    f"Vision provider '{secrets.selected_vision_provider}' credential shape validation passed."
+                    if not any(
+                        key.startswith("VISION_")
+                        for key in (
+                            *secrets.missing_required_secret_keys,
+                            *secrets.missing_required_non_secret_config_keys,
+                        )
+                    )
+                    else (
+                        f"Vision provider '{secrets.selected_vision_provider}' is missing required configuration."
+                    )
+                ),
+                action=(
+                    None
+                    if not any(
+                        key.startswith("VISION_")
+                        for key in (
+                            *secrets.missing_required_secret_keys,
+                            *secrets.missing_required_non_secret_config_keys,
+                        )
+                    )
+                    else "Fix vision-provider credentials in backend/.env for the selected provider and rerun the doctor command."
+                ),
             )
-        except Exception as exc:
-            checks.append(
-                DiagnosticCheck(
-                    id="vision_provider_credentials_ready",
-                    status="fail",
-                    message=str(exc),
-                    action="Fix vision-provider credentials in backend/.env for the selected provider and rerun the doctor command.",
-                )
-            )
+        )
 
-    if settings.realtime_tooling_enabled:
-        try:
-            search_provider_factory = SearchProviderFactory(settings=settings)
-            checks.append(
-                DiagnosticCheck(
-                    id="tooling_provider_selected",
-                    status="pass",
-                    message=(
-                        f"Realtime tooling uses search provider '{search_provider_factory.provider_name}'."
-                    ),
-                )
+    if secrets.selected_search_provider is not None:
+        missing_search_keys = [
+            key
+            for key in (
+                *secrets.missing_required_secret_keys,
+                *secrets.missing_required_non_secret_config_keys,
             )
-        except Exception as exc:
-            checks.append(
-                DiagnosticCheck(
-                    id="tooling_provider_selected",
-                    status="fail",
-                    message=str(exc),
-                    action="Fix REALTIME_WEB_SEARCH_PROVIDER in backend/.env and rerun the doctor command.",
-                )
+            if key.startswith("TAVILY_")
+        ]
+        checks.append(
+            DiagnosticCheck(
+                id="tooling_provider_selected",
+                status="pass" if not missing_search_keys else "fail",
+                message=(
+                    f"Realtime tooling uses search provider '{secrets.selected_search_provider}'."
+                    if not missing_search_keys
+                    else (
+                        f"Realtime tooling search provider '{secrets.selected_search_provider}' is missing required configuration."
+                    )
+                ),
+                action=(
+                    None
+                    if not missing_search_keys
+                    else "Fix REALTIME_WEB_SEARCH_PROVIDER configuration in backend/.env and rerun the doctor command."
+                ),
             )
+        )
 
     checks.append(
         DiagnosticCheck(
@@ -788,6 +845,13 @@ def _build_production_posture_checks(
         )
     )
     return tuple(checks)
+
+
+def _coerce_text(value: object) -> str | None:
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    return None
 
 
 def _error_message(result: object, *, fallback: str) -> str:

@@ -3,19 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from backend.bootstrap.memory_export import write_memory_export_zip
-from backend.bootstrap.runtime import (
-    DoctorRuntimeDetails,
-    build_backend_storage,
-    check_runtime_configuration,
-    collect_doctor_runtime_details,
-)
-from backend.core.settings import Settings, load_environment_files
-from backend.core.storage import now_ms
-from backend.realtime.factory import RealtimeProviderFactory
-from backend.tools.runtime import RealtimeToolingRuntime
-from backend.vision.factory import VisionAnalyzerFactory
 from portworld_cli.output import CommandResult, DiagnosticCheck, format_key_value_lines
+from portworld_cli.runtime.source_backend import (
+    build_source_backend_output_path,
+    coerce_source_backend_payload,
+    run_source_backend_cli,
+)
 from portworld_cli.runtime.reporting import probe_external_command
 from portworld_cli.services.config.errors import ConfigUsageError
 from portworld_cli.workspace.discovery.paths import ProjectPaths, ProjectRootResolutionError
@@ -30,11 +23,10 @@ def run_local_doctor_source(
 ) -> CommandResult:
     checks: list[DiagnosticCheck] = []
     project_root: str | None = None
-    settings: Settings | None = None
     storage_backend: str | None = None
     storage_details: dict[str, str | bool] | None = None
     storage_paths: dict[str, str] | None = None
-    details: DoctorRuntimeDetails | None = None
+    details: dict[str, object] | None = None
 
     try:
         config_session = require_source_workspace_session(
@@ -121,175 +113,55 @@ def run_local_doctor_source(
     )
 
     if env_exists:
-        try:
-            settings = _build_settings(paths)
-            checks.append(
-                DiagnosticCheck(
-                    id="settings_loaded",
-                    status="pass",
-                    message=f"Loaded backend settings from {paths.env_file}",
-                )
+        checks.append(
+            DiagnosticCheck(
+                id="settings_loaded",
+                status="pass",
+                message=f"Using backend settings from {paths.env_file}",
             )
-        except Exception as exc:
-            checks.append(
-                DiagnosticCheck(
-                    id="settings_loaded",
-                    status="fail",
-                    message=str(exc),
-                    action="Fix backend/.env so the CLI can parse the backend settings.",
-                )
+        )
+        check_args = ["check-config"]
+        if full:
+            check_args.append("--full-readiness")
+        completed = run_source_backend_cli(paths, backend_args=check_args)
+        payload = coerce_source_backend_payload(
+            completed,
+            default_message="Backend config check did not return structured JSON output.",
+        )
+        if completed.returncode == 0:
+            storage_backend = _coerce_text(payload.get("storage_backend"))
+            storage_details = _coerce_mapping(payload.get("storage_details"))
+            storage_paths = _coerce_mapping(payload.get("storage_paths"))
+            checks.extend(_build_local_backend_checks(payload))
+            details_completed = run_source_backend_cli(
+                paths,
+                backend_args=[
+                    "doctor-details",
+                    *(["--full-readiness"] if full else []),
+                ],
             )
-
-    storage = None
-    if settings is not None:
-        try:
-            settings.validate_production_posture()
-            storage_info, storage = build_backend_storage(settings)
-            storage_backend = storage_info.backend
-            storage_details = dict(storage_info.details)
-            if storage.is_local_backend:
-                storage_paths = storage.local_storage_paths().to_dict()
-            realtime_provider_factory = RealtimeProviderFactory(settings=settings)
-            realtime_provider_factory.validate_configuration()
-            checks.append(
-                DiagnosticCheck(
-                    id="backend_config_valid",
-                    status="pass",
-                    message=(
-                        "Backend config is valid for realtime provider "
-                        f"'{realtime_provider_factory.provider_name}' with storage backend "
-                        f"'{storage.backend_name}'"
-                    ),
-                )
+            details_payload = coerce_source_backend_payload(
+                details_completed,
+                default_message="Backend doctor details did not return structured JSON output.",
             )
-        except Exception as exc:
-            checks.append(
-                DiagnosticCheck(
-                    id="backend_config_valid",
-                    status="fail",
-                    message=str(exc),
-                    action="Fix the backend profile or realtime provider settings in backend/.env.",
-                )
-            )
-            storage = None
-
-    vision_valid = False
-    tooling_valid = False
-    if settings is not None and storage is not None:
-        if settings.vision_memory_enabled:
-            try:
-                vision_factory = VisionAnalyzerFactory(settings=settings)
-                vision_factory.validate_configuration()
-                checks.append(
-                    DiagnosticCheck(
-                        id="vision_provider_valid",
-                        status="pass",
-                        message=f"Vision provider '{vision_factory.provider_name}' is configured correctly",
-                    )
-                )
-                vision_valid = True
-            except Exception as exc:
-                checks.append(
-                    DiagnosticCheck(
-                        id="vision_provider_valid",
-                        status="fail",
-                        message=str(exc),
-                        action="Fix the visual-memory provider settings in backend/.env.",
-                    )
-                )
+            if details_completed.returncode == 0:
+                details = dict(details_payload)
+                details.pop("status", None)
+            elif storage_backend is not None:
+                details = {
+                    "storage_backend": storage_backend,
+                    "storage_details": storage_details or {},
+                    **({"storage_paths": storage_paths} if storage_paths is not None else {}),
+                }
         else:
             checks.append(
                 DiagnosticCheck(
-                    id="vision_provider_valid",
-                    status="pass",
-                    message="Visual memory is disabled",
-                )
-            )
-            vision_valid = True
-
-        if settings.realtime_tooling_enabled:
-            try:
-                tooling_runtime = RealtimeToolingRuntime.from_settings(
-                    settings,
-                    storage=storage,
-                )
-                if tooling_runtime.web_search_enabled:
-                    checks.append(
-                        DiagnosticCheck(
-                            id="tooling_provider_valid",
-                            status="pass",
-                            message=f"Realtime tooling is enabled with web search provider '{settings.realtime_web_search_provider}'",
-                        )
-                    )
-                else:
-                    checks.append(
-                        DiagnosticCheck(
-                            id="tooling_provider_valid",
-                            status="warn",
-                            message=(
-                                "Realtime tooling is enabled but web_search is unavailable because "
-                                "the configured search provider does not have active credentials."
-                            ),
-                            action=(
-                                "Add the required credential for the selected search provider "
-                                "and rerun `portworld doctor`."
-                            ),
-                        )
-                    )
-                tooling_valid = True
-            except Exception as exc:
-                checks.append(
-                    DiagnosticCheck(
-                        id="tooling_provider_valid",
-                        status="fail",
-                        message=str(exc),
-                        action="Fix the realtime tooling settings in backend/.env.",
-                    )
-                )
-        else:
-            checks.append(
-                DiagnosticCheck(
-                    id="tooling_provider_valid",
-                    status="pass",
-                    message="Realtime tooling is disabled",
-                )
-            )
-            tooling_valid = True
-
-    storage_probe_ran = False
-    if full and settings is not None and storage is not None and vision_valid and tooling_valid:
-        try:
-            storage.bootstrap()
-            storage_probe_ran = True
-            checks.append(
-                DiagnosticCheck(
-                    id="storage_bootstrap_probe",
-                    status="pass",
-                    message="Storage bootstrap probe succeeded",
-                )
-            )
-        except Exception as exc:
-            action = (
-                "Fix the storage paths and permissions, then rerun `portworld doctor --full`."
-                if storage.is_local_backend
-                else "Fix the managed database connectivity and runtime storage settings, then rerun `portworld doctor --full`."
-            )
-            checks.append(
-                DiagnosticCheck(
-                    id="storage_bootstrap_probe",
+                    id="backend_config_valid",
                     status="fail",
-                    message=str(exc),
-                    action=action,
+                    message=str(payload.get("message") or "Backend config validation failed."),
+                    action="Fix the backend profile or provider settings in backend/.env.",
                 )
             )
-    if settings is not None and storage is not None:
-        try:
-            details = collect_doctor_runtime_details(
-                settings,
-                full_readiness=storage_probe_ran,
-            )
-        except Exception:
-            details = None
 
     ok = not any(check.status == "fail" for check in checks)
     data: dict[str, object] = {
@@ -303,7 +175,7 @@ def run_local_doctor_source(
         ),
     }
     if details is not None:
-        data["details"] = details.to_dict()
+        data["details"] = details
     elif storage_backend is not None:
         fallback_details: dict[str, object] = {
             "storage_backend": storage_backend,
@@ -337,9 +209,14 @@ def run_ops_check_config_source(
     *,
     full_readiness: bool,
 ) -> CommandResult:
-    result = check_runtime_configuration(
-        _build_settings_for_ops(session),
-        full_readiness=full_readiness,
+    paths = _project_paths_for_ops(session)
+    backend_args = ["check-config"]
+    if full_readiness:
+        backend_args.append("--full-readiness")
+    completed = run_source_backend_cli(paths, backend_args=backend_args)
+    payload = coerce_source_backend_payload(
+        completed,
+        default_message="Backend config check did not return structured JSON output.",
     )
     warnings = tuple(
         DiagnosticCheck(
@@ -347,49 +224,48 @@ def run_ops_check_config_source(
             status="warn",
             message=warning,
         )
-        for index, warning in enumerate(result.warnings, start=1)
-    )
-    message = format_key_value_lines(
-        ("check_mode", result.check_mode),
-        ("storage_backend", result.storage_backend),
-        ("realtime_provider", result.realtime_provider),
-        ("vision_provider", result.vision_provider),
-        ("realtime_tooling_enabled", result.realtime_tooling_enabled),
-        ("web_search_provider", result.web_search_provider),
-        ("storage_bootstrap_probe", result.storage_bootstrap_probe),
+        for index, warning in enumerate(payload.get("warnings", ()), start=1)
+        if isinstance(warning, str)
     )
     return CommandResult(
-        ok=True,
+        ok=completed.returncode == 0,
         command="portworld ops check-config",
-        message=message or None,
-        data=result.to_dict(),
+        message=format_key_value_lines(
+            ("check_mode", payload.get("check_mode")),
+            ("storage_backend", payload.get("storage_backend")),
+            ("realtime_provider", payload.get("realtime_provider")),
+            ("vision_provider", payload.get("vision_provider")),
+            ("realtime_tooling_enabled", payload.get("realtime_tooling_enabled")),
+            ("web_search_provider", payload.get("web_search_provider")),
+            ("storage_bootstrap_probe", payload.get("storage_bootstrap_probe")),
+        )
+        or str(payload.get("message") or None),
+        data=payload,
         checks=warnings,
-        exit_code=0,
+        exit_code=0 if completed.returncode == 0 else 1,
     )
 
 
 def run_bootstrap_storage_source(session) -> CommandResult:
-    settings = _build_settings_for_ops(session)
-    _, storage = build_backend_storage(settings)
-    if not storage.is_local_backend:
-        raise RuntimeError(
-            "portworld ops bootstrap-storage is only supported when "
-            "BACKEND_STORAGE_BACKEND=local. Managed metadata bootstrap now runs through "
-            "`portworld ops check-config --full` or normal runtime startup instead."
-        )
-    result = storage.bootstrap()
-
-    payload = {"status": "ok", **result.to_dict()}
+    completed = run_source_backend_cli(
+        _project_paths_for_ops(session),
+        backend_args=["bootstrap-storage"],
+    )
+    payload = coerce_source_backend_payload(
+        completed,
+        default_message="Backend bootstrap-storage did not return structured JSON output.",
+    )
     message = format_key_value_lines(
-        ("bootstrapped_at_ms", result.bootstrapped_at_ms),
-        ("sqlite_path", result.sqlite_path),
-        ("user_profile_markdown_path", result.user_profile_markdown_path),
+        ("bootstrapped_at_ms", payload.get("bootstrapped_at_ms")),
+        ("sqlite_path", payload.get("sqlite_path")),
+        ("user_profile_markdown_path", payload.get("user_profile_markdown_path")),
     )
     return CommandResult(
-        ok=True,
+        ok=completed.returncode == 0,
         command="portworld ops bootstrap-storage",
-        message=message or None,
+        message=message or str(payload.get("message") or None),
         data=payload,
+        exit_code=0 if completed.returncode == 0 else 1,
     )
 
 
@@ -398,72 +274,150 @@ def run_export_memory_source(
     *,
     output_path: Path | None,
 ) -> CommandResult:
-    settings = _build_settings_for_ops(session)
-    _, storage = build_backend_storage(settings)
-    storage.bootstrap()
-    artifacts = storage.list_memory_export_artifacts()
-    final_output_path = output_path or (Path.cwd() / f"portworld-memory-export-{now_ms()}.zip")
-    export_path = write_memory_export_zip(
-        artifacts=artifacts,
-        session_retention_days=settings.backend_session_memory_retention_days,
-        output_path=final_output_path,
+    final_output_path = build_source_backend_output_path(output_path)
+    completed = run_source_backend_cli(
+        _project_paths_for_ops(session),
+        backend_args=["export-memory", "--output", str(final_output_path)],
     )
-
-    payload = {
-        "status": "ok",
-        "artifact_count": len(artifacts),
-        "export_path": str(export_path),
-    }
+    payload = coerce_source_backend_payload(
+        completed,
+        default_message="Backend export-memory did not return structured JSON output.",
+    )
+    if completed.returncode == 0:
+        payload["export_path"] = str(final_output_path)
     message = format_key_value_lines(
-        ("artifact_count", len(artifacts)),
-        ("export_path", export_path),
+        ("artifact_count", payload.get("artifact_count")),
+        ("export_path", payload.get("export_path")),
     )
     return CommandResult(
-        ok=True,
+        ok=completed.returncode == 0,
         command="portworld ops export-memory",
-        message=message or None,
+        message=message or str(payload.get("message") or None),
         data=payload,
+        exit_code=0 if completed.returncode == 0 else 1,
     )
 
 
 def run_migrate_storage_layout_source(session) -> CommandResult:
-    settings = _build_settings_for_ops(session)
-    _, storage = build_backend_storage(settings)
-    if not storage.is_local_backend:
-        raise RuntimeError(
-            "portworld ops migrate-storage-layout is only supported when "
-            "BACKEND_STORAGE_BACKEND=local."
-        )
-    storage.bootstrap()
-    migration_result = storage.migrate_legacy_storage_layout()
-
-    payload: dict[str, Any] = {"status": "ok", **migration_result}
+    completed = run_source_backend_cli(
+        _project_paths_for_ops(session),
+        backend_args=["migrate-storage-layout"],
+    )
+    payload = coerce_source_backend_payload(
+        completed,
+        default_message="Backend migrate-storage-layout did not return structured JSON output.",
+    )
     message = format_key_value_lines(
-        ("migrated_count", migration_result.get("migrated_count")),
-        ("orphaned_count", migration_result.get("orphaned_count")),
-        ("session_ids_scanned", migration_result.get("session_ids_scanned")),
-        ("orphan_root", migration_result.get("orphan_root")),
+        ("migrated_count", payload.get("migrated_count")),
+        ("orphaned_count", payload.get("orphaned_count")),
+        ("session_ids_scanned", payload.get("session_ids_scanned")),
+        ("orphan_root", payload.get("orphan_root")),
     )
     return CommandResult(
-        ok=True,
+        ok=completed.returncode == 0,
         command="portworld ops migrate-storage-layout",
-        message=message or None,
+        message=message or str(payload.get("message") or None),
         data=payload,
+        exit_code=0 if completed.returncode == 0 else 1,
     )
 
 
-def _build_settings(paths: ProjectPaths) -> Settings:
-    load_environment_files(paths.env_file)
-    return Settings.from_env()
-
-
-def _build_settings_for_ops(session) -> Settings:
+def _project_paths_for_ops(session) -> ProjectPaths:
     source_session = require_source_workspace_session(
         session,
         command_name="portworld ops",
         usage_error_type=ConfigUsageError,
     )
     assert source_session.project_paths is not None
-    paths = source_session.project_paths
-    load_environment_files(paths.env_file)
-    return Settings.from_env()
+    return source_session.project_paths
+
+
+def _build_local_backend_checks(payload: dict[str, Any]) -> tuple[DiagnosticCheck, ...]:
+    checks: list[DiagnosticCheck] = []
+    storage_backend = _coerce_text(payload.get("storage_backend")) or "unknown"
+    realtime_provider = _coerce_text(payload.get("realtime_provider")) or "unknown"
+    vision_provider = _coerce_text(payload.get("vision_provider"))
+    realtime_tooling_enabled = bool(payload.get("realtime_tooling_enabled"))
+    web_search_provider = _coerce_text(payload.get("web_search_provider"))
+    warnings = tuple(
+        warning for warning in payload.get("warnings", ()) if isinstance(warning, str)
+    )
+
+    checks.append(
+        DiagnosticCheck(
+            id="backend_config_valid",
+            status="pass",
+            message=(
+                f"Backend config is valid for realtime provider '{realtime_provider}' "
+                f"with storage backend '{storage_backend}'"
+            ),
+        )
+    )
+    checks.append(
+        DiagnosticCheck(
+            id="vision_provider_valid",
+            status="pass",
+            message=(
+                f"Vision provider '{vision_provider}' is configured correctly"
+                if vision_provider is not None
+                else "Visual memory is disabled"
+            ),
+        )
+    )
+    if not realtime_tooling_enabled:
+        checks.append(
+            DiagnosticCheck(
+                id="tooling_provider_valid",
+                status="pass",
+                message="Realtime tooling is disabled",
+            )
+        )
+    elif any("web_search is disabled" in warning for warning in warnings):
+        checks.append(
+            DiagnosticCheck(
+                id="tooling_provider_valid",
+                status="warn",
+                message=(
+                    "Realtime tooling is enabled but web_search is unavailable because "
+                    "the configured search provider does not have active credentials."
+                ),
+                action=(
+                    "Add the required credential for the selected search provider and rerun `portworld doctor`."
+                ),
+            )
+        )
+    else:
+        checks.append(
+            DiagnosticCheck(
+                id="tooling_provider_valid",
+                status="pass",
+                message=(
+                    f"Realtime tooling is enabled with web search provider '{web_search_provider}'"
+                    if web_search_provider is not None
+                    else "Realtime tooling is enabled"
+                ),
+            )
+        )
+
+    if payload.get("storage_bootstrap_probe") is True:
+        checks.append(
+            DiagnosticCheck(
+                id="storage_bootstrap_probe",
+                status="pass",
+                message="Storage bootstrap probe succeeded",
+            )
+        )
+    return tuple(checks)
+
+
+def _coerce_mapping(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return dict(value)
+    return None
+
+
+def _coerce_text(value: Any) -> str | None:
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    return None
