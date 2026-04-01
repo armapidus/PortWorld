@@ -37,6 +37,14 @@ struct MainAppView: View {
               handleMetaSkip()
             }
           )
+        case .wakePractice:
+          WakePracticeView(
+            wearablesRuntimeManager: wearablesRuntimeManager,
+            settings: appSettingsStore.settings,
+            onContinue: {
+              advanceOnboarding { onboardingStore.markWakePracticeCompleted() }
+            }
+          )
         case .profileInterview:
           ProfileInterviewView(
             wearablesRuntimeManager: wearablesRuntimeManager,
@@ -100,6 +108,12 @@ private extension MainAppView {
     }
 
     if onboardingStore.progress.metaCompleted &&
+      onboardingStore.progress.wakePracticeCompleted == false
+    {
+      return .wakePractice
+    }
+
+    if onboardingStore.progress.metaCompleted &&
       onboardingStore.progress.profileCompleted == false
     {
       return .profileInterview
@@ -130,6 +144,8 @@ private extension MainAppView {
     case .ready, .failed:
       switch route {
       case .metaConnection:
+        return
+      case .wakePractice where onboardingStore.progress.wakePracticeCompleted == false:
         return
       case .profileInterview where onboardingStore.progress.profileCompleted == false:
         return

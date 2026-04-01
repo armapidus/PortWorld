@@ -11,6 +11,7 @@ final class OnboardingStore: ObservableObject {
     var backendValidated = false
     var metaCompleted = false
     var metaSkipped = false
+    var wakePracticeCompleted = false
     var profileCompleted = false
   }
 
@@ -87,11 +88,18 @@ final class OnboardingStore: ObservableObject {
     persist()
   }
 
+  func markWakePracticeCompleted() {
+    guard progress.wakePracticeCompleted == false else { return }
+    progress.wakePracticeCompleted = true
+    persist()
+  }
+
   func markProfileCompleted() {
     guard progress.profileCompleted == false else { return }
     progress.profileCompleted = true
     progress.metaCompleted = true
     progress.metaSkipped = false
+    progress.wakePracticeCompleted = true
     persist()
   }
 
@@ -110,6 +118,7 @@ final class OnboardingStore: ObservableObject {
     if normalized.profileCompleted {
       normalized.metaCompleted = true
       normalized.metaSkipped = false
+      normalized.wakePracticeCompleted = true
     }
 
     return normalized
