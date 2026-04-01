@@ -14,7 +14,7 @@ from portworld_cli.envfile import (
 
 
 class EnvfileAliasTests(unittest.TestCase):
-    def test_legacy_aliases_are_not_canonicalized(self) -> None:
+    def test_legacy_like_keys_are_preserved_as_custom_overrides(self) -> None:
         template = load_env_template_text(
             Path("/tmp/template.env"),
             "OPENAI_API_KEY=\nVISION_MISTRAL_API_KEY=\n",
@@ -26,8 +26,8 @@ class EnvfileAliasTests(unittest.TestCase):
             parsed = parse_env_file(env_path, template=template)
 
         self.assertEqual(parsed.known_values, OrderedDict())
-        self.assertEqual(parsed.legacy_alias_values, OrderedDict())
         self.assertEqual(parsed.custom_overrides, OrderedDict([("MISTRAL_API_KEY", "legacy-key")]))
+        self.assertEqual(parsed.preserved_overrides, OrderedDict([("MISTRAL_API_KEY", "legacy-key")]))
 
     def test_custom_legacy_like_values_stay_in_custom_overrides(self) -> None:
         template = load_env_template_text(
@@ -37,7 +37,6 @@ class EnvfileAliasTests(unittest.TestCase):
         existing = ParsedEnvFile(
             path=Path("/tmp/.env"),
             known_values=OrderedDict([("OPENAI_API_KEY", "openai-key")]),
-            legacy_alias_values=OrderedDict(),
             custom_overrides=OrderedDict([("MISTRAL_API_KEY", "legacy-key")]),
             preserved_overrides=OrderedDict([("MISTRAL_API_KEY", "legacy-key")]),
         )

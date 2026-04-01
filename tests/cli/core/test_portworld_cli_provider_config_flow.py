@@ -31,7 +31,7 @@ class ProviderConfigFlowTests(unittest.TestCase):
         backend_dir.mkdir(parents=True, exist_ok=True)
         (backend_dir / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
 
-        repo_env_example = Path(__file__).resolve().parents[1] / "backend" / ".env.example"
+        repo_env_example = Path(__file__).resolve().parents[3] / "backend" / ".env.example"
         (backend_dir / ".env.example").write_text(
             repo_env_example.read_text(encoding="utf-8"),
             encoding="utf-8",
@@ -101,37 +101,30 @@ class ProviderConfigFlowTests(unittest.TestCase):
                         realtime_api_key="updated-openai",
                         vision_api_key="azure-key",
                         search_api_key=None,
-                        openai_api_key=None,
-                        vision_provider_api_key=None,
-                        tavily_api_key=None,
                     ),
                 )
 
-    def test_non_interactive_bedrock_requires_region_config(self) -> None:
+    def test_non_interactive_bedrock_uses_template_region_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             session = self._build_session(Path(temp_dir))
-            with self.assertRaisesRegex(
-                ConfigValidationError,
-                "VISION_BEDROCK_REGION \\(Bedrock Vision\\) is required in non-interactive mode.",
-            ):
-                collect_provider_section(
-                    session,
-                    ProviderEditOptions(
-                        realtime_provider="openai",
-                        with_vision=True,
-                        without_vision=False,
-                        vision_provider="bedrock",
-                        with_tooling=False,
-                        without_tooling=False,
-                        search_provider=None,
-                        realtime_api_key="updated-openai",
-                        vision_api_key=None,
-                        search_api_key=None,
-                        openai_api_key=None,
-                        vision_provider_api_key=None,
-                        tavily_api_key=None,
-                    ),
-                )
+            result = collect_provider_section(
+                session,
+                ProviderEditOptions(
+                    realtime_provider="openai",
+                    with_vision=True,
+                    without_vision=False,
+                    vision_provider="bedrock",
+                    with_tooling=False,
+                    without_tooling=False,
+                    search_provider=None,
+                    realtime_api_key="updated-openai",
+                    vision_api_key=None,
+                    search_api_key=None,
+                ),
+            )
+
+            self.assertEqual(result.vision_provider, "bedrock")
+            self.assertEqual(result.env_updates["VISION_BEDROCK_REGION"], "eu-west-2")
 
     def test_vision_provider_flag_requires_vision_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -153,9 +146,6 @@ class ProviderConfigFlowTests(unittest.TestCase):
                         realtime_api_key=None,
                         vision_api_key=None,
                         search_api_key=None,
-                        openai_api_key=None,
-                        vision_provider_api_key=None,
-                        tavily_api_key=None,
                     ),
                 )
 
@@ -179,9 +169,6 @@ class ProviderConfigFlowTests(unittest.TestCase):
                         realtime_api_key=None,
                         vision_api_key=None,
                         search_api_key=None,
-                        openai_api_key=None,
-                        vision_provider_api_key=None,
-                        tavily_api_key=None,
                     ),
                 )
 
