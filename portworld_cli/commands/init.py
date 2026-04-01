@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import click
 
-from backend.core.provider_requirements import (
-    PROVIDER_KIND_REALTIME,
-    PROVIDER_KIND_SEARCH,
-    PROVIDER_KIND_VISION,
-    supported_provider_ids,
-)
 from portworld_cli.commands.compat import reject_legacy_secret_flag
 from portworld_cli.context import CLIContext
 from portworld_cli.output import exit_with_result
+from portworld_cli.providers.catalog import (
+    PROVIDER_KIND_REALTIME,
+    PROVIDER_KIND_SEARCH,
+    PROVIDER_KIND_VISION,
+    supported_runtime_provider_ids,
+)
 from portworld_cli.services.init import InitOptions, run_init
 
 
@@ -18,7 +18,7 @@ from portworld_cli.services.init import InitOptions, run_init
 @click.option("--force", is_flag=True, default=False, help="Rewrite backend/.env without overwrite confirmation.")
 @click.option(
     "--realtime-provider",
-    type=click.Choice(supported_provider_ids(PROVIDER_KIND_REALTIME)),
+    type=click.Choice(supported_runtime_provider_ids(PROVIDER_KIND_REALTIME)),
     default=None,
     help="Select the realtime provider id.",
 )
@@ -26,7 +26,7 @@ from portworld_cli.services.init import InitOptions, run_init
 @click.option("--without-vision", is_flag=True, default=False, help="Disable visual memory.")
 @click.option(
     "--vision-provider",
-    type=click.Choice(supported_provider_ids(PROVIDER_KIND_VISION)),
+    type=click.Choice(supported_runtime_provider_ids(PROVIDER_KIND_VISION)),
     default=None,
     help="Select the vision provider id when visual memory is enabled.",
 )
@@ -34,7 +34,7 @@ from portworld_cli.services.init import InitOptions, run_init
 @click.option("--without-tooling", is_flag=True, default=False, help="Disable realtime tooling.")
 @click.option(
     "--search-provider",
-    type=click.Choice(supported_provider_ids(PROVIDER_KIND_SEARCH)),
+    type=click.Choice(supported_runtime_provider_ids(PROVIDER_KIND_SEARCH)),
     default=None,
     help="Select the web-search provider id when tooling is enabled.",
 )

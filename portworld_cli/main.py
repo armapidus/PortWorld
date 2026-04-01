@@ -4,21 +4,28 @@ from pathlib import Path
 
 import click
 
-from backend import __version__
-from portworld_cli.commands.config import config_group
-from portworld_cli.commands.deploy import deploy_group
-from portworld_cli.commands.doctor import doctor_command
-from portworld_cli.commands.extensions import extensions_group
-from portworld_cli.commands.init import init_command
-from portworld_cli.commands.logs import logs_group
-from portworld_cli.commands.ops import ops_group
-from portworld_cli.commands.providers import providers_group
-from portworld_cli.commands.status import status_command
-from portworld_cli.commands.update import update_group
 from portworld_cli.context import CLIContext
+from portworld_cli.lazy_group import LazyGroup
+from portworld_cli.version import __version__
+
+
+COMMAND_SPECS: dict[str, tuple[str, str, str]] = {
+    "init": ("portworld_cli.commands.init", "init_command", "Initialize local PortWorld backend configuration."),
+    "doctor": ("portworld_cli.commands.doctor", "doctor_command", "Validate local or managed deployment readiness."),
+    "deploy": ("portworld_cli.commands.deploy", "deploy_group", "Deploy PortWorld to a managed target."),
+    "status": ("portworld_cli.commands.status", "status_command", "Inspect workspace and deployment state."),
+    "logs": ("portworld_cli.commands.logs", "logs_group", "Read managed deployment logs."),
+    "config": ("portworld_cli.commands.config", "config_group", "Inspect or edit project configuration."),
+    "providers": ("portworld_cli.commands.providers", "providers_group", "Inspect the currently supported provider surface."),
+    "update": ("portworld_cli.commands.update", "update_group", "Update the CLI installation or the active managed deployment."),
+    "ops": ("portworld_cli.commands.ops", "ops_group", "Run backend operator tasks."),
+    "extensions": ("portworld_cli.commands.extensions", "extensions_group", "Manage official or local PortWorld extensions."),
+}
 
 
 @click.group(
+    cls=LazyGroup,
+    lazy_commands=COMMAND_SPECS,
     context_settings={"help_option_names": ["-h", "--help"]},
     no_args_is_help=True,
 )
@@ -57,18 +64,6 @@ def cli(
         non_interactive=non_interactive,
         yes=yes,
     )
-
-
-cli.add_command(init_command)
-cli.add_command(doctor_command)
-cli.add_command(deploy_group)
-cli.add_command(status_command)
-cli.add_command(logs_group)
-cli.add_command(config_group)
-cli.add_command(providers_group)
-cli.add_command(update_group)
-cli.add_command(ops_group)
-cli.add_command(extensions_group)
 
 
 def main() -> None:

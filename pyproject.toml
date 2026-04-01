@@ -86,4 +86,7 @@ exclude = ["backend.var*"]
 portworld_cli = ["templates/*.template"]
 
 [tool.setuptools.dynamic]
-version = {attr = "backend.__version__"}
+version = {attr = "portworld_cli.version.__version__"}
+
+[tool.setuptools.exclude-package-data]
+"*" = [".DS_Store", "*.pyc", "*.pyo"]

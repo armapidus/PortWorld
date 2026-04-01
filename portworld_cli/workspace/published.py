@@ -9,7 +9,6 @@ import tempfile
 import time
 from urllib.error import URLError
 
-from backend import __version__
 from portworld_cli.envfile import (
     EnvTemplate,
     EnvWriteResult,
@@ -19,6 +18,7 @@ from portworld_cli.envfile import (
 )
 from portworld_cli.release.identity import REPO_OWNER
 from portworld_cli.release.lookup import extract_latest_release_tag, fetch_latest_release_payload
+from portworld_cli.version import __version__
 from portworld_cli.workspace.discovery.paths import ProjectPaths, WorkspacePaths
 from portworld_cli.workspace.project_config import ProjectConfig, write_project_config
 

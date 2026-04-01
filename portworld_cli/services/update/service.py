@@ -8,7 +8,6 @@ import shutil
 import subprocess
 from urllib.error import URLError
 
-from backend import __version__
 from portworld_cli.context import CLIContext
 from portworld_cli.deploy.service import run_deploy_gcp_cloud_run
 from portworld_cli.output import CommandResult, format_key_value_lines
@@ -39,6 +38,7 @@ from portworld_cli.services.cloud_contract import (
     validate_cloud_flag_scope_for_update_deploy,
 )
 from portworld_cli.services.common import ErrorMappingPolicy, map_command_exception
+from portworld_cli.version import __version__
 from portworld_cli.workspace.discovery.paths import ProjectPaths, ProjectRootResolutionError, resolve_project_paths
 from portworld_cli.workspace.session import load_inspection_session, load_workspace_session
 
