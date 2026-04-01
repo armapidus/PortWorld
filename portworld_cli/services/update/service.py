@@ -9,13 +9,7 @@ import subprocess
 from urllib.error import URLError
 
 from backend import __version__
-from portworld_cli.aws.deploy import DeployAWSECSFargateOptions, run_deploy_aws_ecs_fargate
-from portworld_cli.azure.deploy import (
-    DeployAzureContainerAppsOptions,
-    run_deploy_azure_container_apps,
-)
 from portworld_cli.context import CLIContext
-from portworld_cli.deploy.config import DeployGCPCloudRunOptions
 from portworld_cli.deploy.service import run_deploy_gcp_cloud_run
 from portworld_cli.output import CommandResult, format_key_value_lines
 from portworld_cli.release.identity import (
@@ -35,6 +29,14 @@ from portworld_cli.targets import (
     TARGET_AWS_ECS_FARGATE,
     TARGET_AZURE_CONTAINER_APPS,
     TARGET_GCP_CLOUD_RUN,
+)
+from portworld_cli.services.cloud_contract import (
+    CloudProviderOptions,
+    problem_next_message,
+    to_aws_deploy_options,
+    to_azure_deploy_options,
+    to_gcp_deploy_options,
+    validate_cloud_flag_scope_for_update_deploy,
 )
 from portworld_cli.services.common import ErrorMappingPolicy, map_command_exception
 from portworld_cli.workspace.discovery.paths import ProjectPaths, ProjectRootResolutionError, resolve_project_paths
@@ -61,37 +63,8 @@ class UpdateUsageError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class UpdateDeployOptions:
-    project: str | None
-    region: str | None
-    service: str | None
-    artifact_repo: str | None
-    sql_instance: str | None
-    database: str | None
-    bucket: str | None
+    cloud: CloudProviderOptions
     tag: str | None
-    min_instances: int | None
-    max_instances: int | None
-    concurrency: int | None
-    cpu: str | None
-    memory: str | None
-    aws_region: str | None
-    aws_service: str | None
-    aws_vpc_id: str | None
-    aws_subnet_ids: str | None
-    aws_database_url: str | None
-    aws_s3_bucket: str | None
-    aws_ecr_repo: str | None
-    azure_subscription: str | None
-    azure_resource_group: str | None
-    azure_region: str | None
-    azure_environment: str | None
-    azure_app: str | None
-    azure_database_url: str | None
-    azure_storage_account: str | None
-    azure_blob_container: str | None
-    azure_blob_endpoint: str | None
-    azure_acr_server: str | None
-    azure_acr_repo: str | None
 
 
 def run_update_cli(cli_context: CLIContext) -> CommandResult:
@@ -147,6 +120,7 @@ def run_update_deploy(
     cli_context: CLIContext,
     options: UpdateDeployOptions,
 ) -> CommandResult:
+    active_target: str | None = None
     try:
         session = load_inspection_session(cli_context)
         load_workspace_session(cli_context)
@@ -156,6 +130,17 @@ def run_update_deploy(
                 "No managed deploy target is configured. Use `portworld deploy <target>` first "
                 "or configure managed cloud defaults with `portworld config edit cloud`."
             )
+        issue = validate_cloud_flag_scope_for_update_deploy(
+            active_target=active_target,
+            cloud_options=options.cloud,
+        )
+        if issue is not None:
+            return _usage_error_result(
+                target=active_target,
+                problem=issue.problem,
+                next_step=issue.next_step,
+            )
+
         result = _dispatch_update_deploy(cli_context, active_target=active_target, options=options)
         wrapped_message = result.message
         prefix = f"Managed redeploy target: {active_target}"
@@ -174,11 +159,31 @@ def run_update_deploy(
             checks=result.checks,
             exit_code=result.exit_code,
         )
+    except UpdateUsageError as exc:
+        return _usage_error_result(
+            target=active_target,
+            problem=str(exc),
+            next_step=(
+                "Run `portworld status` to confirm the active target, then pass only that target's "
+                "provider-scoped flags to `portworld update deploy`."
+            ),
+        )
     except Exception as exc:
-        return map_command_exception(
+        mapped = map_command_exception(
             exc,
             policy=ErrorMappingPolicy(command_name=UPDATE_DEPLOY_COMMAND_NAME),
-            usage_error_types=(UpdateUsageError,),
+        )
+        if active_target is None:
+            return mapped
+        data = dict(mapped.data)
+        data["target"] = active_target
+        return CommandResult(
+            ok=mapped.ok,
+            command=mapped.command,
+            message=mapped.message,
+            data=data,
+            checks=mapped.checks,
+            exit_code=mapped.exit_code,
         )
 
 
@@ -189,134 +194,40 @@ def _dispatch_update_deploy(
     options: UpdateDeployOptions,
 ) -> CommandResult:
     if active_target == TARGET_GCP_CLOUD_RUN:
-        _ensure_gcp_only_flags(options)
         return run_deploy_gcp_cloud_run(
             cli_context,
-            DeployGCPCloudRunOptions(
-                project=options.project,
-                region=options.region,
-                service=options.service,
-                artifact_repo=options.artifact_repo,
-                sql_instance=options.sql_instance,
-                database=options.database,
-                bucket=options.bucket,
-                tag=options.tag,
-                min_instances=options.min_instances,
-                max_instances=options.max_instances,
-                concurrency=options.concurrency,
-                cpu=options.cpu,
-                memory=options.memory,
-            ),
+            to_gcp_deploy_options(options.cloud, tag=options.tag),
         )
     if active_target == TARGET_AWS_ECS_FARGATE:
-        _ensure_aws_only_flags(options)
+        from portworld_cli.aws.deploy import run_deploy_aws_ecs_fargate
+
         return run_deploy_aws_ecs_fargate(
             cli_context,
-            DeployAWSECSFargateOptions(
-                region=options.aws_region,
-                service=options.aws_service,
-                vpc_id=options.aws_vpc_id,
-                subnet_ids=options.aws_subnet_ids,
-                database_url=options.aws_database_url,
-                bucket=options.aws_s3_bucket,
-                ecr_repo=options.aws_ecr_repo,
-                tag=options.tag,
-            ),
+            to_aws_deploy_options(options.cloud, tag=options.tag),
         )
     if active_target == TARGET_AZURE_CONTAINER_APPS:
-        _ensure_azure_only_flags(options)
+        from portworld_cli.azure.deploy import run_deploy_azure_container_apps
+
         return run_deploy_azure_container_apps(
             cli_context,
-            DeployAzureContainerAppsOptions(
-                subscription=options.azure_subscription,
-                resource_group=options.azure_resource_group,
-                region=options.azure_region,
-                environment=options.azure_environment,
-                app=options.azure_app,
-                database_url=options.azure_database_url,
-                storage_account=options.azure_storage_account,
-                blob_container=options.azure_blob_container,
-                blob_endpoint=options.azure_blob_endpoint,
-                acr_server=options.azure_acr_server,
-                acr_repo=options.azure_acr_repo,
-                tag=options.tag,
-            ),
+            to_azure_deploy_options(options.cloud, tag=options.tag),
         )
     raise UpdateUsageError(f"Managed deploy target '{active_target}' is not supported.")
 
 
-def _ensure_gcp_only_flags(options: UpdateDeployOptions) -> None:
-    if _has_aws_flags(options) or _has_azure_flags(options):
-        raise UpdateUsageError(
-            "AWS/Azure flags are not supported when the active managed target is gcp-cloud-run."
-        )
-
-
-def _ensure_aws_only_flags(options: UpdateDeployOptions) -> None:
-    if _has_gcp_flags(options) or _has_azure_flags(options):
-        raise UpdateUsageError(
-            "GCP/Azure flags are not supported when the active managed target is aws-ecs-fargate."
-        )
-
-
-def _ensure_azure_only_flags(options: UpdateDeployOptions) -> None:
-    if _has_gcp_flags(options) or _has_aws_flags(options):
-        raise UpdateUsageError(
-            "GCP/AWS flags are not supported when the active managed target is azure-container-apps."
-        )
-
-
-def _has_gcp_flags(options: UpdateDeployOptions) -> bool:
-    return any(
-        value is not None
-        for value in (
-            options.project,
-            options.region,
-            options.service,
-            options.artifact_repo,
-            options.sql_instance,
-            options.database,
-            options.bucket,
-            options.min_instances,
-            options.max_instances,
-            options.concurrency,
-            options.cpu,
-            options.memory,
-        )
-    )
-
-
-def _has_aws_flags(options: UpdateDeployOptions) -> bool:
-    return any(
-        value is not None
-        for value in (
-            options.aws_region,
-            options.aws_service,
-            options.aws_vpc_id,
-            options.aws_subnet_ids,
-            options.aws_database_url,
-            options.aws_s3_bucket,
-            options.aws_ecr_repo,
-        )
-    )
-
-
-def _has_azure_flags(options: UpdateDeployOptions) -> bool:
-    return any(
-        value is not None
-        for value in (
-            options.azure_subscription,
-            options.azure_resource_group,
-            options.azure_region,
-            options.azure_environment,
-            options.azure_app,
-            options.azure_database_url,
-            options.azure_storage_account,
-            options.azure_blob_container,
-            options.azure_blob_endpoint,
-            options.azure_acr_server,
-            options.azure_acr_repo,
-        )
+def _usage_error_result(*, target: str | None, problem: str, next_step: str) -> CommandResult:
+    payload = {
+        "status": "error",
+        "error_type": "UsageError",
+    }
+    if target is not None:
+        payload["target"] = target
+    return CommandResult(
+        ok=False,
+        command=UPDATE_DEPLOY_COMMAND_NAME,
+        message=problem_next_message(problem=problem, next_step=next_step),
+        data=payload,
+        exit_code=2,
     )
 
 

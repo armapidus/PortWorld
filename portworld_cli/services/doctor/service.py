@@ -11,6 +11,17 @@ from portworld_cli.output import CommandResult, DiagnosticCheck, format_key_valu
 from portworld_cli.workspace.project_config import ProjectConfigError
 from portworld_cli.runtime.published import run_local_doctor_published
 from portworld_cli.runtime.source import run_local_doctor_source
+from portworld_cli.services.cloud_contract import (
+    AWSDoctorOptions,
+    AzureDoctorOptions,
+    CloudProviderOptions,
+    GCPDoctorOptions,
+    problem_next_message,
+    to_aws_doctor_options,
+    to_azure_doctor_options,
+    to_gcp_doctor_options,
+    validate_cloud_flag_scope_for_doctor,
+)
 from portworld_cli.services.config.errors import ConfigRuntimeError
 from portworld_cli.targets import TARGET_AWS_ECS_FARGATE, normalize_managed_target
 from portworld_cli.workspace.discovery.paths import ProjectRootResolutionError
@@ -25,111 +36,28 @@ COMMAND_NAME = "portworld doctor"
 class DoctorOptions:
     target: str
     full: bool
-    project: str | None
-    region: str | None
-    aws_region: str | None
-    aws_service: str | None
-    aws_vpc_id: str | None
-    aws_subnet_ids: str | None
-    aws_database_url: str | None
-    aws_s3_bucket: str | None
-    azure_subscription: str | None
-    azure_resource_group: str | None
-    azure_region: str | None
-    azure_environment: str | None
-    azure_app: str | None
-    azure_database_url: str | None
-    azure_storage_account: str | None
-    azure_blob_container: str | None
-    azure_blob_endpoint: str | None
+    cloud: CloudProviderOptions
 
 
 def run_doctor(cli_context: CLIContext, options: DoctorOptions) -> CommandResult:
     normalized_target = normalize_managed_target(options.target) or options.target
+    issue = validate_cloud_flag_scope_for_doctor(
+        target=options.target,
+        cloud_options=options.cloud,
+    )
+    if issue is not None:
+        return _usage_error_result(
+            problem=issue.problem,
+            next_step=issue.next_step,
+            target=options.target,
+        )
+
     if options.target == "gcp-cloud-run":
-        if (
-            options.aws_region is not None
-            or options.aws_service is not None
-            or options.aws_vpc_id is not None
-            or options.aws_subnet_ids is not None
-            or options.aws_database_url is not None
-            or options.aws_s3_bucket is not None
-            or options.azure_subscription is not None
-            or options.azure_resource_group is not None
-            or options.azure_region is not None
-            or options.azure_environment is not None
-            or options.azure_app is not None
-            or options.azure_database_url is not None
-            or options.azure_storage_account is not None
-            or options.azure_blob_container is not None
-            or options.azure_blob_endpoint is not None
-        ):
-            return _usage_error_result(
-                problem="AWS/Azure flags are only supported with their matching cloud targets.",
-                next_step="Use only GCP flags with `--target gcp-cloud-run`, or switch `--target` to the matching cloud.",
-            )
         return _run_gcp_cloud_run_doctor(cli_context, options=options)
     if normalized_target == TARGET_AWS_ECS_FARGATE:
-        if (
-            options.project is not None
-            or options.region is not None
-            or options.azure_subscription is not None
-            or options.azure_resource_group is not None
-            or options.azure_region is not None
-            or options.azure_environment is not None
-            or options.azure_app is not None
-            or options.azure_database_url is not None
-            or options.azure_storage_account is not None
-            or options.azure_blob_container is not None
-            or options.azure_blob_endpoint is not None
-        ):
-            return _usage_error_result(
-                problem="GCP/Azure flags are not supported with --target aws-ecs-fargate.",
-                next_step="Use only AWS flags with `--target aws-ecs-fargate`, or switch `--target`.",
-            )
         return _run_aws_ecs_fargate_doctor(cli_context, options=options)
     if options.target == "azure-container-apps":
-        if (
-            options.project is not None
-            or options.region is not None
-            or options.aws_region is not None
-            or options.aws_service is not None
-            or options.aws_vpc_id is not None
-            or options.aws_subnet_ids is not None
-            or options.aws_database_url is not None
-            or options.aws_s3_bucket is not None
-        ):
-            return _usage_error_result(
-                problem="GCP/AWS flags are not supported with --target azure-container-apps.",
-                next_step="Use only Azure flags with `--target azure-container-apps`, or switch `--target`.",
-            )
         return _run_azure_container_apps_doctor(cli_context, options=options)
-    if (
-        options.project is not None
-        or options.region is not None
-        or options.aws_region is not None
-        or options.aws_service is not None
-        or options.aws_vpc_id is not None
-        or options.aws_subnet_ids is not None
-        or options.aws_database_url is not None
-        or options.aws_s3_bucket is not None
-        or options.azure_subscription is not None
-        or options.azure_resource_group is not None
-        or options.azure_region is not None
-        or options.azure_environment is not None
-        or options.azure_app is not None
-        or options.azure_database_url is not None
-        or options.azure_storage_account is not None
-        or options.azure_blob_container is not None
-        or options.azure_blob_endpoint is not None
-    ):
-        return _usage_error_result(
-            problem=(
-                "Cloud target options are only supported with --target gcp-cloud-run, "
-                "--target aws-ecs-fargate, or --target azure-container-apps."
-            ),
-            next_step="Run `portworld doctor --target local` without cloud flags, or choose a managed target.",
-        )
     return _run_local_doctor(cli_context, full=options.full)
 
 
@@ -205,6 +133,7 @@ def _run_gcp_cloud_run_doctor(
     *,
     options: DoctorOptions,
 ) -> CommandResult:
+    gcp_options: GCPDoctorOptions = to_gcp_doctor_options(options.cloud)
     try:
         session = load_workspace_session(cli_context)
     except ProjectRootResolutionError as exc:
@@ -214,8 +143,8 @@ def _run_gcp_cloud_run_doctor(
             message=format_key_value_lines(
                 ("target", options.target),
                 ("full", options.full),
-                ("project", options.project),
-                ("region", options.region),
+                ("gcp_project", gcp_options.project),
+                ("gcp_region", gcp_options.region),
             ),
             data={
                 "target": options.target,
@@ -259,8 +188,8 @@ def _run_gcp_cloud_run_doctor(
     evaluation = evaluate_gcp_cloud_run_readiness(
         source_project_paths=session.project_paths,
         full=options.full,
-        explicit_project=options.project,
-        explicit_region=options.region,
+        explicit_project=gcp_options.project,
+        explicit_region=gcp_options.region,
         project_config=session.project_config,
     )
     root_check = DiagnosticCheck(
@@ -287,8 +216,8 @@ def _run_gcp_cloud_run_doctor(
                 "project_root",
                 None if session.project_paths is None else session.project_paths.project_root,
             ),
-            ("project", details.project_id or options.project),
-            ("region", details.region or options.region),
+            ("gcp_project", details.project_id or gcp_options.project),
+            ("gcp_region", details.region or gcp_options.region),
         ),
         data={
             "target": options.target,
@@ -315,6 +244,7 @@ def _run_aws_ecs_fargate_doctor(
     *,
     options: DoctorOptions,
 ) -> CommandResult:
+    aws_options: AWSDoctorOptions = to_aws_doctor_options(options.cloud)
     try:
         session = load_workspace_session(cli_context)
     except ProjectRootResolutionError as exc:
@@ -324,7 +254,7 @@ def _run_aws_ecs_fargate_doctor(
             message=format_key_value_lines(
                 ("target", options.target),
                 ("full", options.full),
-                ("aws_region", options.aws_region),
+                ("aws_region", aws_options.region),
             ),
             data={
                 "target": options.target,
@@ -376,12 +306,12 @@ def _run_aws_ecs_fargate_doctor(
     )
     evaluation = evaluate_aws_ecs_fargate_readiness(
         runtime_source=session.effective_runtime_source,
-        explicit_region=options.aws_region,
-        explicit_service=options.aws_service,
-        explicit_vpc_id=options.aws_vpc_id,
-        explicit_subnet_ids=options.aws_subnet_ids,
-        explicit_database_url=options.aws_database_url,
-        explicit_s3_bucket=options.aws_s3_bucket,
+        explicit_region=aws_options.region,
+        explicit_service=aws_options.service,
+        explicit_vpc_id=aws_options.vpc_id,
+        explicit_subnet_ids=aws_options.subnet_ids,
+        explicit_database_url=aws_options.database_url,
+        explicit_s3_bucket=aws_options.s3_bucket,
         env_values=session.merged_env_values(),
         project_config=session.project_config,
     )
@@ -439,6 +369,7 @@ def _run_azure_container_apps_doctor(
     *,
     options: DoctorOptions,
 ) -> CommandResult:
+    azure_options: AzureDoctorOptions = to_azure_doctor_options(options.cloud)
     try:
         session = load_workspace_session(cli_context)
     except ProjectRootResolutionError as exc:
@@ -448,7 +379,7 @@ def _run_azure_container_apps_doctor(
             message=format_key_value_lines(
                 ("target", options.target),
                 ("full", options.full),
-                ("azure_subscription", options.azure_subscription),
+                ("azure_subscription", azure_options.subscription),
             ),
             data={
                 "target": options.target,
@@ -499,15 +430,15 @@ def _run_azure_container_apps_doctor(
         ),
     )
     evaluation = evaluate_azure_container_apps_readiness(
-        explicit_subscription=options.azure_subscription,
-        explicit_resource_group=options.azure_resource_group,
-        explicit_region=options.azure_region,
-        explicit_environment=options.azure_environment,
-        explicit_app=options.azure_app,
-        explicit_database_url=options.azure_database_url,
-        explicit_storage_account=options.azure_storage_account,
-        explicit_blob_container=options.azure_blob_container,
-        explicit_blob_endpoint=options.azure_blob_endpoint,
+        explicit_subscription=azure_options.subscription,
+        explicit_resource_group=azure_options.resource_group,
+        explicit_region=azure_options.region,
+        explicit_environment=azure_options.environment,
+        explicit_app=azure_options.app,
+        explicit_database_url=azure_options.database_url,
+        explicit_storage_account=azure_options.storage_account,
+        explicit_blob_container=azure_options.blob_container,
+        explicit_blob_endpoint=azure_options.blob_endpoint,
         env_values=session.merged_env_values(),
         project_config=session.project_config,
     )
@@ -556,23 +487,15 @@ def _run_azure_container_apps_doctor(
     )
 
 
-def _usage_error_result(*, problem: str, next_step: str) -> CommandResult:
+def _usage_error_result(*, problem: str, next_step: str, target: str) -> CommandResult:
     return CommandResult(
         ok=False,
         command=COMMAND_NAME,
-        message=_problem_next_message(problem=problem, next_step=next_step),
+        message=problem_next_message(problem=problem, next_step=next_step),
         data={
             "status": "error",
             "error_type": "UsageError",
+            "target": target,
         },
         exit_code=2,
     )
-
-
-def _problem_next_message(*, problem: str, next_step: str, stage: str | None = None) -> str:
-    lines: list[str] = []
-    if stage:
-        lines.append(f"stage: {stage}")
-    lines.append(f"problem: {problem}")
-    lines.append(f"next: {next_step}")
-    return "\n".join(lines)
