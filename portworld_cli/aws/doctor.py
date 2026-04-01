@@ -8,8 +8,6 @@ from portworld_cli.aws.common import (
     aws_cli_available,
     is_postgres_url,
     normalize_optional_text,
-    run_aws_json,
-    run_aws_text,
     s3_bucket_name_tls_warning,
     split_csv_values,
     validate_s3_bucket_name,
@@ -251,21 +249,28 @@ def evaluate_aws_ecs_fargate_readiness(
     cloudfront_domain_name: str | None = None
     service_url: str | None = None
     if cli_ok and region and bucket_name:
-        checks.append(_s3_bucket_ready_check(region=region, bucket_name=bucket_name))
+        assert aws_adapters is not None
+        checks.append(_s3_bucket_ready_check(adapters=aws_adapters, region=region, bucket_name=bucket_name))
     if cli_ok and region and ecr_repository:
-        checks.append(_ecr_repository_ready_check(region=region, repository_name=ecr_repository))
+        assert aws_adapters is not None
+        checks.append(_ecr_repository_ready_check(adapters=aws_adapters, region=region, repository_name=ecr_repository))
     if cli_ok and region and cluster_name and service_name:
+        assert aws_adapters is not None
         ecs_check, service_url = _ecs_service_check(
+            adapters=aws_adapters,
             region=region,
             cluster_name=cluster_name,
             service_name=service_name,
         )
         checks.append(ecs_check)
     if cli_ok and region and alb_name:
-        alb_check, alb_dns_name = _alb_check(region=region, alb_name=alb_name)
+        assert aws_adapters is not None
+        alb_check, alb_dns_name = _alb_check(adapters=aws_adapters, region=region, alb_name=alb_name)
         checks.append(alb_check)
     if cli_ok and cloudfront_comment:
+        assert aws_adapters is not None
         cloudfront_check, cloudfront_distribution_id, cloudfront_domain_name = _cloudfront_distribution_check(
+            adapters=aws_adapters,
             comment=cloudfront_comment
         )
         checks.append(cloudfront_check)
@@ -273,8 +278,10 @@ def evaluate_aws_ecs_fargate_readiness(
             service_url = _normalize_service_url(cloudfront_domain_name)
 
     if cli_ok and region and database_url is None and rds_instance_identifier:
+        assert aws_adapters is not None
         checks.extend(
             _rds_provisioning_checks(
+                adapters=aws_adapters,
                 region=region,
                 explicit_vpc_id=vpc_id,
                 explicit_subnet_ids=subnet_ids,
@@ -305,8 +312,8 @@ def evaluate_aws_ecs_fargate_readiness(
     )
 
 
-def _s3_bucket_ready_check(*, region: str, bucket_name: str) -> DiagnosticCheck:
-    result = run_aws_text(["s3api", "head-bucket", "--bucket", bucket_name, "--region", region])
+def _s3_bucket_ready_check(*, adapters: AWSAdapters, region: str, bucket_name: str) -> DiagnosticCheck:
+    result = adapters.storage.run_text(["s3api", "head-bucket", "--bucket", bucket_name, "--region", region])
     if result.ok:
         return DiagnosticCheck(
             id="s3_bucket_ready",
@@ -329,8 +336,8 @@ def _s3_bucket_ready_check(*, region: str, bucket_name: str) -> DiagnosticCheck:
     )
 
 
-def _ecr_repository_ready_check(*, region: str, repository_name: str) -> DiagnosticCheck:
-    result = run_aws_json(
+def _ecr_repository_ready_check(*, adapters: AWSAdapters, region: str, repository_name: str) -> DiagnosticCheck:
+    result = adapters.image.run_json(
         [
             "ecr",
             "describe-repositories",
@@ -364,11 +371,12 @@ def _ecr_repository_ready_check(*, region: str, repository_name: str) -> Diagnos
 
 def _ecs_service_check(
     *,
+    adapters: AWSAdapters,
     region: str,
     cluster_name: str,
     service_name: str,
 ) -> tuple[DiagnosticCheck, str | None]:
-    described_cluster = run_aws_json(
+    described_cluster = adapters.compute.run_json(
         [
             "ecs",
             "describe-clusters",
@@ -400,7 +408,7 @@ def _ecs_service_check(
             None,
         )
 
-    described_service = run_aws_json(
+    described_service = adapters.compute.run_json(
         [
             "ecs",
             "describe-services",
@@ -477,8 +485,8 @@ def _ecs_service_check(
     )
 
 
-def _alb_check(*, region: str, alb_name: str) -> tuple[DiagnosticCheck, str | None]:
-    described = run_aws_json(
+def _alb_check(*, adapters: AWSAdapters, region: str, alb_name: str) -> tuple[DiagnosticCheck, str | None]:
+    described = adapters.network.run_json(
         [
             "elbv2",
             "describe-load-balancers",
@@ -533,9 +541,10 @@ def _alb_check(*, region: str, alb_name: str) -> tuple[DiagnosticCheck, str | No
 
 def _cloudfront_distribution_check(
     *,
+    adapters: AWSAdapters,
     comment: str,
 ) -> tuple[DiagnosticCheck, str | None, str | None]:
-    listed = run_aws_json(["cloudfront", "list-distributions"])
+    listed = adapters.network.run_json(["cloudfront", "list-distributions"])
     if not listed.ok or not isinstance(listed.value, dict):
         return (
             DiagnosticCheck(
@@ -593,6 +602,7 @@ def _cloudfront_distribution_check(
 
 def _rds_provisioning_checks(
     *,
+    adapters: AWSAdapters,
     region: str,
     explicit_vpc_id: str | None,
     explicit_subnet_ids: tuple[str, ...],
@@ -606,9 +616,16 @@ def _rds_provisioning_checks(
             message=f"RDS instance identifier '{rds_instance_identifier}' is ready for one-click provisioning.",
         )
     )
-    checks.extend(_vpc_and_subnet_checks(region=region, explicit_vpc_id=explicit_vpc_id, explicit_subnet_ids=explicit_subnet_ids))
+    checks.extend(
+        _vpc_and_subnet_checks(
+            adapters=adapters,
+            region=region,
+            explicit_vpc_id=explicit_vpc_id,
+            explicit_subnet_ids=explicit_subnet_ids,
+        )
+    )
 
-    described = run_aws_json(
+    described = adapters.database.run_json(
         [
             "rds",
             "describe-db-instances",
@@ -659,6 +676,7 @@ def _rds_provisioning_checks(
 
 def _vpc_and_subnet_checks(
     *,
+    adapters: AWSAdapters,
     region: str,
     explicit_vpc_id: str | None,
     explicit_subnet_ids: tuple[str, ...],
@@ -666,7 +684,7 @@ def _vpc_and_subnet_checks(
     checks: list[DiagnosticCheck] = []
     resolved_vpc_id = explicit_vpc_id
     if resolved_vpc_id is None:
-        vpcs = run_aws_json(
+        vpcs = adapters.network.run_json(
             [
                 "ec2",
                 "describe-vpcs",
@@ -708,7 +726,7 @@ def _vpc_and_subnet_checks(
 
     subnet_ids = explicit_subnet_ids
     if resolved_vpc_id and not subnet_ids:
-        subnets = run_aws_json(
+        subnets = adapters.network.run_json(
             [
                 "ec2",
                 "describe-subnets",

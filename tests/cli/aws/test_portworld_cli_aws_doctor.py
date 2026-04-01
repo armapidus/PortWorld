@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import unittest
 from unittest import mock
 
@@ -25,6 +26,44 @@ class AWSDoctorTests(unittest.TestCase):
         check_ids = {check.id: check for check in evaluation.checks}
         self.assertEqual(check_ids["aws_cli_installed"].status, "fail")
 
+    @mock.patch.dict(os.environ, {}, clear=True)
+    @mock.patch("portworld_cli.aws.doctor.aws_cli_available", return_value=True)
+    @mock.patch("portworld_cli.aws.doctor.AWSAdapters.create")
+    def test_region_falls_back_to_aws_cli_config_via_adapter_executor(
+        self,
+        create_adapters: mock.Mock,
+        _available: mock.Mock,
+    ) -> None:
+        adapters = mock.Mock()
+        adapters.compute.run_json.return_value = mock.Mock(
+            ok=True,
+            value={"Account": "123", "Arn": "arn:aws:iam::123:user/test"},
+            message=None,
+        )
+        adapters.executor.run_text.return_value = mock.Mock(
+            ok=True,
+            value="us-west-2",
+            message=None,
+        )
+        create_adapters.return_value = adapters
+
+        evaluation = evaluate_aws_ecs_fargate_readiness(
+            runtime_source="source",
+            explicit_region=None,
+            explicit_service=None,
+            explicit_vpc_id=None,
+            explicit_subnet_ids=None,
+            explicit_database_url=None,
+            explicit_s3_bucket=None,
+            env_values={},
+            project_config=ProjectConfig(),
+        )
+
+        by_id = {check.id: check for check in evaluation.checks}
+        self.assertEqual(by_id["aws_region_selected"].status, "pass")
+        self.assertEqual(evaluation.details.region, "us-west-2")
+        adapters.executor.run_text.assert_called_once_with(["configure", "get", "region"])
+
     @mock.patch(
         "portworld_cli.aws.doctor._cloudfront_distribution_check",
         return_value=(mock.Mock(id="cloudfront_ready", status="pass"), "dist-1", "d111.cloudfront.net"),
@@ -46,12 +85,10 @@ class AWSDoctorTests(unittest.TestCase):
         return_value=mock.Mock(id="s3_bucket_ready", status="pass"),
     )
     @mock.patch("portworld_cli.aws.doctor.AWSAdapters.create")
-    @mock.patch("portworld_cli.aws.doctor.run_aws_json")
     @mock.patch("portworld_cli.aws.doctor.aws_cli_available", return_value=True)
     def test_valid_configuration_passes_core_checks(
         self,
         _available: mock.Mock,
-        run_aws_json: mock.Mock,
         create_adapters: mock.Mock,
         _s3_bucket_ready_check: mock.Mock,
         _ecr_repository_ready_check: mock.Mock,
@@ -70,9 +107,6 @@ class AWSDoctorTests(unittest.TestCase):
                 )
             )
         )
-        run_aws_json.side_effect = [
-            mock.Mock(ok=True, value={"Buckets": []}, message=None),
-        ]
 
         evaluation = evaluate_aws_ecs_fargate_readiness(
             runtime_source="source",
@@ -99,6 +133,7 @@ class AWSDoctorTests(unittest.TestCase):
         self.assertEqual(by_id["ecs_service_ready"].status, "pass")
         self.assertEqual(by_id["alb_ready"].status, "pass")
         self.assertEqual(by_id["cloudfront_ready"].status, "pass")
+        create_adapters.assert_called_once()
 
 
 if __name__ == "__main__":
