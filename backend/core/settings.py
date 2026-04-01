@@ -102,17 +102,22 @@ class MissingOpenAIAPIKeyError(MissingRealtimeProviderAPIKeyError):
         RuntimeError.__init__(self, message)
 
 
-def load_environment_files(backend_env_path: Path | None = None) -> None:
+def load_environment_files(
+    backend_env_path: Path | None = None,
+    *,
+    discover_secondary_env: bool = True,
+) -> None:
     primary_env_path = (backend_env_path or _BACKEND_ENV_PATH).resolve()
     load_dotenv(dotenv_path=primary_env_path)
 
     secondary_env_path: Path | None = None
-    discovered = find_dotenv(usecwd=True)
-    if discovered:
-        secondary_env_path = Path(discovered).resolve()
-        load_dotenv(dotenv_path=secondary_env_path)
-    else:
-        load_dotenv()
+    if discover_secondary_env:
+        discovered = find_dotenv(usecwd=True)
+        if discovered:
+            secondary_env_path = Path(discovered).resolve()
+            load_dotenv(dotenv_path=secondary_env_path)
+        else:
+            load_dotenv()
 
     # Keep an internal hint for resolving relative extension paths from env.
     if secondary_env_path is not None and secondary_env_path.is_file():
