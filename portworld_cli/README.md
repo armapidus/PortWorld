@@ -183,12 +183,12 @@ The bare install snippet shown on TestPyPI may be incomplete if not every transi
 
 ## Production Caution
 
-The managed cloud workflows are usable, but some infrastructure defaults are still MVP-oriented:
+The managed cloud workflows are supported, but some infrastructure defaults still favor bring-up over locked-down internet posture:
 
 - AWS one-click deploy currently provisions RDS with public accessibility and broad ingress
 - Azure one-click deploy currently provisions PostgreSQL with public access
 
-Treat those defaults as validation-oriented until production hardening is complete.
+Review and harden those defaults before exposing a deployment to the public internet.
 
 ## More Documentation
 

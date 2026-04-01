@@ -1,228 +1,164 @@
+# PortWorld
 
-<p> <img width="7173" height="1758" alt="Associer@3x" src="https://github.com/user-attachments/assets/f65cca33-ff43-47fc-bb5f-96af42dd660d" />
+PortWorld is an open-source runtime for voice-and-vision assistants connected to the real world.
+The supported public slice today is:
 
-<p align="center">
-  <b>Open-source platform that connects in one-click AI solution to the real world. Smart glasses, the new voice and vision interface.</b>
-</p>
+- a FastAPI backend for realtime sessions, memory, and provider routing
+- the `portworld` CLI for local bootstrap, self-hosting, and managed deploy workflows
+- an iOS app that connects a self-hosted PortWorld backend to Meta smart glasses
 
-<p align="center">
-  <b>PortWorld combines an iOS glasses client with a FastAPI backend for voice + vision + tool orchestration. You own the domain logic and prompts; PortWorld provides the runtime, transport, and integration surface.</b>
-</p>
+## Status
 
+PortWorld is shipped as a stable public `v0.x` project.
+The supported surfaces are usable today, but the repository is still under active improvement.
 
+- Stable first-class surfaces: `backend/`, `portworld_cli/`, `portworld_shared/`, `IOS/`
+- Supported but still hardening: managed cloud deploy defaults and public-facing operator docs
+- Not part of the public supported surface: old experimental/internal materials that are no longer tracked in the repo
 
+## Who This Repo Is For
 
-## Highlights
+- operators who want to run PortWorld locally or on managed cloud targets
+- contributors working on the backend, CLI, or iOS app
+- teams building a self-hosted assistant flow around PortWorld's runtime and provider integrations
 
-- Voice in with Voxtral-compatible STT.
-- Vision/video understanding with Nemotron-compatible endpoints (NVIDIA GPU BREV Deployments and OpenAI API Compatible.
-- Agent presets + runtime overrides
-- Realtime voice session relay over `WS /ws/session` with backend-managed memory and vision integration.
-- iOS app (`PortWorld`) with "test backend" flow for end-to-end smoke testing.
+## Minimum Requirements
 
-## Table Of Contents
+### Backend and CLI
 
-- [Architecture](#architecture)
-- [Repository Layout](#repository-layout)
-- [Quick Start (5 Minutes)](#quick-start-5-minutes)
-- [iOS Setup (Simulator + Real iPhone)](#ios-setup-simulator--real-iphone)
-- [Run End-to-End Test From The App](#run-end-to-end-test-from-the-app)
-- [Backend API Surface](#backend-api-surface)
-- [Troubleshooting](#troubleshooting)
-- [Security Notes](#security-notes)
-- [Community](#community)
-- [Legal And Provenance](#legal-and-provenance)
-- [Releases](#releases)
-- [Additional Docs](#additional-docs)
+- macOS or Linux
+- Python 3.11+
+- Docker and Docker Compose for the default local operator path
+- Node.js/npm/npx only when using Node-based MCP extensions outside the published/container path
 
-## Architecture
+### iOS
 
-1. Glasses + iOS app capture audio/video/photo context.
-2. Backend resolves runtime profile, selected agent, and provider routing.
-3. Main LLM generates response using transcript + visual context + optional tools.
-4. TTS endpoint streams assistant audio back to the client.
+- iPhone-focused app targeting iOS 17.0+
+- Xcode with iOS 17 support
+- a reachable PortWorld backend for meaningful runtime validation
 
-### MistralAI Worldwide Hackathon Architecture Example
+## Supported Workflows
 
-<img width="2600" height="1200" alt="image" src="https://github.com/user-attachments/assets/b025ab6a-47a9-420f-ae9e-288207df02d7" />
+### 1. Default public operator path
 
-## Repository Layout
-
-- `backend/`: active backend runtime (FastAPI, realtime session relay, memory, tooling, deploy support).
-- `IOS/`: iOS client app (`PortWorld`) for Meta Wearables DAT integration.
-
-## Quick Start (5 Minutes)
-
-### 1) Clone And Install
+This is the fastest working path for someone who wants to run PortWorld locally without developing the repo itself.
 
 ```bash
-git clone https://github.com/armapidus/PortWorld.git
+curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/portworld/PortWorld/main/install.sh | bash
+portworld init
+cd ~/.portworld/stacks/default
+docker compose up -d
+portworld doctor --target local
+portworld status
+```
+
+### 2. Source-checkout contributor path
+
+Use this when you are editing PortWorld itself.
+
+```bash
+git clone https://github.com/portworld/PortWorld.git
 cd PortWorld
-
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -U pip
-pip install -r backend/requirements.txt
+pipx install . --force
+portworld init
 ```
 
-### 2) Configure Backend Environment
+### 3. Backend-only contributor path
+
+This is the fastest working backend path from a repo checkout.
 
 ```bash
+git clone https://github.com/portworld/PortWorld.git
+cd PortWorld
 cp backend/.env.example backend/.env
+docker compose up --build
+curl http://127.0.0.1:8080/livez
 ```
 
-Update `backend/.env` with your keys (minimum required):
+`backend/.env.example` is the canonical environment reference.
+At minimum, set the provider credentials required for the runtime mode you choose.
 
-- `OPENAI_API_KEY`
-- optional depending on enabled features:
-  - `VISION_PROVIDER_API_KEY` + `VISION_PROVIDER_BASE_URL`
-  - `TAVILY_API_KEY`
-  - `BACKEND_BEARER_TOKEN` (required for production profile)
-
-### 3) Run Backend
+### 4. iOS contributor path
 
 ```bash
-python -m backend.cli serve
-```
-
-### 4) Smoke Test Backend
-
-```bash
-curl -sS http://127.0.0.1:8080/livez | jq
-```
-
-## iOS Setup (Simulator + Real iPhone)
-
-### 1) Open Project
-
-```bash
+git clone https://github.com/portworld/PortWorld.git
+cd PortWorld
+cp backend/.env.example backend/.env
+docker compose up --build
 open IOS/PortWorld.xcodeproj
 ```
 
-### 2) Configure Backend URL In `Info.plist`
+Then:
 
-Edit `SON_BACKEND_BASE_URL` in [`IOS/Info.plist`](IOS/Info.plist):
+1. Build the `PortWorld` scheme.
+2. Configure the backend base URL in the app or local config template.
+3. Validate backend setup in-app against the running local deployment.
 
-- iOS Simulator: `http://127.0.0.1:8080`
-- real iPhone: `http://<YOUR_MAC_LAN_IP>:8080`
+### 5. Managed deploys
 
-Get your Mac LAN IP:
+The public CLI supports these managed targets:
+
+- `gcp-cloud-run`
+- `aws-ecs-fargate`
+- `azure-container-apps`
+
+Readiness example:
 
 ```bash
-ipconfig getifaddr en0 || ipconfig getifaddr en1
+portworld doctor --target gcp-cloud-run --gcp-project <project> --gcp-region <region>
+portworld doctor --target aws-ecs-fargate --aws-region <region>
+portworld doctor --target azure-container-apps --azure-subscription <subscription> --azure-resource-group <resource-group> --azure-region <region>
 ```
 
-Keep default paths:
+Managed deploys are part of the supported surface, but some production hardening remains the operator's responsibility.
+Optional provider integrations are also part of the supported surface when configured through the documented provider IDs and required environment variables.
 
-- `SON_WS_PATH=/ws/session`
-- `SON_VISION_PATH=/vision/frame`
-- `SON_QUERY_PATH=/query`
+## Repository Layout
 
-### 3) Signing For Personal Team
+- `backend/`: active backend runtime, local self-hosting path, and provider/runtime configuration
+- `portworld_cli/`: public CLI/operator workflow
+- `portworld_shared/`: shared contracts used by the backend and CLI
+- `IOS/`: active iOS client app
+- `docs/operations/`: release and operator documentation
+- `docs/open-source/`: repository opening and publication checklist
+- `.github/`: CI, release automation, and contribution templates
 
-If you use a free/personal Apple team:
+## What Works Today
 
-1. `TARGETS > PortWorld > Signing & Capabilities`
-2. Enable `Automatically manage signing`
-3. Select your `Personal Team`
-4. Use a unique bundle id (for example `com.yourname.PortWorld`)
-5. Remove `Associated Domains` capability for local testing
-6. In `Build Settings`, clear `Code Signing Entitlements` if still pointing to `PortWorld.entitlements`
+- local backend self-hosting with documented health/readiness checks
+- published-workspace local operator flow through `portworld init`
+- managed deploy flows for GCP Cloud Run, AWS ECS/Fargate, and Azure Container Apps
+- optional provider integrations documented in `backend/README.md` and `portworld providers`
+- iOS onboarding, backend validation, and active Meta/glasses runtime path
+- released CLI installation through PyPI/TestPyPI, GitHub Releases, and the bootstrap installer
 
-### 4) Real iPhone Prerequisites
+## Major Limitations
 
-1. Enable iPhone Developer Mode:
-   - `Settings > Privacy & Security > Developer Mode`
-2. Keep iPhone and Mac on the same Wi-Fi.
-3. Allow local network access for PortWorld in iPhone settings.
+- provider credentials are required for meaningful runtime use; there is no no-key production path
+- managed deploy defaults still need explicit operator review before internet-facing production rollout
+- iOS runtime validation depends on a reachable backend and, for full product validation, supported Meta hardware/app setup
+- the shared iOS schemes do not currently provide a meaningful maintained Xcode test action
 
-## Run End-to-End Test From The App
-
-You can validate backend integration without glasses by using the built-in example media flow.
-
-1. Launch the app from Xcode (`Cmd+R`).
-2. Tap `TEST BACKEND (Example Media)`:
-   - available on Home screen
-   - available on Runtime setup screen
-3. Complete the built-in validation flow against your configured backend and confirm the app reaches the current backend endpoints successfully.
-
-Backend should report successful liveness on `GET /livez` and accept authenticated app traffic on the configured session and memory routes.
-
-## Backend API Surface
-
-- `GET /livez`
-- `GET /readyz`
-- `WS /ws/session`
-- `POST /vision/frame`
-- `GET /memory/user`
-- `PUT /memory/user`
-- `POST /memory/user/reset`
-- `GET /memory/export`
-- `GET /memory/sessions/{id}/status`
-- `POST /memory/sessions/{id}/reset`
-
-## Troubleshooting
-
-### `Connection refused` to backend URL
-
-Cause: app points to the wrong host/port or backend is not running.  
-Fix: set `SON_BACKEND_BASE_URL` to correct host/port.
-
-### `The Internet connection appears to be offline` with `Local network prohibited`
-
-Cause: iOS blocked local network permission.  
-Fix:
-
-1. `Settings > PortWorld > Local Network` -> enable.
-2. Reinstall app if needed to trigger permission prompt again.
-
-### Can open server in Safari but app still fails
-
-Check:
-
-- `SON_BACKEND_BASE_URL` is exactly correct.
-- iPhone and Mac are on same subnet.
-- backend running with `HOST=0.0.0.0`.
-
-### App call works but backend audio does not play
-
-Update to latest code on `main`.  
-`ExampleMediaPipelineTester` now requests `mp3_44100_128` and includes playback fallbacks.
-
-### `Invalid profile 'uRGB'` warnings
-
-Non-blocking image/profile warning in logs. Usually unrelated to network/audio flow.
-
-## Security Notes
-
-- Never commit real API keys to Git.
-- Use `.env` locally and rotate keys if accidentally shared.
-- Use `EDGE_API_KEY` when exposing backend beyond local/private network.
-
-## Community
+## Security And Community
 
 - Security policy: [SECURITY.md](SECURITY.md)
 - Contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Code of Conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- Open-source readiness checklist: [docs/open-source/OPEN_SOURCE_READINESS_CHECKLIST.md](docs/open-source/OPEN_SOURCE_READINESS_CHECKLIST.md)
 
-## Legal And Provenance
-
-- We only publish code and assets that maintainers have the right to redistribute.
-- Before release, verify third-party asset and snippet licenses (images, diagrams, screenshots, copied code/text).
-- Remove or replace material that cannot be redistributed under this repository license.
-- Keep model/provider names in docs as factual compatibility references, not endorsements.
+Do not post secrets, tokens, private URLs, or unredacted production logs in public issues.
 
 ## Releases
 
-- Changelog (canonical release history): [CHANGELOG.md](CHANGELOG.md)
-- GitHub Releases (tag artifacts and published notes): [Releases](https://github.com/portworld/PortWorld/releases)
+- Changelog: [CHANGELOG.md](CHANGELOG.md)
+- GitHub Releases: <https://github.com/portworld/PortWorld/releases>
+- CLI release process: [docs/operations/CLI_RELEASE_PROCESS.md](docs/operations/CLI_RELEASE_PROCESS.md)
 
-## Additional Docs
+## Additional Documentation
 
-- Backend details: [`backend/README.md`](backend/README.md)
-- CLI details: [`portworld_cli/README.md`](portworld_cli/README.md)
-- iOS details: [`IOS/README.md`](IOS/README.md)
-- Release process: [`docs/operations/CLI_RELEASE_PROCESS.md`](docs/operations/CLI_RELEASE_PROCESS.md)
+- Backend runtime: [backend/README.md](backend/README.md)
+- CLI/operator workflow: [portworld_cli/README.md](portworld_cli/README.md)
+- iOS app: [IOS/README.md](IOS/README.md)
 
 ## License
 

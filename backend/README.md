@@ -157,6 +157,12 @@ curl http://127.0.0.1:8080/livez
 
 `GET /livez` confirms process liveness only. It does not validate provider credentials or provider readiness.
 Use `/livez` for public and Cloud Run liveness checks.
+For readiness verification, call authenticated `/readyz`:
+
+```bash
+curl -H "Authorization: Bearer <token>" http://127.0.0.1:8080/readyz
+```
+
 Use `portworld ops check-config --full-readiness` for a stricter preflight that includes provider validation and a storage bootstrap probe.
 The legacy `python -m backend.cli check-config --full-readiness` path still works.
 
@@ -214,6 +220,12 @@ Set `BACKEND_PROFILE=production` to enforce the following at startup:
 | Variable | Description |
 |---|---|
 | `BACKEND_BEARER_TOKEN` | Required in production; all protected endpoints require `Authorization: Bearer <token>` |
+
+Minimum internet-exposed security baseline:
+
+- set explicit `CORS_ORIGINS` and `BACKEND_ALLOWED_HOSTS` values; do not use wildcard `*`
+- keep `BACKEND_ENABLE_IP_RATE_LIMITS=true`
+- do not expose `/readyz` probes without bearer auth
 
 **Storage backends**
 
