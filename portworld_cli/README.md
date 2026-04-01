@@ -1,46 +1,43 @@
 # PortWorld CLI
 
-`portworld` is the public setup, validation, deploy, and lifecycle CLI for PortWorld.
+`portworld` is the command-line interface for setting up PortWorld locally, validating environments, and deploying PortWorld to supported cloud targets.
 
-It supports two primary workflows:
+It supports two workflows:
 
-- operator path: a zero-clone published workspace backed by the released backend image
-- contributor path: a source checkout workflow for local development and repo-backed changes
+- published workspace: run PortWorld locally without cloning the repo
+- source checkout: work from a PortWorld repository clone for development
+
+Supported environments:
+
+- macOS and Linux
+- Python 3.11+
+- Docker for local published-workspace runs
 
 ## Install
 
-Public install path:
+Recommended install:
+
+```bash
+uv tool install portworld
+```
+
+Alternative install with `pipx`:
+
+```bash
+pipx install portworld
+```
+
+Convenience bootstrap installer:
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/portworld/PortWorld/main/install.sh | bash
 ```
 
-The bootstrap installs `uv` automatically, downloads Python 3.11+ when needed, and bootstraps
-Node.js/npm/npx in user space when needed for Node-based MCP stdio launchers. Published/container
-workspaces use the Node runtime baked into the backend image instead of depending on the host PATH.
+The bootstrap can install `uv`, provision Python 3.11+ when needed, and bootstrap Node.js tooling for MCP launchers.
 
-Manual fallback for a pinned release:
+## Quickstart
 
-```bash
-uv tool install "portworld==<version>"
-portworld init
-```
-
-TestPyPI beta validation:
-
-```bash
-pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "portworld==<version>"
-```
-
-```bash
-uv tool install --default-index https://test.pypi.org/simple --index https://pypi.org/simple "portworld==<version>"
-```
-
-The bare TestPyPI page snippet may fail because TestPyPI does not necessarily host every transitive dependency.
-
-## Operator Quickstart
-
-The default public path is the operator-friendly published workspace flow:
+The default public flow is a published workspace backed by a released backend image:
 
 ```bash
 portworld init
@@ -50,10 +47,10 @@ portworld doctor --target local
 portworld status
 ```
 
-`portworld init` now supports two interactive modes:
+`portworld init` supports two setup modes:
 
-- `quickstart` (default): minimal questions with safe defaults
-- `manual`: full explicit configuration flow
+- `quickstart`: minimal prompts with safe defaults
+- `manual`: full explicit setup flow
 
 You can force either mode:
 
@@ -62,34 +59,28 @@ portworld init --setup-mode quickstart
 portworld init --setup-mode manual
 ```
 
-This flow:
+This flow creates a local workspace, pins a released backend image, and lets you run PortWorld without cloning the repository.
 
-- creates a local published workspace
-- pins a released backend image
-- lets you run PortWorld locally without cloning the repo
-- uses the backend image as the runtime source of truth for Node MCP stdio prerequisites
+## Source Checkout Workflow
 
-Example extension manifests for the filesystem MCP server:
-
-- local/source runtime: [mcp-filesystem-local.extensions.json](/Users/pierrehaas/.codex/worktrees/30fa/PortWorld/docs/operations/examples/mcp-filesystem-local.extensions.json)
-- published/container runtime: [mcp-filesystem-published.extensions.json](/Users/pierrehaas/.codex/worktrees/30fa/PortWorld/docs/operations/examples/mcp-filesystem-published.extensions.json)
-
-## Contributor Path
-
-For a source checkout workflow, run from the repo root:
+Use a repo checkout when you are developing PortWorld itself:
 
 ```bash
 pipx install . --force
 portworld init
 ```
 
-Use this path when you are developing PortWorld itself or need repo-backed runtime artifacts.
+Source-checkout installs are intended for contributors, local development, and repo-backed changes.
 
-## Managed Deploy
+## Managed Cloud Deploys
 
-Managed targets (MVP): `gcp-cloud-run`, `aws-ecs-fargate`, `azure-container-apps`.
+Supported managed targets:
 
-Managed deploy examples:
+- `gcp-cloud-run`
+- `aws-ecs-fargate`
+- `azure-container-apps`
+
+Typical readiness and deploy flow:
 
 ```bash
 portworld doctor --target gcp-cloud-run --gcp-project <project> --gcp-region <region>
@@ -102,29 +93,7 @@ portworld doctor --target azure-container-apps --azure-subscription <subscriptio
 portworld deploy azure-container-apps --subscription <subscription> --resource-group <resource-group> --region <region> --cors-origins https://app.example.com
 ```
 
-Published workspaces can drive any managed target after initial target configuration.
-
-Managed storage shape for these targets:
-
-- object storage is the source of truth for memory files
-- Postgres remains for operational metadata (session/frame indexes) in the current MVP backend
-- `gcp-cloud-run`: Cloud Run + GCS + Cloud SQL Postgres
-- `aws-ecs-fargate`: ECS/Fargate + CloudFront + ALB + S3 + Postgres operational metadata
-- `azure-container-apps`: Container Apps + Blob Storage + Postgres operational metadata
-
-## Main Commands
-
-- `portworld init` initializes or refreshes a source checkout or published workspace
-- `portworld doctor` validates local or managed readiness
-- `portworld deploy` deploys PortWorld to a managed target
-- `portworld status` shows current workspace and deploy state
-- `portworld logs` reads managed deployment logs for GCP, AWS, and Azure
-- `portworld config` inspects or edits project configuration
-- `portworld providers` lists supported provider integrations
-- `portworld update` updates the CLI or redeploys the active managed target across GCP, AWS, and Azure
-- `portworld ops` runs lower-level backend operator tasks
-
-Managed target log commands:
+Managed log examples:
 
 ```bash
 portworld logs gcp-cloud-run --since 24h --limit 50
@@ -132,31 +101,63 @@ portworld logs aws-ecs-fargate --since 24h --limit 50
 portworld logs azure-container-apps --since 24h --limit 50
 ```
 
-`portworld update deploy` redeploys whichever managed target is currently active in workspace state/config.
+`portworld update deploy` redeploys the currently active managed target from workspace state and config.
 
-Current MVP hardening note:
+Current MVP hardening notes:
 
-- AWS one-click currently provisions RDS with public accessibility and broad ingress
-- Azure one-click currently provisions PostgreSQL with public access
-- keep these defaults for MVP validation only; tighten them before production use
+- AWS one-click deploy currently provisions RDS with public accessibility and broad ingress
+- Azure one-click deploy currently provisions PostgreSQL with public access
+- treat these defaults as validation-only until production hardening is complete
 
-## Updates
+## Main Commands
 
-For CLI updates:
+- `portworld init`: initialize or refresh a published workspace or source checkout
+- `portworld doctor`: validate local or managed readiness
+- `portworld deploy`: deploy PortWorld to a managed target
+- `portworld status`: inspect workspace and deploy state
+- `portworld logs`: read managed deployment logs
+- `portworld config`: inspect or edit project configuration
+- `portworld providers`: list supported providers
+- `portworld update`: upgrade the CLI or redeploy the active managed target
+- `portworld ops`: run lower-level operator tasks
+
+## Updating
+
+Upgrade an installed CLI:
 
 ```bash
 uv tool upgrade portworld
 ```
 
-You can also rerun the installer or pin a specific released version:
+Install a pinned release:
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/portworld/PortWorld/main/install.sh | bash -s -- --version <tag>
+uv tool install "portworld==<version>"
 ```
 
-## More Docs
+Run the bootstrap installer for a specific tag:
 
-- backend runtime and self-hosting details: `backend/README.md`
-- self-host quickstart and operator notes: `docs/operations/BACKEND_SELF_HOSTING.md`
-- release process and TestPyPI/PyPI notes: `docs/operations/CLI_RELEASE_PROCESS.md`
-- changelog and release history: `CHANGELOG.md`
+```bash
+curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/portworld/PortWorld/main/install.sh | bash -s -- --version v<version>
+```
+
+## TestPyPI
+
+For TestPyPI validation, use one of these commands:
+
+```bash
+pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "portworld==<version>"
+```
+
+```bash
+uv tool install --default-index https://test.pypi.org/simple --index https://pypi.org/simple "portworld==<version>"
+```
+
+The bare install snippet shown on TestPyPI may be incomplete because not every transitive dependency is necessarily hosted there.
+
+## More Documentation
+
+- Backend runtime and self-hosting: [backend/README.md](https://github.com/portworld/PortWorld/blob/main/backend/README.md)
+- Operator quickstart and self-hosting notes: [docs/operations/BACKEND_SELF_HOSTING.md](https://github.com/portworld/PortWorld/blob/main/docs/operations/BACKEND_SELF_HOSTING.md)
+- CLI release process: [docs/operations/CLI_RELEASE_PROCESS.md](https://github.com/portworld/PortWorld/blob/main/docs/operations/CLI_RELEASE_PROCESS.md)
+- Changelog: [CHANGELOG.md](https://github.com/portworld/PortWorld/blob/main/CHANGELOG.md)
