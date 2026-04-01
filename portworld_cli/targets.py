@@ -25,6 +25,7 @@ EXPOSED_MANAGED_TARGETS: tuple[str, ...] = (
 )
 
 STATUS_STATE_PATH_KEYS: dict[str, str] = {
+    # Preserve these JSON payload keys for compatibility with existing status consumers.
     TARGET_GCP_CLOUD_RUN: "gcp_cloud_run",
     TARGET_AWS_ECS_FARGATE: "aws_ecs_fargate",
     TARGET_AZURE_CONTAINER_APPS: "azure_container_apps",

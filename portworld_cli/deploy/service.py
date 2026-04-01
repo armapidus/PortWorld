@@ -15,6 +15,7 @@ from portworld_cli.deploy.config import (
     load_deploy_session,
     resolve_deploy_config,
 )
+from portworld_cli.deploy.gcp_errors import gcp_error_action, gcp_error_message
 from portworld_cli.deploy.reporting import (
     COMMAND_NAME,
     build_failure_result,
@@ -208,8 +209,8 @@ def run_deploy_gcp_cloud_run(
             if not build_result.ok:
                 raise DeployStageError(
                     stage="cloud_build",
-                    message=_gcp_error_message(build_result.error, "Cloud Build submission failed."),
-                    action=_gcp_error_action(build_result.error, "Inspect the Cloud Build error output and rerun deploy."),
+                    message=gcp_error_message(build_result.error, "Cloud Build submission failed."),
+                    action=gcp_error_action(build_result.error, "Inspect the Cloud Build error output and rerun deploy."),
                 )
             build_submission = build_result.value
             assert build_submission is not None
@@ -512,8 +513,8 @@ def _require_active_gcloud_account(*, adapters: GCPAdapters) -> str:
     if not probe.ok:
         raise DeployStageError(
             stage="prerequisite_validation",
-            message=_gcp_error_message(probe.error, "gcloud is not available."),
-            action=_gcp_error_action(
+            message=gcp_error_message(probe.error, "gcloud is not available."),
+            action=gcp_error_action(
                 probe.error,
                 "Install the Google Cloud SDK and make `gcloud` available on PATH.",
             ),
@@ -522,11 +523,11 @@ def _require_active_gcloud_account(*, adapters: GCPAdapters) -> str:
     if not account_result.ok:
         raise DeployStageError(
             stage="prerequisite_validation",
-            message=_gcp_error_message(
+            message=gcp_error_message(
                 account_result.error,
                 "Unable to determine the active gcloud account.",
             ),
-            action=_gcp_error_action(
+            action=gcp_error_action(
                 account_result.error,
                 "Run `gcloud auth login` and select the intended account.",
             ),
@@ -572,20 +573,6 @@ def _probe_liveness(service_url: str) -> bool:
     except Exception:
         return False
     return response.status_code == 200
-
-
-def _gcp_error_message(error: object | None, fallback: str) -> str:
-    message = getattr(error, "message", None)
-    if isinstance(message, str) and message.strip():
-        return message
-    return fallback
-
-
-def _gcp_error_action(error: object | None, fallback: str) -> str:
-    action = getattr(error, "action", None)
-    if isinstance(action, str) and action.strip():
-        return action
-    return fallback
 
 
 def _now_ms() -> int:

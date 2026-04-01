@@ -3,6 +3,8 @@ from __future__ import annotations
 import click
 
 
+# Temporary public compatibility surface for removed pre-provider-scoped secret flags.
+# Keep these migration errors stable through the first PyPI release, then revisit.
 def reject_legacy_secret_flag(
     _ctx: click.Context,
     param: click.Parameter,

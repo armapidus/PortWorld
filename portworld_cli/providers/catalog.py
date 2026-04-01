@@ -56,6 +56,7 @@ _DEFAULT_PROVIDER_IDS: dict[str, str] = {
     "vision": "mistral",
     "search": "tavily",
 }
+_CLOUD_PROVIDER_CAPABILITY_TAGS: tuple[str, ...] = ("deploy", "status", "logs", "update_deploy")
 
 
 def _merge_key_sets(*key_sets: tuple[str, ...]) -> tuple[str, ...]:
@@ -124,17 +125,37 @@ def _runtime_catalog_entries() -> tuple[ProviderCatalogEntry, ...]:
     return tuple(entries)
 
 
-PROVIDER_CATALOG: tuple[ProviderCatalogEntry, ...] = (
-    ProviderCatalogEntry(
-        id="gcp",
-        display_name="GCP Cloud Run",
+def _cloud_provider_entry(
+    *,
+    provider_id: str,
+    display_name: str,
+    summary: str,
+    alias: str,
+    required_cli: str,
+    setup_notes: tuple[str, ...],
+    command_paths: tuple[str, ...],
+) -> ProviderCatalogEntry:
+    return ProviderCatalogEntry(
+        id=provider_id,
+        display_name=display_name,
         kind="cloud",
+        summary=summary,
+        default=(provider_id == "gcp"),
+        aliases=(alias,),
+        capability_tags=_CLOUD_PROVIDER_CAPABILITY_TAGS,
+        supported_targets=(alias,),
+        required_clis=(required_cli,),
+        setup_notes=setup_notes,
+        command_paths=command_paths,
+    )
+
+PROVIDER_CATALOG: tuple[ProviderCatalogEntry, ...] = (
+    _cloud_provider_entry(
+        provider_id="gcp",
+        display_name="GCP Cloud Run",
         summary="Managed deployment path for PortWorld on Google Cloud Run.",
-        default=True,
-        aliases=("gcp-cloud-run",),
-        capability_tags=("deploy", "status", "logs", "update_deploy"),
-        supported_targets=("gcp-cloud-run",),
-        required_clis=("gcloud",),
+        alias="gcp-cloud-run",
+        required_cli="gcloud",
         setup_notes=(
             "Authenticate with `gcloud auth login` before managed commands.",
             "Set or pass the active project and Cloud Run region.",
@@ -148,16 +169,12 @@ PROVIDER_CATALOG: tuple[ProviderCatalogEntry, ...] = (
             "portworld update deploy",
         ),
     ),
-    ProviderCatalogEntry(
-        id="aws",
+    _cloud_provider_entry(
+        provider_id="aws",
         display_name="AWS ECS/Fargate",
-        kind="cloud",
         summary="Managed deployment path for PortWorld on AWS ECS/Fargate with CloudFront, ALB, S3 memory storage, and Postgres operational metadata.",
-        default=False,
-        aliases=("aws-ecs-fargate",),
-        capability_tags=("deploy", "status", "logs", "update_deploy"),
-        supported_targets=("aws-ecs-fargate",),
-        required_clis=("aws",),
+        alias="aws-ecs-fargate",
+        required_cli="aws",
         setup_notes=(
             "Configure AWS credentials with `aws configure` before managed commands.",
             "Default deploy provisions ECS/Fargate, CloudFront, ALB, ECR, S3, and RDS for a one-click managed path.",
@@ -171,16 +188,12 @@ PROVIDER_CATALOG: tuple[ProviderCatalogEntry, ...] = (
             "portworld update deploy",
         ),
     ),
-    ProviderCatalogEntry(
-        id="azure",
+    _cloud_provider_entry(
+        provider_id="azure",
         display_name="Azure Container Apps",
-        kind="cloud",
         summary="Managed deployment path for PortWorld on Azure Container Apps with Blob memory storage and Postgres operational metadata.",
-        default=False,
-        aliases=("azure-container-apps",),
-        capability_tags=("deploy", "status", "logs", "update_deploy"),
-        supported_targets=("azure-container-apps",),
-        required_clis=("az",),
+        alias="azure-container-apps",
+        required_cli="az",
         setup_notes=(
             "Authenticate with `az login` before managed commands.",
             "Default deploy provisions Container Apps, ACR, Blob storage, and PostgreSQL for a one-click managed path.",

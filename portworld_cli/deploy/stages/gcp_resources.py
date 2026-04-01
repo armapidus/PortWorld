@@ -4,6 +4,7 @@ import click
 
 from portworld_cli.context import CLIContext
 from portworld_cli.deploy.config import DeployStageError, ResolvedDeployConfig
+from portworld_cli.deploy.gcp_errors import gcp_error_action, gcp_error_message
 from portworld_cli.gcp import GCPAdapters, build_service_account_email
 from portworld_cli.ux.prompts import prompt_text
 
@@ -16,8 +17,8 @@ def ensure_required_apis(*, adapters: GCPAdapters, config: ResolvedDeployConfig,
     if not statuses_result.ok:
         raise DeployStageError(
             stage="api_enablement",
-            message=_gcp_error_message(statuses_result.error, "Unable to inspect required GCP APIs."),
-            action=_gcp_error_action(statuses_result.error, "Verify project access and retry."),
+            message=gcp_error_message(statuses_result.error, "Unable to inspect required GCP APIs."),
+            action=gcp_error_action(statuses_result.error, "Verify project access and retry."),
         )
     statuses = statuses_result.value or ()
     missing = [status.service_name for status in statuses if not status.enabled]
@@ -29,8 +30,8 @@ def ensure_required_apis(*, adapters: GCPAdapters, config: ResolvedDeployConfig,
         if not enable_result.ok:
             raise DeployStageError(
                 stage="api_enablement",
-                message=_gcp_error_message(enable_result.error, "Failed enabling required GCP APIs."),
-                action=_gcp_error_action(enable_result.error, "Enable the listed APIs and rerun deploy."),
+                message=gcp_error_message(enable_result.error, "Failed enabling required GCP APIs."),
+                action=gcp_error_action(enable_result.error, "Enable the listed APIs and rerun deploy."),
             )
         assert enable_result.value is not None
         return enable_result.value.resource
@@ -47,8 +48,8 @@ def ensure_runtime_service_account(*, adapters: GCPAdapters, config: ResolvedDep
     if not service_account_result.ok:
         raise DeployStageError(
             stage="service_account_setup",
-            message=_gcp_error_message(service_account_result.error, "Failed creating runtime service account."),
-            action=_gcp_error_action(service_account_result.error, "Verify IAM permissions and rerun deploy."),
+            message=gcp_error_message(service_account_result.error, "Failed creating runtime service account."),
+            action=gcp_error_action(service_account_result.error, "Verify IAM permissions and rerun deploy."),
         )
     service_account_email = build_service_account_email(
         account_id=account_id,
@@ -63,8 +64,8 @@ def ensure_runtime_service_account(*, adapters: GCPAdapters, config: ResolvedDep
         if not bind_result.ok:
             raise DeployStageError(
                 stage="service_account_setup",
-                message=_gcp_error_message(bind_result.error, f"Failed binding {role} to runtime service account."),
-                action=_gcp_error_action(bind_result.error, "Verify IAM permissions and rerun deploy."),
+                message=gcp_error_message(bind_result.error, f"Failed binding {role} to runtime service account."),
+                action=gcp_error_action(bind_result.error, "Verify IAM permissions and rerun deploy."),
             )
     return service_account_email
 
@@ -97,8 +98,8 @@ def ensure_artifact_repository(
     if not result.ok:
         raise DeployStageError(
             stage="artifact_registry_setup",
-            message=_gcp_error_message(result.error, "Failed creating Artifact Registry repository."),
-            action=_gcp_error_action(result.error, "Verify Artifact Registry permissions and retry."),
+            message=gcp_error_message(result.error, "Failed creating Artifact Registry repository."),
+            action=gcp_error_action(result.error, "Verify Artifact Registry permissions and retry."),
         )
     assert result.value is not None
     return result.value.resource
@@ -130,8 +131,8 @@ def ensure_gcs_bucket(
         ):
             raise DeployStageError(
                 stage="gcs_bucket_setup",
-                message=_gcp_error_message(error, "Failed creating or reusing the artifact bucket."),
-                action=_gcp_error_action(
+                message=gcp_error_message(error, "Failed creating or reusing the artifact bucket."),
+                action=gcp_error_action(
                     error,
                     "Provide --bucket with an alternative globally unique bucket name and retry.",
                 ),
@@ -160,8 +161,8 @@ def ensure_bucket_binding(
     if not result.ok:
         raise DeployStageError(
             stage="gcs_bucket_setup",
-            message=_gcp_error_message(result.error, "Failed binding bucket IAM role for the runtime service account."),
-            action=_gcp_error_action(result.error, "Verify bucket permissions and rerun deploy."),
+            message=gcp_error_message(result.error, "Failed binding bucket IAM role for the runtime service account."),
+            action=gcp_error_action(result.error, "Verify bucket permissions and rerun deploy."),
         )
 
 
@@ -177,16 +178,3 @@ def _runtime_service_account_id(service_name: str) -> str:
         account_id = (account_id + "-runtime")[:6]
     return account_id
 
-
-def _gcp_error_message(error: object | None, fallback: str) -> str:
-    message = getattr(error, "message", None)
-    if isinstance(message, str) and message.strip():
-        return message
-    return fallback
-
-
-def _gcp_error_action(error: object | None, fallback: str) -> str:
-    action = getattr(error, "action", None)
-    if isinstance(action, str) and action.strip():
-        return action
-    return fallback

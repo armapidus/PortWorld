@@ -11,6 +11,7 @@ from backend.core.provider_requirements import (
     resolve_selected_providers,
 )
 from portworld_cli.deploy.config import DeployStageError, DeployUsageError, ResolvedDeployConfig
+from portworld_cli.deploy.gcp_errors import gcp_error_action, gcp_error_message
 from portworld_cli.gcp import GCPAdapters
 
 
@@ -92,8 +93,8 @@ def ensure_core_secrets(
     if not bearer_secret_result.ok:
         raise DeployStageError(
             stage="secret_manager_setup",
-            message=_gcp_error_message(bearer_secret_result.error, "Unable to inspect bearer-token secret."),
-            action=_gcp_error_action(bearer_secret_result.error, "Verify Secret Manager access and rerun deploy."),
+            message=gcp_error_message(bearer_secret_result.error, "Unable to inspect bearer-token secret."),
+            action=gcp_error_action(bearer_secret_result.error, "Verify Secret Manager access and rerun deploy."),
         )
     bearer_token = (env_values.get("BACKEND_BEARER_TOKEN", "") or "").strip()
     if bearer_secret_result.value is None:
@@ -169,8 +170,8 @@ def _ensure_secret_exists(
     if not result.ok:
         raise DeployStageError(
             stage=stage,
-            message=_gcp_error_message(result.error, f"Failed creating secret {secret_name!r}."),
-            action=_gcp_error_action(result.error, "Verify Secret Manager permissions and rerun deploy."),
+            message=gcp_error_message(result.error, f"Failed creating secret {secret_name!r}."),
+            action=gcp_error_action(result.error, "Verify Secret Manager permissions and rerun deploy."),
         )
 
 
@@ -190,8 +191,8 @@ def _add_secret_version(
     if not result.ok:
         raise DeployStageError(
             stage=stage,
-            message=_gcp_error_message(result.error, f"Failed adding secret version for {secret_name!r}."),
-            action=_gcp_error_action(result.error, "Verify Secret Manager permissions and rerun deploy."),
+            message=gcp_error_message(result.error, f"Failed adding secret version for {secret_name!r}."),
+            action=gcp_error_action(result.error, "Verify Secret Manager permissions and rerun deploy."),
         )
 
 
@@ -207,16 +208,3 @@ def _generate_secure_token(*, length: int = 32) -> str:
 def _env_key_secret_suffix(env_key: str) -> str:
     return env_key.strip().lower().replace("_", "-")
 
-
-def _gcp_error_message(error: object | None, fallback: str) -> str:
-    message = getattr(error, "message", None)
-    if isinstance(message, str) and message.strip():
-        return message
-    return fallback
-
-
-def _gcp_error_action(error: object | None, fallback: str) -> str:
-    action = getattr(error, "action", None)
-    if isinstance(action, str) and action.strip():
-        return action
-    return fallback

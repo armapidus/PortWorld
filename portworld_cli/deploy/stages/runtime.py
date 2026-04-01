@@ -7,6 +7,7 @@ from typing import Any, Iterator
 
 from backend.core.provider_requirements import list_provider_requirements
 from portworld_cli.deploy.config import DeployStageError, ResolvedDeployConfig
+from portworld_cli.deploy.gcp_errors import gcp_error_action, gcp_error_message
 from portworld_cli.gcp import GCPAdapters, build_postgres_url
 
 
@@ -70,8 +71,8 @@ def ensure_cloud_sql(
     if not instance_result.ok:
         raise DeployStageError(
             stage="cloud_sql_setup",
-            message=_gcp_error_message(instance_result.error, "Failed creating Cloud SQL instance."),
-            action=_gcp_error_action(instance_result.error, "Verify Cloud SQL Admin permissions and retry."),
+            message=gcp_error_message(instance_result.error, "Failed creating Cloud SQL instance."),
+            action=gcp_error_action(instance_result.error, "Verify Cloud SQL Admin permissions and retry."),
         )
     assert instance_result.value is not None
     instance_ref = instance_result.value.resource
@@ -84,8 +85,8 @@ def ensure_cloud_sql(
     if not database_result.ok:
         raise DeployStageError(
             stage="cloud_sql_setup",
-            message=_gcp_error_message(database_result.error, "Failed creating Cloud SQL database."),
-            action=_gcp_error_action(database_result.error, "Verify Cloud SQL permissions and retry."),
+            message=gcp_error_message(database_result.error, "Failed creating Cloud SQL database."),
+            action=gcp_error_action(database_result.error, "Verify Cloud SQL permissions and retry."),
         )
 
     db_password = _generate_secure_token(length=24)
@@ -98,8 +99,8 @@ def ensure_cloud_sql(
     if not user_result.ok:
         raise DeployStageError(
             stage="cloud_sql_setup",
-            message=_gcp_error_message(user_result.error, "Failed creating or updating the Cloud SQL application user."),
-            action=_gcp_error_action(user_result.error, "Verify Cloud SQL permissions and retry."),
+            message=gcp_error_message(user_result.error, "Failed creating or updating the Cloud SQL application user."),
+            action=gcp_error_action(user_result.error, "Verify Cloud SQL permissions and retry."),
         )
 
     if not instance_ref.connection_name or not instance_ref.primary_ip_address:
@@ -110,8 +111,8 @@ def ensure_cloud_sql(
         if not refreshed.ok:
             raise DeployStageError(
                 stage="cloud_sql_setup",
-                message=_gcp_error_message(refreshed.error, "Failed refreshing Cloud SQL instance details."),
-                action=_gcp_error_action(refreshed.error, "Wait for the instance to finish provisioning and rerun deploy."),
+                message=gcp_error_message(refreshed.error, "Failed refreshing Cloud SQL instance details."),
+                action=gcp_error_action(refreshed.error, "Wait for the instance to finish provisioning and rerun deploy."),
             )
         if refreshed.value is not None:
             instance_ref = refreshed.value
@@ -246,8 +247,8 @@ def deploy_cloud_run_service(
     if not result.ok:
         raise DeployStageError(
             stage="cloud_run_deploy",
-            message=_gcp_error_message(result.error, "Cloud Run deploy failed."),
-            action=_gcp_error_action(result.error, "Inspect the Cloud Run error output and rerun deploy."),
+            message=gcp_error_message(result.error, "Cloud Run deploy failed."),
+            action=gcp_error_action(result.error, "Inspect the Cloud Run error output and rerun deploy."),
         )
     assert result.value is not None
     return result.value
@@ -291,8 +292,8 @@ def _ensure_secret_exists(
     if not result.ok:
         raise DeployStageError(
             stage=stage,
-            message=_gcp_error_message(result.error, f"Failed creating secret {secret_name!r}."),
-            action=_gcp_error_action(result.error, "Verify Secret Manager permissions and rerun deploy."),
+            message=gcp_error_message(result.error, f"Failed creating secret {secret_name!r}."),
+            action=gcp_error_action(result.error, "Verify Secret Manager permissions and rerun deploy."),
         )
 
 
@@ -312,8 +313,8 @@ def _add_secret_version(
     if not result.ok:
         raise DeployStageError(
             stage=stage,
-            message=_gcp_error_message(result.error, f"Failed adding secret version for {secret_name!r}."),
-            action=_gcp_error_action(result.error, "Verify Secret Manager permissions and rerun deploy."),
+            message=gcp_error_message(result.error, f"Failed adding secret version for {secret_name!r}."),
+            action=gcp_error_action(result.error, "Verify Secret Manager permissions and rerun deploy."),
         )
 
 
@@ -328,20 +329,6 @@ def _generate_secure_token(*, length: int = 32) -> str:
     import secrets
 
     return secrets.token_urlsafe(length)
-
-
-def _gcp_error_message(error: object | None, fallback: str) -> str:
-    message = getattr(error, "message", None)
-    if isinstance(message, str) and message.strip():
-        return message
-    return fallback
-
-
-def _gcp_error_action(error: object | None, fallback: str) -> str:
-    action = getattr(error, "action", None)
-    if isinstance(action, str) and action.strip():
-        return action
-    return fallback
 
 
 @contextmanager
