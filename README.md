@@ -17,7 +17,7 @@
 - Voice in with Voxtral-compatible STT.
 - Vision/video understanding with Nemotron-compatible endpoints (NVIDIA GPU BREV Deployments and OpenAI API Compatible.
 - Agent presets + runtime overrides
-- Live token-to-audio relay (`/v1/pipeline/tts-stream`) with ElevenLabs streaming.
+- Realtime voice session relay over `WS /ws/session` with backend-managed memory and vision integration.
 - iOS app (`PortWorld`) with "test backend" flow for end-to-end smoke testing.
 
 ## Table Of Contents
@@ -89,7 +89,6 @@ python -m backend.cli serve
 
 ```bash
 curl -sS http://127.0.0.1:8080/livez | jq
-curl -sS http://127.0.0.1:8080/healthz | jq
 ```
 
 ## iOS Setup (Simulator + Real iPhone)
@@ -145,22 +144,22 @@ You can validate backend integration without glasses by using the built-in examp
 2. Tap `TEST BACKEND (Example Media)`:
    - available on Home screen
    - available on Runtime setup screen
-3. App posts to `POST /v1/pipeline/tts-stream` and plays returned audio.
+3. Complete the built-in validation flow against your configured backend and confirm the app reaches the current backend endpoints successfully.
 
-Backend should log a `POST /v1/pipeline/tts-stream` request.
+Backend should report successful liveness on `GET /livez` and accept authenticated app traffic on the configured session and memory routes.
 
 ## Backend API Surface
 
-- `GET /healthz`
-- `GET /v1/debug/endpoints`
-- `GET /v1/agents`
-- `GET /v1/config/quickstart-template`
-- `GET /v1/config/runtime-template`
-- `POST /v1/pipeline`
-- `POST /v1/pipeline/tts-stream`
-- `POST /v1/elevenlabs/stream`
-- `POST /v1/debug/ios/simulate`
-- `POST /v1/debug/vision/frame`
+- `GET /livez`
+- `GET /readyz`
+- `WS /ws/session`
+- `POST /vision/frame`
+- `GET /memory/user`
+- `PUT /memory/user`
+- `POST /memory/user/reset`
+- `GET /memory/export`
+- `GET /memory/sessions/{id}/status`
+- `POST /memory/sessions/{id}/reset`
 
 ## Troubleshooting
 

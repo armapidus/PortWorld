@@ -125,7 +125,7 @@ Expected response:
 ```
 
 `GET /livez` confirms process liveness only. It does not validate upstream provider credentials or provider readiness.
-Use `GET /livez` for public and Cloud Run liveness checks. `GET /healthz` remains available as a compatibility alias for older local tooling.
+Use `GET /livez` for public and Cloud Run liveness checks.
 Use `portworld ops check-config --full-readiness` for a stricter preflight that includes provider validation and a storage bootstrap probe. The legacy `python3 -m backend.cli check-config --full-readiness` path still works.
 
 Optional operator CLI commands from the repo root:
@@ -226,8 +226,6 @@ Route reference:
 
 - `GET /livez`
   - public liveness endpoint for local and Cloud Run probes
-- `GET /healthz`
-  - compatibility liveness alias retained for older tooling
 - `GET /memory/user`
   - read the current persistent user-memory scaffold or populated memory
 - `GET /readyz`
@@ -268,13 +266,13 @@ Use the public CLI for managed deploy targets:
 
 ```bash
 portworld doctor --target gcp-cloud-run --gcp-project <project> --gcp-region <region>
-portworld deploy gcp-cloud-run --project <project> --region <region> --cors-origins https://app.example.com
+portworld deploy gcp-cloud-run --project <project> --region <region>
 
 portworld doctor --target aws-ecs-fargate --aws-region <region>
-portworld deploy aws-ecs-fargate --region <region> --cors-origins https://app.example.com
+portworld deploy aws-ecs-fargate --region <region>
 
 portworld doctor --target azure-container-apps --azure-subscription <subscription> --azure-resource-group <resource-group> --azure-region <region>
-portworld deploy azure-container-apps --subscription <subscription> --resource-group <resource-group> --region <region> --cors-origins https://app.example.com
+portworld deploy azure-container-apps --subscription <subscription> --resource-group <resource-group> --region <region>
 
 portworld logs gcp-cloud-run --since 24h --limit 50
 portworld logs aws-ecs-fargate --since 24h --limit 50

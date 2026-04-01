@@ -87,13 +87,13 @@ For managed deploys in the current MVP, use one of the public managed targets:
 
 ```bash
 portworld doctor --target gcp-cloud-run --gcp-project <project> --gcp-region <region>
-portworld deploy gcp-cloud-run --project <project> --region <region> --cors-origins https://app.example.com
+portworld deploy gcp-cloud-run --project <project> --region <region>
 
 portworld doctor --target aws-ecs-fargate --aws-region <region>
-portworld deploy aws-ecs-fargate --region <region> --cors-origins https://app.example.com
+portworld deploy aws-ecs-fargate --region <region>
 
 portworld doctor --target azure-container-apps --azure-subscription <subscription> --azure-resource-group <resource-group> --azure-region <region>
-portworld deploy azure-container-apps --subscription <subscription> --resource-group <resource-group> --region <region> --cors-origins https://app.example.com
+portworld deploy azure-container-apps --subscription <subscription> --resource-group <resource-group> --region <region>
 ```
 
 Repeat deploys reuse the target state file under `.portworld/state/` after explicit flags and current cloud CLI auth/config:
@@ -281,9 +281,9 @@ portworld doctor --target aws-ecs-fargate --aws-region <region>
 portworld doctor --target azure-container-apps --azure-subscription <subscription> --azure-resource-group <resource-group> --azure-region <region>
 
 # Deploy to a managed target
-portworld deploy gcp-cloud-run --project <project> --region <region> --cors-origins https://app.example.com
-portworld deploy aws-ecs-fargate --region <region> --cors-origins https://app.example.com
-portworld deploy azure-container-apps --subscription <subscription> --resource-group <resource-group> --region <region> --cors-origins https://app.example.com
+portworld deploy gcp-cloud-run --project <project> --region <region>
+portworld deploy aws-ecs-fargate --region <region>
+portworld deploy azure-container-apps --subscription <subscription> --resource-group <resource-group> --region <region>
 
 # Read managed deployment logs
 portworld logs gcp-cloud-run --since 24h --limit 50
