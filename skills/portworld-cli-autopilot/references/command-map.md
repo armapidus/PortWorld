@@ -23,7 +23,7 @@ uv run python -m portworld_cli.main config show
 ## Managed readiness checks
 
 ```bash
-uv run python -m portworld_cli.main doctor --target gcp-cloud-run --project <project> --region <region>
+uv run python -m portworld_cli.main doctor --target gcp-cloud-run --gcp-project <project> --gcp-region <region>
 uv run python -m portworld_cli.main doctor --target aws-ecs-fargate --aws-region <region>
 uv run python -m portworld_cli.main doctor --target azure-container-apps --azure-subscription <sub> --azure-resource-group <rg> --azure-region <region>
 ```

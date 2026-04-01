@@ -267,7 +267,7 @@ curl -X POST http://127.0.0.1:8080/memory/sessions/<session_id>/reset
 Use the public CLI for managed deploy targets:
 
 ```bash
-portworld doctor --target gcp-cloud-run --project <project> --region <region>
+portworld doctor --target gcp-cloud-run --gcp-project <project> --gcp-region <region>
 portworld deploy gcp-cloud-run --project <project> --region <region> --cors-origins https://app.example.com
 
 portworld doctor --target aws-ecs-fargate --aws-region <region>

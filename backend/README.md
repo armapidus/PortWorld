@@ -86,7 +86,7 @@ Run the contributor/source path from the repo root. The operator path is the def
 For managed deploys in the current MVP, use one of the public managed targets:
 
 ```bash
-portworld doctor --target gcp-cloud-run --project <project> --region <region>
+portworld doctor --target gcp-cloud-run --gcp-project <project> --gcp-region <region>
 portworld deploy gcp-cloud-run --project <project> --region <region> --cors-origins https://app.example.com
 
 portworld doctor --target aws-ecs-fargate --aws-region <region>
@@ -276,7 +276,7 @@ portworld init
 
 # Validate local or managed readiness
 portworld doctor --target local
-portworld doctor --target gcp-cloud-run --project <project> --region <region>
+portworld doctor --target gcp-cloud-run --gcp-project <project> --gcp-region <region>
 portworld doctor --target aws-ecs-fargate --aws-region <region>
 portworld doctor --target azure-container-apps --azure-subscription <subscription> --azure-resource-group <resource-group> --azure-region <region>
 

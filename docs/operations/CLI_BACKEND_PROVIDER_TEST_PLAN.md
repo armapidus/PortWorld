@@ -372,7 +372,7 @@ Only do this after source and published testing are already green.
 For the currently tracked GCP target, run:
 
 ```bash
-portworld doctor --target gcp-cloud-run --project <project> --region <region>
+portworld doctor --target gcp-cloud-run --gcp-project <project> --gcp-region <region>
 portworld status
 ```
 

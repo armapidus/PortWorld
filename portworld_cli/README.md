@@ -92,7 +92,7 @@ Managed targets (MVP): `gcp-cloud-run`, `aws-ecs-fargate`, `azure-container-apps
 Managed deploy examples:
 
 ```bash
-portworld doctor --target gcp-cloud-run --project <project> --region <region>
+portworld doctor --target gcp-cloud-run --gcp-project <project> --gcp-region <region>
 portworld deploy gcp-cloud-run --project <project> --region <region> --cors-origins https://app.example.com
 
 portworld doctor --target aws-ecs-fargate --aws-region <region>
