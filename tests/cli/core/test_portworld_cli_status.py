@@ -106,7 +106,9 @@ class StatusCrossTargetTests(unittest.TestCase):
             )
 
             self.assertTrue(result.ok)
-            self.assertTrue(result.message.startswith("Summary\n"))
+            self.assertIn("active_target", result.message or "")
+            self.assertIn("service_url", result.message or "")
+            self.assertNotIn("workspace_root", result.message or "")
             self.assertEqual(result.data["active_target"], TARGET_GCP_CLOUD_RUN)
             self.assertEqual(result.data["deploy"]["source"], "state")
             self.assertEqual(
@@ -193,7 +195,7 @@ class StatusCrossTargetTests(unittest.TestCase):
 
         self.assertTrue(result.ok)
         self.assertEqual(result.data["node_mcp"]["backend"]["missing_binaries"], ["npx"])
-        self.assertIn("backend_node_mcp_missing_binaries: npx", result.message)
+        self.assertIn("backend node tooling missing: npx", result.message)
 
     @mock.patch("portworld_cli.services.status.service.build_health_summary")
     @mock.patch("portworld_cli.services.status.service.collect_local_runtime_status", return_value=None)

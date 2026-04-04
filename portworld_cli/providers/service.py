@@ -25,10 +25,12 @@ def run_providers_list(cli_context: CLIContext) -> CommandResult:
     for kind, entries in grouped.items():
         lines = [kind]
         for entry in entries:
-            default_label = "yes" if entry.default else "no"
-            lines.append(
-                f"- {entry.id}: {entry.summary} (default: {default_label})"
-            )
+            label = entry.display_name
+            if entry.default:
+                label = f"{label} [Default]"
+            lines.append(f"- {label}")
+            lines.append(f"  id: {entry.id}")
+            lines.append(f"  {entry.summary}")
         sections.append("\n".join(lines))
 
     return CommandResult(

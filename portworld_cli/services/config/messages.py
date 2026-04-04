@@ -167,23 +167,28 @@ def build_config_show_message(
     active_workspace_root: Path | None,
 ) -> str:
     pairs: list[tuple[str, object | None]] = [
-        ("workspace_root", workspace_root),
-        ("project_root", project_root),
-        ("workspace_resolution_source", workspace_resolution_source),
-        ("active_workspace_root", active_workspace_root),
         ("project_mode", project_config.project_mode),
         ("runtime_source", project_config.runtime_source or "unset"),
-        ("configured_runtime_source", configured_runtime_source or "legacy_default"),
-        ("effective_runtime_source", effective_runtime_source),
-        ("runtime_source_derived_from_legacy", runtime_source_derived_from_legacy),
         ("cloud_provider", project_config.cloud_provider or "none"),
-        ("realtime_provider", project_config.providers.realtime.provider),
-        ("vision_memory", project_config.providers.vision.enabled),
-        ("vision_provider", project_config.providers.vision.provider),
-        ("realtime_tooling", project_config.providers.tooling.enabled),
-        ("web_search_provider", project_config.providers.tooling.web_search_provider),
-        ("backend_profile", normalize_backend_profile(project_config.security.backend_profile)),
         ("preferred_target", project_config.deploy.preferred_target or "none"),
+        ("realtime", _humanize_realtime_provider(project_config.providers.realtime.provider)),
+        (
+            "vision_memory",
+            _humanize_optional_provider(
+                enabled=project_config.providers.vision.enabled,
+                provider_id=project_config.providers.vision.provider,
+                suffix="Vision",
+            ),
+        ),
+        (
+            "realtime_tooling",
+            _humanize_optional_provider(
+                enabled=project_config.providers.tooling.enabled,
+                provider_id=project_config.providers.tooling.web_search_provider,
+                suffix="Search",
+            ),
+        ),
+        ("backend_profile", normalize_backend_profile(project_config.security.backend_profile)),
         ("gcp_project_id", project_config.deploy.gcp_cloud_run.project_id or "unset"),
         ("gcp_region", project_config.deploy.gcp_cloud_run.region or "unset"),
         ("gcp_service_name", project_config.deploy.gcp_cloud_run.service_name),
@@ -203,27 +208,14 @@ def build_config_show_message(
             project_config.deploy.azure_container_apps.environment_name or "unset",
         ),
         ("azure_app_name", project_config.deploy.azure_container_apps.app_name or "unset"),
-        ("managed_target_execution", "target-aware deploy/doctor support active"),
-        ("env_path", env_path),
-        ("derived_from_legacy", derived_from_legacy),
-        ("required_provider_secrets", _required_secret_status(secret_readiness)),
-        (
-            "missing_provider_secrets",
-            ",".join(secret_readiness.missing_required_secret_keys) or "none",
-        ),
-        ("required_provider_config", _required_config_status(secret_readiness)),
-        (
-            "missing_provider_config",
-            ",".join(secret_readiness.missing_required_config_keys) or "none",
-        ),
+        ("credentials", _humanize_credentials(secret_readiness)),
         ("bearer_token", presence_label(secret_readiness.bearer_token_present)),
     ]
     if effective_runtime_source == RUNTIME_SOURCE_PUBLISHED:
-        pairs[20:20] = [
+        pairs[10:10] = [
             ("published_release_tag", project_config.deploy.published_runtime.release_tag or "unset"),
             ("published_image_ref", project_config.deploy.published_runtime.image_ref or "unset"),
             ("published_host_port", project_config.deploy.published_runtime.host_port),
-            ("compose_path", workspace_root / "docker-compose.yml"),
         ]
     return format_key_value_lines(*pairs)
 
@@ -244,3 +236,55 @@ def _required_config_status(secret_readiness: SecretReadiness) -> str:
     for key in secret_readiness.required_config_keys:
         parts.append(f"{key}:{presence_label(secret_readiness.config_key_presence.get(key))}")
     return ",".join(parts)
+
+
+def _humanize_credentials(secret_readiness: SecretReadiness) -> str:
+    if secret_readiness.missing_required_secret_keys or secret_readiness.missing_required_config_keys:
+        missing = [
+            *_humanize_required_keys(secret_readiness.missing_required_secret_keys),
+            *_humanize_required_keys(secret_readiness.missing_required_config_keys),
+        ]
+        return f"missing {', '.join(missing)}"
+    return "all required credentials present"
+
+
+def _humanize_required_keys(keys: tuple[str, ...]) -> list[str]:
+    labels: list[str] = []
+    for key in keys:
+        if "TAVILY" in key:
+            labels.append("Tavily search credentials")
+        elif key.startswith("VISION_"):
+            labels.append("vision provider credentials")
+        elif "OPENAI" in key:
+            labels.append("OpenAI credentials")
+        elif "GEMINI" in key:
+            labels.append("Gemini credentials")
+        else:
+            labels.append(key.lower())
+    deduped: list[str] = []
+    for label in labels:
+        if label not in deduped:
+            deduped.append(label)
+    return deduped
+
+
+def _humanize_realtime_provider(provider_id: str) -> str:
+    if provider_id == "gemini_live":
+        return "Gemini Live"
+    if provider_id == "openai":
+        return "OpenAI Realtime"
+    return provider_id.replace("_", " ").title()
+
+
+def _humanize_optional_provider(
+    *,
+    enabled: bool,
+    provider_id: str | None,
+    suffix: str,
+) -> str:
+    if not enabled or provider_id is None:
+        return "disabled"
+    label = provider_id.replace("_", " ").title()
+    if suffix.lower() not in label.lower():
+        label = f"{label} {suffix}"
+    return f"enabled ({label})"

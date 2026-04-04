@@ -66,53 +66,34 @@ def run_status(cli_context: CLIContext) -> CommandResult:
     )
     extension_lines = [
         message,
-        "",
-        "Extensions",
-        f"manifest_path: {extensions_summary.manifest_path}",
-        f"python_install_dir: {extensions_summary.python_install_dir}",
-        f"installed_count: {extensions_summary.installed_count}",
-        f"enabled_count: {extensions_summary.enabled_count}",
-        f"error: {extensions_summary.error or 'none'}",
-        (
-            f"host_node_mcp_enabled_count: {host_node_launcher_readiness.enabled_count}"
-            if host_node_launcher_readiness.error is None
-            else f"host_node_mcp_error: {host_node_launcher_readiness.error}"
-        ),
-        (
-            "host_node_mcp_missing_binaries: none"
-            if host_node_launcher_readiness.error is not None
-            or not host_node_launcher_readiness.missing_binaries
-            else (
-                "host_node_mcp_missing_binaries: "
-                f"{', '.join(host_node_launcher_readiness.missing_binaries)}"
-            )
-        ),
-        (
-            "host_node_mcp_next_step: none"
-            if not host_node_launcher_readiness.bootstrap_required
-            else (
-                "host_node_mcp_next_step: run `bash install.sh --no-init --non-interactive`, "
-                "then rerun `portworld extensions doctor`"
-            )
-        ),
     ]
+    extension_warnings: list[str] = []
+    if extensions_summary.error:
+        extension_warnings.append(f"extensions: {extensions_summary.error}")
+    if host_node_launcher_readiness.error:
+        extension_warnings.append(f"host node tooling: {host_node_launcher_readiness.error}")
+    elif host_node_launcher_readiness.missing_binaries:
+        extension_warnings.append(
+            "host node tooling missing: " + ", ".join(host_node_launcher_readiness.missing_binaries)
+        )
+    elif host_node_launcher_readiness.bootstrap_required:
+        extension_warnings.append(
+            "host node tooling bootstrap required: run `bash install.sh --no-init --non-interactive`, then rerun `portworld extensions doctor`"
+        )
     if backend_node_launcher_readiness is not None:
+        if backend_node_launcher_readiness.error:
+            extension_warnings.append(f"backend node tooling: {backend_node_launcher_readiness.error}")
+        elif backend_node_launcher_readiness.missing_binaries:
+            extension_warnings.append(
+                "backend node tooling missing: "
+                + ", ".join(backend_node_launcher_readiness.missing_binaries)
+            )
+    if extension_warnings:
         extension_lines.extend(
             [
-                (
-                    f"backend_node_mcp_enabled_count: {backend_node_launcher_readiness.enabled_count}"
-                    if backend_node_launcher_readiness.error is None
-                    else f"backend_node_mcp_error: {backend_node_launcher_readiness.error}"
-                ),
-                (
-                    "backend_node_mcp_missing_binaries: none"
-                    if backend_node_launcher_readiness.error is not None
-                    or not backend_node_launcher_readiness.missing_binaries
-                    else (
-                        "backend_node_mcp_missing_binaries: "
-                        f"{', '.join(backend_node_launcher_readiness.missing_binaries)}"
-                    )
-                ),
+                "",
+                "Warnings",
+                *[f"{warning}" for warning in extension_warnings],
             ]
         )
     message = "\n".join(extension_lines)

@@ -275,181 +275,50 @@ def build_status_message(
     health: HealthSummary,
     secret_readiness: SecretReadiness,
 ) -> str:
-    sections: list[str] = []
-    summary_pairs: list[tuple[str, object | None]] = [
+    pairs: list[tuple[str, object | None]] = [
         ("active_target", active_target or "none"),
-        ("deploy_source", "state" if last_known_payload else "none"),
-        ("live_status", live_status.status),
-        ("livez", health.livez),
-        ("readyz", health.readyz),
+        ("service_url", _status_service_url(last_known_payload, live_status)),
+        ("deploy", "configured" if last_known_payload else "not_deployed"),
+        ("live_service", _humanize_live_status(live_status)),
+        ("health", _humanize_health(health)),
+        ("credentials", _humanize_credentials(secret_readiness)),
         (
-            "missing_provider_secrets",
-            ",".join(secret_readiness.missing_required_secret_keys) or "none",
+            "realtime",
+            _humanize_realtime_provider(secret_readiness.selected_realtime_provider),
         ),
         (
-            "missing_provider_config",
-            ",".join(secret_readiness.missing_required_config_keys) or "none",
-        ),
-    ]
-    if last_known_payload:
-        summary_pairs.extend(
-            [
-                ("service_name", last_known_payload.get("service_name")),
-                ("service_url", last_known_payload.get("service_url")),
-            ]
-        )
-    sections.append("\n".join(["Summary", format_key_value_lines(*summary_pairs)]))
-
-    project_pairs: list[tuple[str, object | None]] = [
-        ("workspace_root", session.config_session.workspace_root),
-        (
-            "project_root",
-            None
-            if session.config_session.project_paths is None
-            else session.config_session.project_paths.project_root,
-        ),
-        (
-            "workspace_resolution_source",
-            session.config_session.workspace_resolution_source,
-        ),
-        ("active_workspace_root", session.config_session.active_workspace_root),
-        ("project_mode", session.project_config.project_mode),
-        ("runtime_source", session.project_config.runtime_source or "unset"),
-        (
-            "effective_runtime_source",
-            session.config_session.effective_runtime_source,
-        ),
-        ("cloud_provider", session.project_config.cloud_provider or "none"),
-        ("active_target", active_target or "none"),
-        ("derived_from_legacy", session.derived_from_legacy),
-    ]
-    if session.config_session.effective_runtime_source == "published":
-        project_pairs[5:5] = [
-            (
-                "release_tag",
-                session.project_config.deploy.published_runtime.release_tag,
+            "vision_memory",
+            _humanize_optional_provider(
+                enabled=secret_readiness.selected_vision_provider is not None,
+                provider_id=secret_readiness.selected_vision_provider,
+                suffix="Vision",
             ),
-            ("image_ref", session.project_config.deploy.published_runtime.image_ref),
-            ("host_port", session.project_config.deploy.published_runtime.host_port),
-        ]
-    sections.append(
-        "\n".join(
-            [
-                "Project",
-                format_key_value_lines(*project_pairs),
-            ]
-        )
-    )
-
-    if local_runtime is not None:
-        sections.append(
-            "\n".join(
-                [
-                    "Local runtime",
-                    format_key_value_lines(
-                        ("available", local_runtime.available),
-                        ("running", local_runtime.running),
-                        ("state", local_runtime.state),
-                        ("health", local_runtime.health),
-                        ("container_name", local_runtime.container_name),
-                        ("warning", local_runtime.warning),
-                    ),
-                ]
-            )
-        )
-
-    deploy_pairs = [("source", "state" if last_known_payload else "none")]
-    if last_known_payload:
-        deploy_pairs.extend(
-            [
-                ("project_id", last_known_payload.get("project_id")),
-                ("region", last_known_payload.get("region")),
-                ("service_name", last_known_payload.get("service_name")),
-                ("runtime_source", last_known_payload.get("runtime_source")),
-                ("image_source_mode", last_known_payload.get("image_source_mode")),
-                ("published_release_tag", last_known_payload.get("published_release_tag")),
-                ("published_image_ref", last_known_payload.get("published_image_ref")),
-                ("service_url", last_known_payload.get("service_url")),
-                ("image", last_known_payload.get("image")),
-                ("last_deployed_at", format_epoch_ms(last_known_payload.get("last_deployed_at_ms"))),
-            ]
-        )
-    sections.append("\n".join(["Last deploy", format_key_value_lines(*deploy_pairs)]))
-
-    by_target_pairs: list[tuple[str, object | None]] = []
-    for target, target_summary in deploy_by_target.items():
-        source = target_summary.get("source")
-        last_known = target_summary.get("last_known")
-        service_url = None
-        if isinstance(last_known, dict):
-            service_url = last_known.get("service_url")
-        if service_url:
-            by_target_pairs.append((target, f"{source} ({service_url})"))
-        else:
-            by_target_pairs.append((target, source))
-    sections.append("\n".join(["Deploy by target", format_key_value_lines(*by_target_pairs)]))
-
-    live_pairs = [
-        ("attempted", live_status.attempted),
-        ("live_status", live_status.status),
-        ("warning_code", live_status.warning_code),
-        ("warning_message", live_status.warning_message),
+        ),
+        (
+            "realtime_tooling",
+            _humanize_optional_provider(
+                enabled=secret_readiness.selected_search_provider is not None,
+                provider_id=secret_readiness.selected_search_provider,
+                suffix="Search",
+            ),
+        ),
+        ("bearer_token", presence_label(secret_readiness.bearer_token_present)),
     ]
-    if live_status.service_ref is not None:
-        live_pairs.extend(
-            [
-                ("service_exists", live_status.service_exists),
-                ("service_name", live_status.service_ref.service_name),
-                ("service_url", live_status.service_ref.url),
-                ("image", live_status.service_ref.image),
-                ("service_account_email", live_status.service_ref.service_account_email),
-                ("ingress", live_status.service_ref.ingress),
-            ]
-        )
-    elif live_status.service_exists is not None:
-        live_pairs.append(("service_exists", live_status.service_exists))
-    sections.append("\n".join(["Live service", format_key_value_lines(*live_pairs)]))
 
-    sections.append(
-        "\n".join(
+    warning_pairs = _build_status_warning_pairs(
+        live_status=live_status,
+        local_runtime=local_runtime,
+        health=health,
+        secret_readiness=secret_readiness,
+    )
+    if warning_pairs:
+        return "\n\n".join(
             [
-                "Health",
-                format_key_value_lines(
-                    ("source", health.source),
-                    ("livez", health.livez),
-                    ("readyz", health.readyz),
-                ),
+                format_key_value_lines(*pairs),
+                "Warnings\n" + format_key_value_lines(*warning_pairs),
             ]
         )
-    )
-
-    sections.append(
-        "\n".join(
-            [
-                "Secrets",
-                format_key_value_lines(
-                    ("required_provider_secrets", required_secret_status(secret_readiness)),
-                    (
-                        "missing_provider_secrets",
-                        ",".join(secret_readiness.missing_required_secret_keys) or "none",
-                    ),
-                    ("required_provider_config", required_config_status(secret_readiness)),
-                    (
-                        "missing_provider_config",
-                        ",".join(secret_readiness.missing_required_config_keys) or "none",
-                    ),
-                    (
-                        "selected_realtime_provider",
-                        secret_readiness.selected_realtime_provider,
-                    ),
-                    ("selected_vision_provider", secret_readiness.selected_vision_provider or "disabled"),
-                    ("selected_search_provider", secret_readiness.selected_search_provider or "disabled"),
-                    ("bearer_token", presence_label(secret_readiness.bearer_token_present)),
-                ),
-            ]
-        )
-    )
-    return "\n\n".join(sections)
+    return format_key_value_lines(*pairs)
 
 
 def format_epoch_ms(value: object) -> str | None:
@@ -457,6 +326,122 @@ def format_epoch_ms(value: object) -> str | None:
         return None
     timestamp = datetime.fromtimestamp(value / 1000, tz=UTC)
     return timestamp.isoformat().replace("+00:00", "Z")
+
+
+def _status_service_url(
+    last_known_payload: dict[str, object] | None,
+    live_status: LiveServiceStatus,
+) -> str | None:
+    if live_status.service_ref is not None and live_status.service_ref.url:
+        return live_status.service_ref.url
+    if last_known_payload is None:
+        return None
+    value = last_known_payload.get("service_url")
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _humanize_live_status(live_status: LiveServiceStatus) -> str:
+    if live_status.status == "ok":
+        return "reachable"
+    if live_status.status == "not_found":
+        return "not found"
+    if live_status.status == "error":
+        return "check failed"
+    if live_status.status == "skipped":
+        return "not checked"
+    return live_status.status
+
+
+def _humanize_health(health: HealthSummary) -> str:
+    if health.livez == "pass" and health.readyz == "pass":
+        return "healthy"
+    if health.livez == "unknown" and health.readyz == "unknown":
+        return "unknown"
+    parts: list[str] = []
+    if health.livez != "pass":
+        parts.append(f"livez={health.livez}")
+    if health.readyz != "pass":
+        parts.append(f"readyz={health.readyz}")
+    return ", ".join(parts) or "healthy"
+
+
+def _humanize_credentials(secret_readiness: SecretReadiness) -> str:
+    if secret_readiness.missing_required_secret_keys or secret_readiness.missing_required_config_keys:
+        missing = [
+            *_humanize_required_keys(secret_readiness.missing_required_secret_keys),
+            *_humanize_required_keys(secret_readiness.missing_required_config_keys),
+        ]
+        return f"missing {', '.join(missing)}"
+    return "all required credentials present"
+
+
+def _humanize_required_keys(keys: tuple[str, ...]) -> list[str]:
+    labels: list[str] = []
+    for key in keys:
+        if "TAVILY" in key:
+            labels.append("Tavily search credentials")
+        elif key.startswith("VISION_"):
+            labels.append("vision provider credentials")
+        elif "OPENAI" in key:
+            labels.append("OpenAI credentials")
+        elif "GEMINI" in key:
+            labels.append("Gemini credentials")
+        else:
+            labels.append(key.lower())
+    deduped: list[str] = []
+    for label in labels:
+        if label not in deduped:
+            deduped.append(label)
+    return deduped
+
+
+def _humanize_realtime_provider(provider_id: str) -> str:
+    if provider_id == "gemini_live":
+        return "Gemini Live"
+    if provider_id == "openai":
+        return "OpenAI Realtime"
+    return provider_id.replace("_", " ").title()
+
+
+def _humanize_optional_provider(
+    *,
+    enabled: bool,
+    provider_id: str | None,
+    suffix: str,
+) -> str:
+    if not enabled or provider_id is None:
+        return "disabled"
+    label = provider_id.replace("_", " ").title()
+    if suffix.lower() not in label.lower():
+        label = f"{label} {suffix}"
+    return f"enabled ({label})"
+
+
+def _build_status_warning_pairs(
+    *,
+    live_status: LiveServiceStatus,
+    local_runtime: LocalRuntimeStatus | None,
+    health: HealthSummary,
+    secret_readiness: SecretReadiness,
+) -> list[tuple[str, object | None]]:
+    warnings: list[tuple[str, object | None]] = []
+    if live_status.warning_message:
+        warnings.append(("live_service", live_status.warning_message))
+    if health.livez != "pass":
+        warnings.append(("livez", health.livez))
+    if health.readyz != "pass":
+        warnings.append(("readyz", health.readyz))
+    if local_runtime is not None and local_runtime.warning:
+        warnings.append(("local_runtime", local_runtime.warning))
+    if secret_readiness.missing_required_secret_keys:
+        warnings.append(
+            ("missing_credentials", ", ".join(_humanize_required_keys(secret_readiness.missing_required_secret_keys)))
+        )
+    if secret_readiness.missing_required_config_keys:
+        warnings.append(
+            ("missing_config", ", ".join(_humanize_required_keys(secret_readiness.missing_required_config_keys)))
+        )
+    return warnings
 
 
 def presence_label(is_present: bool | None) -> str:
