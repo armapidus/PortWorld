@@ -20,10 +20,12 @@ from portworld_cli.azure.stages import (
 from portworld_cli.azure.stages.config import ResolvedAzureDeployConfig
 from portworld_cli.context import CLIContext
 from portworld_cli.deploy.config import DeployStageError, DeployUsageError, load_deploy_session
+from portworld_cli.deploy.reporting import humanize_stage_label
 from portworld_cli.deploy_state import DeployState, write_deploy_state
 from portworld_cli.output import CommandResult
 from portworld_cli.targets import TARGET_AZURE_CONTAINER_APPS
 from portworld_cli.ux.prompts import prompt_confirm
+from portworld_cli.ux.progress import ProgressReporter
 
 COMMAND_NAME = "portworld deploy azure-container-apps"
 
@@ -34,26 +36,34 @@ def run_deploy_azure_container_apps(
 ) -> CommandResult:
     resources: dict[str, object] = {}
     stage_records: list[dict[str, object]] = []
+    progress = ProgressReporter(cli_context)
     try:
-        session = load_deploy_session(cli_context)
-        if not azure_cli_available():
-            raise DeployStageError(
-                stage="prerequisite_validation",
-                message="Azure CLI is not installed or not on PATH.",
-                action="Install Azure CLI and retry deploy.",
-            )
+        with progress.stage(humanize_stage_label("repo_config_discovery")):
+            session = load_deploy_session(cli_context)
+            stage_records.append(stage_ok("repo_config_discovery", "Resolved workspace and loaded CLI config inputs."))
+
+        with progress.stage(humanize_stage_label("prerequisite_validation")):
+            if not azure_cli_available():
+                raise DeployStageError(
+                    stage="prerequisite_validation",
+                    message="Azure CLI is not installed or not on PATH.",
+                    action="Install Azure CLI and retry deploy.",
+                )
+            stage_records.append(stage_ok("prerequisite_validation", "Validated Azure CLI availability."))
 
         adapters = AzureAdapters.create()
         env_values = OrderedDict(session.merged_env_values().items())
-        config = resolve_azure_deploy_config(
-            cli_context,
-            options=options,
-            env_values=env_values,
-            project_config=session.project_config,
-            runtime_source=session.effective_runtime_source,
-            project_root=(None if session.project_paths is None else session.project_paths.project_root),
-            adapters=adapters,
-        )
+        with progress.stage(humanize_stage_label("parameter_resolution")):
+            config = resolve_azure_deploy_config(
+                cli_context,
+                options=options,
+                env_values=env_values,
+                project_config=session.project_config,
+                runtime_source=session.effective_runtime_source,
+                project_root=(None if session.project_paths is None else session.project_paths.project_root),
+                adapters=adapters,
+            )
+            stage_records.append(stage_ok("parameter_resolution", "Resolved deploy parameters."))
 
         _confirm_mutations(cli_context, config)
         stage_records.append(stage_ok("mutation_plan", "Confirmed deploy mutations."))
@@ -79,6 +89,7 @@ def run_deploy_azure_container_apps(
             env_values=env_values,
             stage_records=stage_records,
             adapters=adapters,
+            progress=progress,
         )
         fqdn = deploy_result.fqdn
         if fqdn is None:
@@ -89,42 +100,46 @@ def run_deploy_azure_container_apps(
             )
         service_url = f"https://{fqdn}"
 
-        livez_ok = probe_livez(service_url)
-        ws_ok = probe_ws(service_url, env_values.get("BACKEND_BEARER_TOKEN", ""))
-        if not livez_ok:
-            raise DeployStageError(
-                stage="post_deploy_validation",
-                message="Container Apps endpoint did not return 200 from /livez.",
-                action="Verify app revision health and ingress configuration.",
-            )
-        if not ws_ok:
-            raise DeployStageError(
-                stage="post_deploy_validation",
-                message="Container Apps endpoint did not complete /ws/session websocket handshake.",
-                action="Verify ingress websocket behavior and Authorization header handling.",
-            )
+        with progress.stage(humanize_stage_label("post_deploy_validation")):
+            livez_ok = probe_livez(service_url)
+            ws_ok = probe_ws(service_url, env_values.get("BACKEND_BEARER_TOKEN", ""))
+            if not livez_ok:
+                raise DeployStageError(
+                    stage="post_deploy_validation",
+                    message="Container Apps endpoint did not return 200 from /livez.",
+                    action="Verify app revision health and ingress configuration.",
+                )
+            if not ws_ok:
+                raise DeployStageError(
+                    stage="post_deploy_validation",
+                    message="Container Apps endpoint did not complete /ws/session websocket handshake.",
+                    action="Verify ingress websocket behavior and Authorization header handling.",
+                )
+            stage_records.append(stage_ok("post_deploy_validation", "Validated /livez and /ws/session endpoint reachability."))
 
-        write_deploy_state(
-            session.workspace_paths.state_file_for_target(TARGET_AZURE_CONTAINER_APPS),
-            DeployState(
-                project_id=config.subscription_id,
-                region=config.region,
-                service_name=config.app_name,
-                runtime_source=config.runtime_source,
-                image_source_mode=config.image_source_mode,
-                artifact_repository=config.acr_repo,
-                artifact_repository_base=config.acr_repo,
-                cloud_sql_instance=None,
-                database_name=config.postgres_database_name,
-                bucket_name=config.blob_container,
-                image=deploy_result.image_uri,
-                published_release_tag=config.published_release_tag,
-                published_image_ref=config.published_image_ref,
-                service_url=service_url,
-                service_account_email=None,
-                last_deployed_at_ms=now_ms(),
-            ),
-        )
+        with progress.stage(humanize_stage_label("state_write")):
+            write_deploy_state(
+                session.workspace_paths.state_file_for_target(TARGET_AZURE_CONTAINER_APPS),
+                DeployState(
+                    project_id=config.subscription_id,
+                    region=config.region,
+                    service_name=config.app_name,
+                    runtime_source=config.runtime_source,
+                    image_source_mode=config.image_source_mode,
+                    artifact_repository=config.acr_repo,
+                    artifact_repository_base=config.acr_repo,
+                    cloud_sql_instance=None,
+                    database_name=config.postgres_database_name,
+                    bucket_name=config.blob_container,
+                    image=deploy_result.image_uri,
+                    published_release_tag=config.published_release_tag,
+                    published_image_ref=config.published_image_ref,
+                    service_url=service_url,
+                    service_account_email=None,
+                    last_deployed_at_ms=now_ms(),
+                ),
+            )
+            stage_records.append(stage_ok("state_write", "Wrote Azure deploy state."))
 
         resources.update(
             {
@@ -228,6 +243,8 @@ def run_deploy_azure_container_apps(
             },
             exit_code=1,
         )
+    finally:
+        progress.close()
 
 
 def _confirm_mutations(cli_context: CLIContext, config: ResolvedAzureDeployConfig) -> None:

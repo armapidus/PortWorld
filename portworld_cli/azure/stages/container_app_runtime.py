@@ -15,6 +15,8 @@ from portworld_cli.azure.stages.config import ResolvedAzureDeployConfig
 from portworld_cli.azure.stages.database import ensure_postgres_and_database_url
 from portworld_cli.azure.stages.shared import stage_ok, to_azure_secret_name
 from portworld_cli.deploy.config import DeployStageError
+from portworld_cli.deploy.reporting import humanize_stage_label
+from portworld_cli.ux.progress import ProgressReporter
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,47 +32,53 @@ def run_azure_deploy_mutations(
     env_values: OrderedDict[str, str],
     stage_records: list[dict[str, object]],
     adapters: AzureAdapters,
+    progress: ProgressReporter,
 ) -> AzureDeployMutationResult:
-    set_subscription = adapters.compute.run_json(["account", "set", "--subscription", config.subscription_id])
-    if not set_subscription.ok:
-        raise DeployStageError(
-            stage="subscription_set",
-            message=set_subscription.message or "Unable to set active Azure subscription.",
-            action="Verify subscription id and az login context.",
+    with progress.stage(humanize_stage_label("azure_subscription_set")):
+        set_subscription = adapters.compute.run_json(["account", "set", "--subscription", config.subscription_id])
+        if not set_subscription.ok:
+            raise DeployStageError(
+                stage="subscription_set",
+                message=set_subscription.message or "Unable to set active Azure subscription.",
+                action="Verify subscription id and az login context.",
+            )
+        stage_records.append(stage_ok("subscription_set", f"Using subscription `{config.subscription_id}`."))
+
+    with progress.stage(humanize_stage_label("azure_platform_setup")):
+        ensure_resource_group(config, stage_records=stage_records, adapters=adapters)
+        ensure_resource_provider(
+            config,
+            stage_records=stage_records,
+            adapters=adapters,
+            namespace="Microsoft.App",
         )
-    stage_records.append(stage_ok("subscription_set", f"Using subscription `{config.subscription_id}`."))
+        ensure_resource_provider(
+            config,
+            stage_records=stage_records,
+            adapters=adapters,
+            namespace="Microsoft.ContainerRegistry",
+        )
+        ensure_resource_provider(
+            config,
+            stage_records=stage_records,
+            adapters=adapters,
+            namespace="Microsoft.Storage",
+        )
+        ensure_resource_provider(
+            config,
+            stage_records=stage_records,
+            adapters=adapters,
+            namespace="Microsoft.DBforPostgreSQL",
+        )
 
-    ensure_resource_group(config, stage_records=stage_records, adapters=adapters)
-    ensure_resource_provider(
-        config,
-        stage_records=stage_records,
-        adapters=adapters,
-        namespace="Microsoft.App",
-    )
-    ensure_resource_provider(
-        config,
-        stage_records=stage_records,
-        adapters=adapters,
-        namespace="Microsoft.ContainerRegistry",
-    )
-    ensure_resource_provider(
-        config,
-        stage_records=stage_records,
-        adapters=adapters,
-        namespace="Microsoft.Storage",
-    )
-    ensure_resource_provider(
-        config,
-        stage_records=stage_records,
-        adapters=adapters,
-        namespace="Microsoft.DBforPostgreSQL",
-    )
+    with progress.stage(humanize_stage_label("azure_registry_setup")):
+        acr_server, acr_username, acr_password = ensure_acr(config, stage_records=stage_records, adapters=adapters)
+        image_uri = f"{acr_server}/{config.acr_repo}:{config.image_tag}"
 
-    acr_server, acr_username, acr_password = ensure_acr(config, stage_records=stage_records, adapters=adapters)
-    image_uri = f"{acr_server}/{config.acr_repo}:{config.image_tag}"
-    ensure_storage(config, stage_records=stage_records, adapters=adapters)
-    ensure_container_apps_environment(config, stage_records=stage_records, adapters=adapters)
-    database_url = ensure_postgres_and_database_url(config, stage_records=stage_records, adapters=adapters)
+    with progress.stage(humanize_stage_label("azure_runtime_infra")):
+        ensure_storage(config, stage_records=stage_records, adapters=adapters)
+        ensure_container_apps_environment(config, stage_records=stage_records, adapters=adapters)
+        database_url = ensure_postgres_and_database_url(config, stage_records=stage_records, adapters=adapters)
 
     current_app = adapters.compute.run_json(
         [
@@ -95,100 +103,102 @@ def run_azure_deploy_mutations(
     env_args = [f"{key}={value}" for key, value in plain_env.items()]
     env_args.extend(f"{key}=secretref:{secret_name}" for key, secret_name in secret_env.items())
 
-    if app_exists:
-        set_container_app_registry_credentials(
-            config=config,
-            acr_server=acr_server,
-            acr_username=acr_username,
-            acr_password=acr_password,
-            adapters=adapters,
-        )
-        update_args = [
-            "containerapp",
-            "update",
-            "--subscription",
-            config.subscription_id,
-            "--resource-group",
-            config.resource_group,
-            "--name",
-            config.app_name,
-            "--image",
-            image_uri,
-        ]
-        if secret_env:
-            update_args.extend(
-                [
-                    "--secrets",
-                    *[
-                        f"{secret_name}={runtime_env[key]}"
-                        for key, secret_name in secret_env.items()
-                    ],
-                ]
+    with progress.stage(humanize_stage_label("azure_container_app_deploy")):
+        if app_exists:
+            set_container_app_registry_credentials(
+                config=config,
+                acr_server=acr_server,
+                acr_username=acr_username,
+                acr_password=acr_password,
+                adapters=adapters,
             )
-        if env_args:
-            update_args.extend(["--set-env-vars", *env_args])
-        update_response = adapters.compute.run_json(update_args)
-        if not update_response.ok:
-            raise DeployStageError(
-                stage="container_app_update",
-                message=update_response.message or "Unable to update Azure Container App.",
-                action="Verify app permissions and containerapp update arguments.",
-            )
-        stage_records.append(stage_ok("container_app_update", f"Updated image to `{image_uri}`."))
-    else:
-        create_args = [
-            "containerapp",
-            "create",
-            "--subscription",
-            config.subscription_id,
-            "--resource-group",
-            config.resource_group,
-            "--name",
-            config.app_name,
-            "--environment",
-            config.environment_name,
-            "--image",
-            image_uri,
-            "--ingress",
-            "external",
-            "--target-port",
-            "8080",
-            "--registry-server",
-            acr_server,
-            "--registry-username",
-            acr_username,
-            "--registry-password",
-            acr_password,
-        ]
-        if secret_env:
-            create_args.extend(
-                [
-                    "--secrets",
-                    *[
-                        f"{secret_name}={runtime_env[key]}"
-                        for key, secret_name in secret_env.items()
-                    ],
-                ]
-            )
-        if env_args:
-            create_args.extend(["--env-vars", *env_args])
-        create_response = adapters.compute.run_json(create_args)
-        if not create_response.ok:
-            raise DeployStageError(
-                stage="container_app_create",
-                message=create_response.message or "Unable to create Azure Container App.",
-                action="Verify Container Apps permissions, image accessibility, and environment setup.",
-            )
-        stage_records.append(stage_ok("container_app_create", f"Created Container App `{config.app_name}`."))
+            update_args = [
+                "containerapp",
+                "update",
+                "--subscription",
+                config.subscription_id,
+                "--resource-group",
+                config.resource_group,
+                "--name",
+                config.app_name,
+                "--image",
+                image_uri,
+            ]
+            if secret_env:
+                update_args.extend(
+                    [
+                        "--secrets",
+                        *[
+                            f"{secret_name}={runtime_env[key]}"
+                            for key, secret_name in secret_env.items()
+                        ],
+                    ]
+                )
+            if env_args:
+                update_args.extend(["--set-env-vars", *env_args])
+            update_response = adapters.compute.run_json(update_args)
+            if not update_response.ok:
+                raise DeployStageError(
+                    stage="container_app_update",
+                    message=update_response.message or "Unable to update Azure Container App.",
+                    action="Verify app permissions and containerapp update arguments.",
+                )
+            stage_records.append(stage_ok("container_app_update", f"Updated image to `{image_uri}`."))
+        else:
+            create_args = [
+                "containerapp",
+                "create",
+                "--subscription",
+                config.subscription_id,
+                "--resource-group",
+                config.resource_group,
+                "--name",
+                config.app_name,
+                "--environment",
+                config.environment_name,
+                "--image",
+                image_uri,
+                "--ingress",
+                "external",
+                "--target-port",
+                "8080",
+                "--registry-server",
+                acr_server,
+                "--registry-username",
+                acr_username,
+                "--registry-password",
+                acr_password,
+            ]
+            if secret_env:
+                create_args.extend(
+                    [
+                        "--secrets",
+                        *[
+                            f"{secret_name}={runtime_env[key]}"
+                            for key, secret_name in secret_env.items()
+                        ],
+                    ]
+                )
+            if env_args:
+                create_args.extend(["--env-vars", *env_args])
+            create_response = adapters.compute.run_json(create_args)
+            if not create_response.ok:
+                raise DeployStageError(
+                    stage="container_app_create",
+                    message=create_response.message or "Unable to create Azure Container App.",
+                    action="Verify Container Apps permissions, image accessibility, and environment setup.",
+                )
+            stage_records.append(stage_ok("container_app_create", f"Created Container App `{config.app_name}`."))
 
-    fqdn = wait_for_container_app_readiness(config=config, adapters=adapters)
-    if fqdn is None:
-        raise DeployStageError(
-            stage="container_app_wait_ready",
-            message="Container App did not report a ready external revision in time.",
-            action="Inspect Container App revisions and ingress settings.",
-        )
-    stage_records.append(stage_ok("container_app_wait_ready", f"Container App is ready at `{fqdn}`."))
+    with progress.stage(humanize_stage_label("azure_rollout_wait")):
+        fqdn = wait_for_container_app_readiness(config=config, adapters=adapters)
+        if fqdn is None:
+            raise DeployStageError(
+                stage="container_app_wait_ready",
+                message="Container App did not report a ready external revision in time.",
+                action="Inspect Container App revisions and ingress settings.",
+            )
+        stage_records.append(stage_ok("container_app_wait_ready", f"Container App is ready at `{fqdn}`."))
     return AzureDeployMutationResult(fqdn=fqdn, database_url=database_url, image_uri=image_uri)
 
 

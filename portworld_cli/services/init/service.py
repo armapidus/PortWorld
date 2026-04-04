@@ -1068,7 +1068,6 @@ def _run_managed_deploy(
         yes=True,
         project_root_override=workspace_root or cli_context.project_root_override,
     )
-    _emit_progress(cli_context, f"Starting managed deploy for {options.target}.")
     if options.target == TARGET_GCP_CLOUD_RUN:
         result = run_deploy_gcp_cloud_run(
             execution_context,

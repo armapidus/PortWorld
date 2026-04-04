@@ -22,6 +22,7 @@ from portworld_cli.deploy.reporting import (
     build_feature_summary,
     build_next_steps,
     build_success_message,
+    humanize_stage_label,
     record_stage,
 )
 from portworld_cli.deploy.source import submit_source_build
@@ -55,6 +56,7 @@ from portworld_cli.workspace.project_config import (
 )
 from portworld_cli.services.config.errors import ConfigRuntimeError
 from portworld_cli.ux.prompts import prompt_confirm
+from portworld_cli.ux.progress import ProgressReporter
 from portworld_cli.workspace.discovery.paths import ProjectRootResolutionError
 from portworld_cli.workspace.state.state_store import CLIStateDecodeError, CLIStateTypeError
 
@@ -74,324 +76,340 @@ def run_deploy_gcp_cloud_run(
     stage_records: list[dict[str, object]] = []
     resources: dict[str, object] = {}
     checks: list[DiagnosticCheck] = []
+    progress = ProgressReporter(cli_context)
 
     try:
-        session = load_deploy_session(cli_context)
-        env_values = OrderedDict(session.merged_env_values().items())
-        project_config = session.project_config
-        remembered_state = DeployState.from_payload(session.remembered_deploy_state)
-        record_stage(
-            stage_records,
-            stage="repo_config_discovery",
-            message="Resolved workspace and loaded CLI config inputs.",
-            details={
-                "workspace_root": str(session.workspace_root),
-                "project_root": (
-                    None if session.project_paths is None else str(session.project_paths.project_root)
-                ),
-                "workspace_resolution_source": session.workspace_resolution_source,
-                "active_workspace_root": (
-                    None if session.active_workspace_root is None else str(session.active_workspace_root)
-                ),
-                "env_file": None if session.env_path is None else str(session.env_path),
-                "project_config_file": str(session.workspace_paths.project_config_file),
-                "state_file": str(session.workspace_paths.state_file_for_target(GCP_CLOUD_RUN_TARGET)),
-                "runtime_source": session.effective_runtime_source,
-            },
-        )
-
-        adapters = GCPAdapters.create()
-        active_account = _require_active_gcloud_account(adapters=adapters)
-        record_stage(
-            stage_records,
-            stage="prerequisite_validation",
-            message="Validated gcloud installation and authentication.",
-            details={"account": active_account},
-        )
-
-        config = resolve_deploy_config(
-            cli_context,
-            adapters=adapters,
-            env_values=env_values,
-            project_config=project_config,
-            remembered_state=remembered_state,
-            options=options,
-            runtime_source=session.effective_runtime_source,
-            project_root=(None if session.project_paths is None else session.project_paths.project_root),
-        )
-        resources.update(
-            {
-                "project_id": config.project_id,
-                "region": config.region,
-                "artifact_registry_repository": config.artifact_repository,
-                "cloud_sql_instance": config.sql_instance_name,
-                "database_name": config.database_name,
-                "bucket_name": config.bucket_name,
-            }
-        )
-        record_stage(
-            stage_records,
-            stage="parameter_resolution",
-            message="Resolved deploy parameters and production posture overrides.",
-            details={
-                "project_id": config.project_id,
-                "region": config.region,
-                "service_name": config.service_name,
-                "artifact_repository": config.artifact_repository,
-                "sql_instance_name": config.sql_instance_name,
-                "database_name": config.database_name,
-                "bucket_name": config.bucket_name,
-                "runtime_source": config.runtime_source,
-                "image_source_mode": config.image_source_mode,
-                "image_tag": config.image_tag,
-                "deploy_image_uri": config.deploy_image_uri,
-                "published_release_tag": config.published_release_tag,
-                "published_image_ref": config.published_image_ref,
-            },
-        )
-
-        _confirm_mutations(cli_context, config=config)
-
-        api_statuses = stage_ensure_required_apis(
-            adapters=adapters,
-            config=config,
-            required_services=REQUIRED_GCP_SERVICES,
-        )
-        record_stage(
-            stage_records,
-            stage="api_enablement",
-            message="Verified required GCP APIs are enabled.",
-            details={"required_apis": [status.service_name for status in api_statuses]},
-        )
-
-        service_account_email = stage_ensure_runtime_service_account(
-            adapters=adapters,
-            config=config,
-        )
-        resources["service_account"] = service_account_email
-        record_stage(
-            stage_records,
-            stage="service_account_setup",
-            message="Ensured runtime service account and project IAM bindings.",
-            details={"service_account_email": service_account_email},
-        )
-
-        repository_ref = stage_ensure_artifact_repository(
-            adapters=adapters,
-            config=config,
-            image_source_mode_published_release=IMAGE_SOURCE_MODE_PUBLISHED_RELEASE,
-            published_remote_repository_description=PUBLISHED_REMOTE_REPOSITORY_DESCRIPTION,
-            published_remote_repository_config_description=PUBLISHED_REMOTE_REPOSITORY_CONFIG_DESCRIPTION,
-            ghcr_remote_docker_repo=GHCR_REMOTE_DOCKER_REPO,
-        )
-        resources["artifact_registry_repository"] = repository_ref.repository
-        record_stage(
-            stage_records,
-            stage="artifact_registry_setup",
-            message="Ensured Artifact Registry repository exists.",
-            details={
-                "repository": repository_ref.repository,
-                "mode": repository_ref.mode,
-            },
-        )
-
-        image_uri = config.deploy_image_uri
-        resources["image"] = image_uri
-        if config.image_source_mode == IMAGE_SOURCE_MODE_SOURCE_BUILD:
-            assert session.project_paths is not None
-            build_result = submit_source_build(
-                adapters=adapters,
-                project_root=session.project_paths.project_root,
-                dockerfile_path=session.project_paths.dockerfile,
-                project_id=config.project_id,
-                image_uri=image_uri,
-            )
-            if not build_result.ok:
-                raise DeployStageError(
-                    stage="cloud_build",
-                    message=gcp_error_message(build_result.error, "Cloud Build submission failed."),
-                    action=gcp_error_action(build_result.error, "Inspect the Cloud Build error output and rerun deploy."),
-                )
-            build_submission = build_result.value
-            assert build_submission is not None
+        with progress.stage(humanize_stage_label("repo_config_discovery")):
+            session = load_deploy_session(cli_context)
+            env_values = OrderedDict(session.merged_env_values().items())
+            project_config = session.project_config
+            remembered_state = DeployState.from_payload(session.remembered_deploy_state)
             record_stage(
                 stage_records,
-                stage="cloud_build",
-                message="Built and published the backend image.",
+                stage="repo_config_discovery",
+                message="Resolved workspace and loaded CLI config inputs.",
                 details={
-                    "image": image_uri,
-                    "build_id": build_submission.build_id,
-                    "log_url": build_submission.log_url,
+                    "workspace_root": str(session.workspace_root),
+                    "project_root": (
+                        None if session.project_paths is None else str(session.project_paths.project_root)
+                    ),
+                    "workspace_resolution_source": session.workspace_resolution_source,
+                    "active_workspace_root": (
+                        None if session.active_workspace_root is None else str(session.active_workspace_root)
+                    ),
+                    "env_file": None if session.env_path is None else str(session.env_path),
+                    "project_config_file": str(session.workspace_paths.project_config_file),
+                    "state_file": str(session.workspace_paths.state_file_for_target(GCP_CLOUD_RUN_TARGET)),
+                    "runtime_source": session.effective_runtime_source,
                 },
             )
-        else:
+
+        adapters = GCPAdapters.create()
+        with progress.stage(humanize_stage_label("prerequisite_validation")):
+            active_account = _require_active_gcloud_account(adapters=adapters)
             record_stage(
                 stage_records,
-                stage="published_image_resolution",
-                message="Resolved the pinned published backend image for managed deploy.",
+                stage="prerequisite_validation",
+                message="Validated gcloud installation and authentication.",
+                details={"account": active_account},
+            )
+
+        with progress.stage(humanize_stage_label("parameter_resolution")):
+            config = resolve_deploy_config(
+                cli_context,
+                adapters=adapters,
+                env_values=env_values,
+                project_config=project_config,
+                remembered_state=remembered_state,
+                options=options,
+                runtime_source=session.effective_runtime_source,
+                project_root=(None if session.project_paths is None else session.project_paths.project_root),
+            )
+            resources.update(
+                {
+                    "project_id": config.project_id,
+                    "region": config.region,
+                    "artifact_registry_repository": config.artifact_repository,
+                    "cloud_sql_instance": config.sql_instance_name,
+                    "database_name": config.database_name,
+                    "bucket_name": config.bucket_name,
+                }
+            )
+            record_stage(
+                stage_records,
+                stage="parameter_resolution",
+                message="Resolved deploy parameters and production posture overrides.",
                 details={
-                    "image": image_uri,
+                    "project_id": config.project_id,
+                    "region": config.region,
+                    "service_name": config.service_name,
+                    "artifact_repository": config.artifact_repository,
+                    "sql_instance_name": config.sql_instance_name,
+                    "database_name": config.database_name,
+                    "bucket_name": config.bucket_name,
+                    "runtime_source": config.runtime_source,
+                    "image_source_mode": config.image_source_mode,
+                    "image_tag": config.image_tag,
+                    "deploy_image_uri": config.deploy_image_uri,
                     "published_release_tag": config.published_release_tag,
                     "published_image_ref": config.published_image_ref,
                 },
             )
 
-        (
-            non_db_secret_names,
-            provider_secret_names,
-            provider_secret_values,
-            bearer_secret_name,
-            bearer_token_for_validation,
-        ) = stage_ensure_core_secrets(
-            adapters=adapters,
-            config=config,
-            env_values=env_values,
-        )
-        record_stage(
-            stage_records,
-            stage="secret_manager_setup",
-            message="Ensured non-database runtime secrets exist.",
-            details={"secrets": non_db_secret_names},
-        )
+        _confirm_mutations(cli_context, config=config)
 
-        sql_instance_ref, database_url_secret_name, database_url_for_validation = stage_ensure_cloud_sql(
-            adapters=adapters,
-            config=config,
-            default_sql_database_version=DEFAULT_SQL_DATABASE_VERSION,
-            default_sql_cpu_count=DEFAULT_SQL_CPU_COUNT,
-            default_sql_memory=DEFAULT_SQL_MEMORY,
-            default_sql_user_name=DEFAULT_SQL_USER_NAME,
-        )
-        resources["cloud_sql_instance"] = sql_instance_ref.instance_name
-        record_stage(
-            stage_records,
-            stage="cloud_sql_setup",
-            message="Ensured Cloud SQL instance, database, user, and database URL secret for operational runtime metadata.",
-            details={
-                "instance_name": sql_instance_ref.instance_name,
-                "connection_name": sql_instance_ref.connection_name,
-                "database_url_secret_name": database_url_secret_name,
-                "cloud_sql_role": "operational_metadata",
-            },
-        )
+        with progress.stage(humanize_stage_label("api_enablement")):
+            api_statuses = stage_ensure_required_apis(
+                adapters=adapters,
+                config=config,
+                required_services=REQUIRED_GCP_SERVICES,
+            )
+            record_stage(
+                stage_records,
+                stage="api_enablement",
+                message="Verified required GCP APIs are enabled.",
+                details={"required_apis": [status.service_name for status in api_statuses]},
+            )
 
-        bucket_name = stage_ensure_gcs_bucket(adapters=adapters, cli_context=cli_context, config=config)
-        resources["bucket_name"] = bucket_name
-        stage_ensure_bucket_binding(
-            adapters=adapters,
-            bucket_name=bucket_name,
-            service_account_email=service_account_email,
-        )
-        record_stage(
-            stage_records,
-            stage="gcs_bucket_setup",
-            message="Ensured managed object-store bucket and bucket IAM binding.",
-            details={
-                "bucket_name": bucket_name,
-                "memory_source_of_truth": "object_store_files",
-            },
-        )
+        with progress.stage(humanize_stage_label("service_account_setup")):
+            service_account_email = stage_ensure_runtime_service_account(
+                adapters=adapters,
+                config=config,
+            )
+            resources["service_account"] = service_account_email
+            record_stage(
+                stage_records,
+                stage="service_account_setup",
+                message="Ensured runtime service account and project IAM bindings.",
+                details={"service_account_email": service_account_email},
+            )
 
-        env_vars = stage_build_runtime_env_vars(
-            env_values=env_values,
-            config=config,
-            bucket_name=bucket_name,
-        )
-        secret_bindings = stage_build_cloud_run_secret_bindings(
-            provider_secret_names=provider_secret_names,
-            bearer_secret_name=bearer_secret_name,
-            database_url_secret_name=database_url_secret_name,
-        )
-        stage_validate_final_settings(
-            env_vars=env_vars,
-            env_values=env_values,
-            secret_placeholders={
-                **provider_secret_values,
-                "BACKEND_BEARER_TOKEN": bearer_token_for_validation,
-                "BACKEND_DATABASE_URL": database_url_for_validation,
-            },
-        )
-        record_stage(
-            stage_records,
-            stage="runtime_config_assembly",
-            message="Assembled managed Cloud Run runtime configuration.",
-            details={
-                "env_var_count": len(env_vars),
-                "secret_binding_count": len(secret_bindings),
-                "storage_backend": "managed",
-                "object_store_provider": "gcs",
-            },
-        )
+        with progress.stage(humanize_stage_label("artifact_registry_setup")):
+            repository_ref = stage_ensure_artifact_repository(
+                adapters=adapters,
+                config=config,
+                image_source_mode_published_release=IMAGE_SOURCE_MODE_PUBLISHED_RELEASE,
+                published_remote_repository_description=PUBLISHED_REMOTE_REPOSITORY_DESCRIPTION,
+                published_remote_repository_config_description=PUBLISHED_REMOTE_REPOSITORY_CONFIG_DESCRIPTION,
+                ghcr_remote_docker_repo=GHCR_REMOTE_DOCKER_REPO,
+            )
+            resources["artifact_registry_repository"] = repository_ref.repository
+            record_stage(
+                stage_records,
+                stage="artifact_registry_setup",
+                message="Ensured Artifact Registry repository exists.",
+                details={
+                    "repository": repository_ref.repository,
+                    "mode": repository_ref.mode,
+                },
+            )
 
-        deploy_outcome = stage_deploy_cloud_run_service(
-            adapters=adapters,
-            config=config,
-            image_uri=image_uri,
-            service_account_email=service_account_email,
-            env_vars=env_vars,
-            secret_bindings=secret_bindings,
-            sql_instance_ref=sql_instance_ref,
-            default_timeout=DEFAULT_TIMEOUT,
-            ingress_setting=INGRESS_SETTING,
-        )
-        service_ref = deploy_outcome.resource
-        resources["service_name"] = service_ref.service_name
-        resources["service_url"] = service_ref.url
-        record_stage(
-            stage_records,
-            stage="cloud_run_deploy",
-            message="Deployed the Cloud Run service.",
-            details={
-                "action": deploy_outcome.action,
-                "service_name": service_ref.service_name,
-                "service_url": service_ref.url,
-                "image": service_ref.image,
-            },
-        )
-
-        liveness_probe_ok = True
-        if service_ref.url:
-            liveness_probe_ok = _probe_liveness(service_ref.url)
-            if not liveness_probe_ok:
-                checks.append(
-                    DiagnosticCheck(
-                        id="liveness_probe",
-                        status="warn",
-                        message="Cloud Run service deployed, but the final /livez probe did not succeed.",
-                        action="Wait for the revision to finish starting, then re-run the health check command from the summary.",
-                    )
+        image_uri = config.deploy_image_uri
+        resources["image"] = image_uri
+        build_stage = "cloud_build" if config.image_source_mode == IMAGE_SOURCE_MODE_SOURCE_BUILD else "published_image_resolution"
+        with progress.stage(humanize_stage_label(build_stage)):
+            if config.image_source_mode == IMAGE_SOURCE_MODE_SOURCE_BUILD:
+                assert session.project_paths is not None
+                build_result = submit_source_build(
+                    adapters=adapters,
+                    project_root=session.project_paths.project_root,
+                    dockerfile_path=session.project_paths.dockerfile,
+                    project_id=config.project_id,
+                    image_uri=image_uri,
                 )
-        record_stage(
-            stage_records,
-            stage="post_deploy_validation",
-            message="Collected final deploy summary and follow-up commands.",
-            details={
-                "service_url": service_ref.url,
-                "liveness_probe_ok": liveness_probe_ok,
-            },
-        )
+                if not build_result.ok:
+                    raise DeployStageError(
+                        stage="cloud_build",
+                        message=gcp_error_message(build_result.error, "Cloud Build submission failed."),
+                        action=gcp_error_action(build_result.error, "Inspect the Cloud Build error output and rerun deploy."),
+                    )
+                build_submission = build_result.value
+                assert build_submission is not None
+                record_stage(
+                    stage_records,
+                    stage="cloud_build",
+                    message="Built and published the backend image.",
+                    details={
+                        "image": image_uri,
+                        "build_id": build_submission.build_id,
+                        "log_url": build_submission.log_url,
+                    },
+                )
+            else:
+                record_stage(
+                    stage_records,
+                    stage="published_image_resolution",
+                    message="Resolved the pinned published backend image for managed deploy.",
+                    details={
+                        "image": image_uri,
+                        "published_release_tag": config.published_release_tag,
+                        "published_image_ref": config.published_image_ref,
+                    },
+                )
 
-        write_deploy_state(
-            session.workspace_paths.state_file_for_target(GCP_CLOUD_RUN_TARGET),
-            DeployState(
-                project_id=config.project_id,
-                region=config.region,
-                service_name=config.service_name,
-                runtime_source=config.runtime_source,
-                image_source_mode=config.image_source_mode,
-                artifact_repository=config.artifact_repository_base,
-                artifact_repository_base=config.artifact_repository_base,
-                cloud_sql_instance=config.sql_instance_name,
-                database_name=config.database_name,
+        with progress.stage(humanize_stage_label("secret_manager_setup")):
+            (
+                non_db_secret_names,
+                provider_secret_names,
+                provider_secret_values,
+                bearer_secret_name,
+                bearer_token_for_validation,
+            ) = stage_ensure_core_secrets(
+                adapters=adapters,
+                config=config,
+                env_values=env_values,
+            )
+            record_stage(
+                stage_records,
+                stage="secret_manager_setup",
+                message="Ensured non-database runtime secrets exist.",
+                details={"secrets": non_db_secret_names},
+            )
+
+        with progress.stage(humanize_stage_label("cloud_sql_setup")):
+            sql_instance_ref, database_url_secret_name, database_url_for_validation = stage_ensure_cloud_sql(
+                adapters=adapters,
+                config=config,
+                default_sql_database_version=DEFAULT_SQL_DATABASE_VERSION,
+                default_sql_cpu_count=DEFAULT_SQL_CPU_COUNT,
+                default_sql_memory=DEFAULT_SQL_MEMORY,
+                default_sql_user_name=DEFAULT_SQL_USER_NAME,
+            )
+            resources["cloud_sql_instance"] = sql_instance_ref.instance_name
+            record_stage(
+                stage_records,
+                stage="cloud_sql_setup",
+                message="Ensured Cloud SQL instance, database, user, and database URL secret for operational runtime metadata.",
+                details={
+                    "instance_name": sql_instance_ref.instance_name,
+                    "connection_name": sql_instance_ref.connection_name,
+                    "database_url_secret_name": database_url_secret_name,
+                    "cloud_sql_role": "operational_metadata",
+                },
+            )
+
+        with progress.stage(humanize_stage_label("gcs_bucket_setup")):
+            bucket_name = stage_ensure_gcs_bucket(adapters=adapters, cli_context=cli_context, config=config)
+            resources["bucket_name"] = bucket_name
+            stage_ensure_bucket_binding(
+                adapters=adapters,
                 bucket_name=bucket_name,
-                image=image_uri,
-                published_release_tag=config.published_release_tag,
-                published_image_ref=config.published_image_ref,
-                service_url=service_ref.url,
                 service_account_email=service_account_email,
-                last_deployed_at_ms=_now_ms(),
-            ),
-        )
+            )
+            record_stage(
+                stage_records,
+                stage="gcs_bucket_setup",
+                message="Ensured managed object-store bucket and bucket IAM binding.",
+                details={
+                    "bucket_name": bucket_name,
+                    "memory_source_of_truth": "object_store_files",
+                },
+            )
+
+        with progress.stage(humanize_stage_label("runtime_config_assembly")):
+            env_vars = stage_build_runtime_env_vars(
+                env_values=env_values,
+                config=config,
+                bucket_name=bucket_name,
+            )
+            secret_bindings = stage_build_cloud_run_secret_bindings(
+                provider_secret_names=provider_secret_names,
+                bearer_secret_name=bearer_secret_name,
+                database_url_secret_name=database_url_secret_name,
+            )
+            stage_validate_final_settings(
+                env_vars=env_vars,
+                env_values=env_values,
+                secret_placeholders={
+                    **provider_secret_values,
+                    "BACKEND_BEARER_TOKEN": bearer_token_for_validation,
+                    "BACKEND_DATABASE_URL": database_url_for_validation,
+                },
+            )
+            record_stage(
+                stage_records,
+                stage="runtime_config_assembly",
+                message="Assembled managed Cloud Run runtime configuration.",
+                details={
+                    "env_var_count": len(env_vars),
+                    "secret_binding_count": len(secret_bindings),
+                    "storage_backend": "managed",
+                    "object_store_provider": "gcs",
+                },
+            )
+
+        with progress.stage(humanize_stage_label("cloud_run_deploy")):
+            deploy_outcome = stage_deploy_cloud_run_service(
+                adapters=adapters,
+                config=config,
+                image_uri=image_uri,
+                service_account_email=service_account_email,
+                env_vars=env_vars,
+                secret_bindings=secret_bindings,
+                sql_instance_ref=sql_instance_ref,
+                default_timeout=DEFAULT_TIMEOUT,
+                ingress_setting=INGRESS_SETTING,
+            )
+            service_ref = deploy_outcome.resource
+            resources["service_name"] = service_ref.service_name
+            resources["service_url"] = service_ref.url
+            record_stage(
+                stage_records,
+                stage="cloud_run_deploy",
+                message="Deployed the Cloud Run service.",
+                details={
+                    "action": deploy_outcome.action,
+                    "service_name": service_ref.service_name,
+                    "service_url": service_ref.url,
+                    "image": service_ref.image,
+                },
+            )
+
+        with progress.stage(humanize_stage_label("post_deploy_validation")):
+            liveness_probe_ok = True
+            if service_ref.url:
+                liveness_probe_ok = _probe_liveness(service_ref.url)
+                if not liveness_probe_ok:
+                    checks.append(
+                        DiagnosticCheck(
+                            id="liveness_probe",
+                            status="warn",
+                            message="Cloud Run service deployed, but the final /livez probe did not succeed.",
+                            action="Wait for the revision to finish starting, then re-run the health check command from the summary.",
+                        )
+                    )
+            record_stage(
+                stage_records,
+                stage="post_deploy_validation",
+                message="Collected final deploy summary and follow-up commands.",
+                details={
+                    "service_url": service_ref.url,
+                    "liveness_probe_ok": liveness_probe_ok,
+                },
+            )
+
+        with progress.stage(humanize_stage_label("state_write")):
+            write_deploy_state(
+                session.workspace_paths.state_file_for_target(GCP_CLOUD_RUN_TARGET),
+                DeployState(
+                    project_id=config.project_id,
+                    region=config.region,
+                    service_name=config.service_name,
+                    runtime_source=config.runtime_source,
+                    image_source_mode=config.image_source_mode,
+                    artifact_repository=config.artifact_repository_base,
+                    artifact_repository_base=config.artifact_repository_base,
+                    cloud_sql_instance=config.sql_instance_name,
+                    database_name=config.database_name,
+                    bucket_name=bucket_name,
+                    image=image_uri,
+                    published_release_tag=config.published_release_tag,
+                    published_image_ref=config.published_image_ref,
+                    service_url=service_ref.url,
+                    service_account_email=service_account_email,
+                    last_deployed_at_ms=_now_ms(),
+                ),
+            )
 
         features = build_feature_summary(env_values)
         next_steps = build_next_steps(
@@ -506,6 +524,8 @@ def run_deploy_gcp_cloud_run(
             action=None,
             error_type=type(exc).__name__,
         )
+    finally:
+        progress.close()
 
 
 def _require_active_gcloud_account(*, adapters: GCPAdapters) -> str:

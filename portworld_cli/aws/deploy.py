@@ -38,11 +38,13 @@ from portworld_cli.aws.stages.config import ResolvedAWSDeployConfig
 from portworld_cli.aws.stages.shared import now_ms, normalize_service_url, stage_ok
 from portworld_cli.context import CLIContext
 from portworld_cli.deploy.config import DeployStageError, DeployUsageError, load_deploy_session
+from portworld_cli.deploy.reporting import humanize_stage_label
 from portworld_cli.deploy_artifacts import IMAGE_SOURCE_MODE_SOURCE_BUILD
 from portworld_cli.deploy_state import DeployState, write_deploy_state
 from portworld_cli.output import CommandResult
 from portworld_cli.targets import TARGET_AWS_ECS_FARGATE
 from portworld_cli.ux.prompts import prompt_confirm
+from portworld_cli.ux.progress import ProgressReporter
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,24 +71,32 @@ def run_deploy_aws_ecs_fargate(
 ) -> CommandResult:
     stage_records: list[dict[str, object]] = []
     resources: dict[str, object] = {}
+    progress = ProgressReporter(cli_context)
     try:
-        session = load_deploy_session(cli_context)
-        if not aws_cli_available():
-            raise DeployStageError(
-                stage="prerequisite_validation",
-                message="aws CLI is not installed or not on PATH.",
-                action="Install AWS CLI v2 and re-run deploy.",
-            )
+        with progress.stage(humanize_stage_label("repo_config_discovery")):
+            session = load_deploy_session(cli_context)
+            stage_records.append(stage_ok("repo_config_discovery", "Resolved workspace and loaded CLI config inputs."))
+
+        with progress.stage(humanize_stage_label("prerequisite_validation")):
+            if not aws_cli_available():
+                raise DeployStageError(
+                    stage="prerequisite_validation",
+                    message="aws CLI is not installed or not on PATH.",
+                    action="Install AWS CLI v2 and re-run deploy.",
+                )
+            stage_records.append(stage_ok("prerequisite_validation", "Validated aws CLI availability."))
 
         env_values = OrderedDict(session.merged_env_values().items())
-        config = resolve_aws_deploy_config(
-            cli_context,
-            options=options,
-            env_values=env_values,
-            project_config=session.project_config,
-            runtime_source=session.effective_runtime_source,
-            project_root=(None if session.project_paths is None else session.project_paths.project_root),
-        )
+        with progress.stage(humanize_stage_label("parameter_resolution")):
+            config = resolve_aws_deploy_config(
+                cli_context,
+                options=options,
+                env_values=env_values,
+                project_config=session.project_config,
+                runtime_source=session.effective_runtime_source,
+                project_root=(None if session.project_paths is None else session.project_paths.project_root),
+            )
+            stage_records.append(stage_ok("parameter_resolution", "Resolved deploy parameters."))
 
         _confirm_mutations(cli_context, config)
         stage_records.append(stage_ok("mutation_plan", "Confirmed deploy mutations."))
@@ -109,6 +119,7 @@ def run_deploy_aws_ecs_fargate(
             env_values=env_values,
             stage_records=stage_records,
             project_root=session.workspace_root,
+            progress=progress,
         )
         resources["ecs_cluster_name"] = result.ecs_cluster_name
         resources["ecs_service_name"] = result.ecs_service_name
@@ -124,59 +135,61 @@ def run_deploy_aws_ecs_fargate(
         resources["rds_security_group_id"] = result.rds_security_group_id
         resources["database_url_source"] = "external" if result.used_external_database else "provisioned"
 
-        livez_ok, ws_ok = wait_for_public_validation(
-            result.service_url,
-            env_values.get("BACKEND_BEARER_TOKEN", ""),
-        )
-        if not livez_ok:
-            raise DeployStageError(
-                stage="post_deploy_validation",
-                message="CloudFront public URL did not return 200 from /livez.",
-                action="Inspect ECS service, ALB, and CloudFront logs and verify backend startup readiness.",
+        with progress.stage(humanize_stage_label("post_deploy_validation")):
+            livez_ok, ws_ok = wait_for_public_validation(
+                result.service_url,
+                env_values.get("BACKEND_BEARER_TOKEN", ""),
             )
-        if not ws_ok:
-            stage_records.append(
-                {
-                    "stage": "post_deploy_validation",
-                    "status": "warn",
-                    "message": (
-                        "Validated /livez, but /ws/session did not complete a websocket handshake before timeout. "
-                        "AWS edge propagation may still be catching up; verify shortly after deploy with `portworld logs aws-ecs-fargate`."
-                    ),
-                }
-            )
-        else:
-            stage_records.append(stage_ok("post_deploy_validation", "Validated /livez and /ws/session endpoint reachability."))
+            if not livez_ok:
+                raise DeployStageError(
+                    stage="post_deploy_validation",
+                    message="CloudFront public URL did not return 200 from /livez.",
+                    action="Inspect ECS service, ALB, and CloudFront logs and verify backend startup readiness.",
+                )
+            if not ws_ok:
+                stage_records.append(
+                    {
+                        "stage": "post_deploy_validation",
+                        "status": "warn",
+                        "message": (
+                            "Validated /livez, but /ws/session did not complete a websocket handshake before timeout. "
+                            "AWS edge propagation may still be catching up; verify shortly after deploy with `portworld logs aws-ecs-fargate`."
+                        ),
+                    }
+                )
+            else:
+                stage_records.append(stage_ok("post_deploy_validation", "Validated /livez and /ws/session endpoint reachability."))
 
-        try:
-            write_deploy_state(
-                session.workspace_paths.state_file_for_target(TARGET_AWS_ECS_FARGATE),
-                DeployState(
-                    project_id=config.account_id,
-                    region=config.region,
-                    service_name=config.app_name,
-                    runtime_source=config.runtime_source,
-                    image_source_mode=config.image_source_mode,
-                    artifact_repository=config.ecr_repository,
-                    artifact_repository_base=config.ecr_repository,
-                    cloud_sql_instance=None,
-                    database_name=(config.rds_db_name if not result.used_external_database else "external"),
-                    bucket_name=config.bucket_name,
-                    image=config.image_uri,
-                    published_release_tag=config.published_release_tag,
-                    published_image_ref=config.published_image_ref,
-                    service_url=result.service_url,
-                    service_account_email=None,
-                    last_deployed_at_ms=now_ms(),
-                ),
-            )
-        except Exception as exc:
-            raise DeployStageError(
-                stage="state_write",
-                message=f"Unable to write AWS deploy state: {exc}",
-                action="Check workspace permissions for `.portworld/state` and retry.",
-            ) from exc
-        stage_records.append(stage_ok("state_write", "Wrote AWS deploy state."))
+        with progress.stage(humanize_stage_label("state_write")):
+            try:
+                write_deploy_state(
+                    session.workspace_paths.state_file_for_target(TARGET_AWS_ECS_FARGATE),
+                    DeployState(
+                        project_id=config.account_id,
+                        region=config.region,
+                        service_name=config.app_name,
+                        runtime_source=config.runtime_source,
+                        image_source_mode=config.image_source_mode,
+                        artifact_repository=config.ecr_repository,
+                        artifact_repository_base=config.ecr_repository,
+                        cloud_sql_instance=None,
+                        database_name=(config.rds_db_name if not result.used_external_database else "external"),
+                        bucket_name=config.bucket_name,
+                        image=config.image_uri,
+                        published_release_tag=config.published_release_tag,
+                        published_image_ref=config.published_image_ref,
+                        service_url=result.service_url,
+                        service_account_email=None,
+                        last_deployed_at_ms=now_ms(),
+                    ),
+                )
+            except Exception as exc:
+                raise DeployStageError(
+                    stage="state_write",
+                    message=f"Unable to write AWS deploy state: {exc}",
+                    action="Check workspace permissions for `.portworld/state` and retry.",
+                ) from exc
+            stage_records.append(stage_ok("state_write", "Wrote AWS deploy state."))
 
         runtime_env = build_runtime_env_vars(env_values, config, database_url=result.database_url)
         message_lines = [
@@ -271,6 +284,8 @@ def run_deploy_aws_ecs_fargate(
             },
             exit_code=1,
         )
+    finally:
+        progress.close()
 
 
 def _run_aws_deploy_mutations(
@@ -279,88 +294,97 @@ def _run_aws_deploy_mutations(
     env_values: OrderedDict[str, str],
     stage_records: list[dict[str, object]],
     project_root: Path,
+    progress: ProgressReporter,
 ) -> AWSDeployMutationResult:
-    ensure_s3_bucket(config, stage_records=stage_records)
-    if config.image_source_mode == IMAGE_SOURCE_MODE_SOURCE_BUILD:
-        ensure_ecr_repository(config, stage_records=stage_records)
-        docker_login_to_ecr(config, stage_records=stage_records)
-        build_and_push_image(config, stage_records=stage_records, project_root=project_root)
-    else:
-        stage_records.append(
-            stage_ok(
-                "publish_image",
-                f"Using published image `{config.image_uri}`.",
-            )
-        )
+    with progress.stage(humanize_stage_label("aws_artifact_setup")):
+        ensure_s3_bucket(config, stage_records=stage_records)
 
-    database_resolution = resolve_or_provision_database(config, stage_records=stage_records)
-    vpc_id, subnet_ids = resolve_vpc_and_subnets(config)
-    alb_security_group_id, ecs_security_group_id = ensure_service_security_groups(
-        config=config,
-        vpc_id=vpc_id,
-        rds_security_group_id=database_resolution.rds_security_group_id,
-        stage_records=stage_records,
-    )
-    alb_arn, alb_dns_name = ensure_application_load_balancer(
-        config=config,
-        subnet_ids=subnet_ids,
-        alb_security_group_id=alb_security_group_id,
-        stage_records=stage_records,
-    )
-    target_group_arn = ensure_target_group(
-        config=config,
-        vpc_id=vpc_id,
-        stage_records=stage_records,
-    )
-    ensure_alb_listener(
-        config=config,
-        alb_arn=alb_arn,
-        target_group_arn=target_group_arn,
-        stage_records=stage_records,
-    )
-    cloudfront_distribution_id, cloudfront_domain_name = ensure_cloudfront_distribution(
-        config=config,
-        alb_dns_name=alb_dns_name,
-        stage_records=stage_records,
-    )
+    with progress.stage(humanize_stage_label("aws_image_publish")):
+        if config.image_source_mode == IMAGE_SOURCE_MODE_SOURCE_BUILD:
+            ensure_ecr_repository(config, stage_records=stage_records)
+            docker_login_to_ecr(config, stage_records=stage_records)
+            build_and_push_image(config, stage_records=stage_records, project_root=project_root)
+        else:
+            stage_records.append(
+                stage_ok(
+                    "publish_image",
+                    f"Using published image `{config.image_uri}`.",
+                )
+            )
+
+    with progress.stage(humanize_stage_label("aws_database_setup")):
+        database_resolution = resolve_or_provision_database(config, stage_records=stage_records)
+
+    with progress.stage(humanize_stage_label("aws_network_edge_setup")):
+        vpc_id, subnet_ids = resolve_vpc_and_subnets(config)
+        alb_security_group_id, ecs_security_group_id = ensure_service_security_groups(
+            config=config,
+            vpc_id=vpc_id,
+            rds_security_group_id=database_resolution.rds_security_group_id,
+            stage_records=stage_records,
+        )
+        alb_arn, alb_dns_name = ensure_application_load_balancer(
+            config=config,
+            subnet_ids=subnet_ids,
+            alb_security_group_id=alb_security_group_id,
+            stage_records=stage_records,
+        )
+        target_group_arn = ensure_target_group(
+            config=config,
+            vpc_id=vpc_id,
+            stage_records=stage_records,
+        )
+        ensure_alb_listener(
+            config=config,
+            alb_arn=alb_arn,
+            target_group_arn=target_group_arn,
+            stage_records=stage_records,
+        )
+        cloudfront_distribution_id, cloudfront_domain_name = ensure_cloudfront_distribution(
+            config=config,
+            alb_dns_name=alb_dns_name,
+            stage_records=stage_records,
+        )
     runtime_env = build_runtime_env_vars(
         env_values,
         config,
         database_url=database_resolution.database_url,
     )
-    execution_role_arn = ensure_ecs_execution_role(stage_records=stage_records)
-    task_role_arn = ensure_ecs_task_role(config=config, stage_records=stage_records)
-    log_group_name = ensure_ecs_log_group(config=config, stage_records=stage_records)
-    cluster_name = ensure_ecs_cluster(config=config, stage_records=stage_records)
-    ensure_ecs_service_linked_role(stage_records=stage_records)
-    task_definition_arn = register_task_definition(
-        config=config,
-        runtime_env=runtime_env,
-        execution_role_arn=execution_role_arn,
-        task_role_arn=task_role_arn,
-        log_group_name=log_group_name,
-        stage_records=stage_records,
-    )
-    service_name = upsert_ecs_service(
-        config=config,
-        cluster_name=cluster_name,
-        task_definition_arn=task_definition_arn,
-        subnet_ids=subnet_ids,
-        ecs_security_group_id=ecs_security_group_id,
-        target_group_arn=target_group_arn,
-        stage_records=stage_records,
-    )
-    wait_for_ecs_service_stable(
-        config=config,
-        cluster_name=cluster_name,
-        service_name=service_name,
-        expected_task_definition_arn=task_definition_arn,
-        stage_records=stage_records,
-    )
-    wait_for_cloudfront_deployed(
-        distribution_id=cloudfront_distribution_id,
-        stage_records=stage_records,
-    )
+    with progress.stage(humanize_stage_label("aws_runtime_setup")):
+        execution_role_arn = ensure_ecs_execution_role(stage_records=stage_records)
+        task_role_arn = ensure_ecs_task_role(config=config, stage_records=stage_records)
+        log_group_name = ensure_ecs_log_group(config=config, stage_records=stage_records)
+        cluster_name = ensure_ecs_cluster(config=config, stage_records=stage_records)
+        ensure_ecs_service_linked_role(stage_records=stage_records)
+        task_definition_arn = register_task_definition(
+            config=config,
+            runtime_env=runtime_env,
+            execution_role_arn=execution_role_arn,
+            task_role_arn=task_role_arn,
+            log_group_name=log_group_name,
+            stage_records=stage_records,
+        )
+        service_name = upsert_ecs_service(
+            config=config,
+            cluster_name=cluster_name,
+            task_definition_arn=task_definition_arn,
+            subnet_ids=subnet_ids,
+            ecs_security_group_id=ecs_security_group_id,
+            target_group_arn=target_group_arn,
+            stage_records=stage_records,
+        )
+    with progress.stage(humanize_stage_label("aws_rollout_wait")):
+        wait_for_ecs_service_stable(
+            config=config,
+            cluster_name=cluster_name,
+            service_name=service_name,
+            expected_task_definition_arn=task_definition_arn,
+            stage_records=stage_records,
+        )
+        wait_for_cloudfront_deployed(
+            distribution_id=cloudfront_distribution_id,
+            stage_records=stage_records,
+        )
     service_url = normalize_service_url(cloudfront_domain_name)
     return AWSDeployMutationResult(
         database_url=database_resolution.database_url,

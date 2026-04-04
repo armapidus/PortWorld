@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import unittest
 
-from portworld_cli.deploy.reporting import build_failure_result
+from portworld_cli.deploy.reporting import build_failure_result, humanize_stage_label
 
 
 class DeployReportingFailureMessageTests(unittest.TestCase):
+    def test_humanize_stage_label_uses_known_mapping(self) -> None:
+        self.assertEqual(humanize_stage_label("cloud_run_deploy"), "Deploying Cloud Run service")
+
+    def test_humanize_stage_label_falls_back_for_unknown_stage(self) -> None:
+        self.assertEqual(humanize_stage_label("custom_stage_name"), "Custom Stage Name")
+
     def test_build_failure_result_includes_problem_and_next(self) -> None:
         result = build_failure_result(
             stage="cloud_build",

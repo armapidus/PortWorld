@@ -3,11 +3,40 @@ from __future__ import annotations
 from collections import OrderedDict
 
 from portworld_cli.output import CommandResult, DiagnosticCheck, format_key_value_lines
-
 from portworld_cli.deploy.config import ResolvedDeployConfig
 
 
 COMMAND_NAME = "portworld deploy gcp-cloud-run"
+
+_DEPLOY_STAGE_LABELS: dict[str, str] = {
+    "repo_config_discovery": "Loading workspace configuration",
+    "prerequisite_validation": "Checking cloud credentials",
+    "parameter_resolution": "Resolving deploy parameters",
+    "api_enablement": "Enabling required GCP APIs",
+    "service_account_setup": "Preparing runtime service account",
+    "artifact_registry_setup": "Preparing container registry",
+    "cloud_build": "Building and publishing backend image",
+    "published_image_resolution": "Resolving published backend image",
+    "secret_manager_setup": "Provisioning runtime secrets",
+    "cloud_sql_setup": "Preparing managed database",
+    "gcs_bucket_setup": "Preparing managed object storage",
+    "runtime_config_assembly": "Assembling runtime configuration",
+    "cloud_run_deploy": "Deploying Cloud Run service",
+    "post_deploy_validation": "Validating deployed service",
+    "state_write": "Writing deploy state",
+    "aws_artifact_setup": "Preparing object storage",
+    "aws_image_publish": "Building and publishing backend image",
+    "aws_database_setup": "Preparing managed database",
+    "aws_network_edge_setup": "Preparing network and edge routing",
+    "aws_runtime_setup": "Deploying ECS service",
+    "aws_rollout_wait": "Waiting for service rollout",
+    "azure_subscription_set": "Selecting Azure subscription",
+    "azure_platform_setup": "Preparing Azure platform resources",
+    "azure_registry_setup": "Preparing container registry",
+    "azure_runtime_infra": "Preparing runtime infrastructure",
+    "azure_container_app_deploy": "Deploying Container App",
+    "azure_rollout_wait": "Waiting for service rollout",
+}
 
 
 def record_stage(
@@ -21,6 +50,17 @@ def record_stage(
     if details:
         payload["details"] = details
     stage_records.append(payload)
+
+
+def humanize_stage_label(stage: str) -> str:
+    normalized = stage.strip()
+    if not normalized:
+        return "Working"
+    label = _DEPLOY_STAGE_LABELS.get(normalized)
+    if label is not None:
+        return label
+    words = normalized.replace("-", "_").split("_")
+    return " ".join(word.capitalize() for word in words if word) or "Working"
 
 
 def build_feature_summary(env_values: OrderedDict[str, str]) -> dict[str, object]:
