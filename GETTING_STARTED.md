@@ -11,9 +11,9 @@ Use this document if you want to:
 
 For subsystem-specific detail after first setup:
 
-- backend runtime reference: [../../backend/README.md](../../backend/README.md)
-- CLI/operator reference: [../../portworld_cli/README.md](../../portworld_cli/README.md)
-- iOS app reference: [../../IOS/README.md](../../IOS/README.md)
+- backend runtime reference: [backend/README.md](backend/README.md)
+- CLI/operator reference: [portworld_cli/README.md](portworld_cli/README.md)
+- iOS app reference: [IOS/README.md](IOS/README.md)
 
 ## Minimum Supported Platforms And Tools
 
@@ -39,8 +39,6 @@ This is the recommended path if you want to run PortWorld locally without develo
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/portworld/PortWorld/main/install.sh | bash
 portworld init
-cd ~/.portworld/stacks/default
-docker compose up -d
 portworld doctor --target local
 portworld status
 ```
@@ -101,14 +99,14 @@ open IOS/PortWorld.xcodeproj
 Then:
 
 1. Build the `PortWorld` scheme.
-2. Configure the backend base URL in the app or local config template.
+2. Use the backend URL and bearer token written by `portworld init`, or update the local iOS config if you need a different backend.
 3. Validate backend setup in-app against the running local deployment.
 
-The iOS-specific configuration, Meta DAT setup, permissions, and build constraints remain in [../../IOS/README.md](../../IOS/README.md).
+The iOS-specific configuration, Meta DAT setup, permissions, and build constraints remain in [IOS/README.md](IOS/README.md).
 
 ## Minimum Viable Backend Environment
 
-The exhaustive backend environment reference is [../../backend/.env.example](../../backend/.env.example).
+The exhaustive backend environment reference is [backend/.env.example](backend/.env.example).
 Use that file as the source of truth for supported variables and defaults.
 
 ### Realtime-only path
@@ -135,7 +133,7 @@ Optional production/local-hardening settings:
 - `BACKEND_PROFILE=production` requires `BACKEND_BEARER_TOKEN`
 - internet-exposed deployments should use explicit `CORS_ORIGINS` and `BACKEND_ALLOWED_HOSTS`
 
-If you enable optional features, use the provider-scoped keys documented in [../../backend/README.md](../../backend/README.md) and [../../backend/.env.example](../../backend/.env.example).
+If you enable optional features, use the provider-scoped keys documented in [backend/README.md](backend/README.md) and [backend/.env.example](backend/.env.example).
 
 ## First Success
 
@@ -180,21 +178,21 @@ The first meaningful iOS success state is:
 2. backend setup/validation succeeds against a reachable PortWorld deployment
 3. the app can proceed through the current onboarding/runtime flow supported by your setup
 
-For iOS-specific runtime expectations and constraints, continue with [../../IOS/README.md](../../IOS/README.md).
+For iOS-specific runtime expectations and constraints, continue with [IOS/README.md](IOS/README.md).
 
 ## What To Read Next
 
-- Read [../../backend/README.md](../../backend/README.md) for:
+- Read [backend/README.md](backend/README.md) for:
   - provider/env reference
   - backend runtime details
   - API and storage details
   - backend-specific verification guidance
-- Read [../../portworld_cli/README.md](../../portworld_cli/README.md) for:
+- Read [portworld_cli/README.md](portworld_cli/README.md) for:
   - CLI commands
   - managed deploy flows
   - install/update specifics
   - production cautions for managed targets
-- Read [../../IOS/README.md](../../IOS/README.md) for:
+- Read [IOS/README.md](IOS/README.md) for:
   - iOS project layout
   - Meta DAT setup
   - runtime configuration inputs
