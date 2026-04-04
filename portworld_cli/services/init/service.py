@@ -948,7 +948,11 @@ def _execute_post_init(
             else _start_source_runtime(session)
         )
     else:
-        execution = _run_managed_deploy(cli_context, options)
+        execution = _run_managed_deploy(
+            cli_context,
+            options,
+            workspace_root=session.workspace_root,
+        )
 
     if not execution.ok:
         return execution
@@ -1053,8 +1057,17 @@ def _start_published_runtime(session: ConfigSession) -> CommandResult:
     )
 
 
-def _run_managed_deploy(cli_context: CLIContext, options: InitOptions) -> CommandResult:
-    execution_context = replace(cli_context, yes=True)
+def _run_managed_deploy(
+    cli_context: CLIContext,
+    options: InitOptions,
+    *,
+    workspace_root: Path | None = None,
+) -> CommandResult:
+    execution_context = replace(
+        cli_context,
+        yes=True,
+        project_root_override=workspace_root or cli_context.project_root_override,
+    )
     _emit_progress(cli_context, f"Starting managed deploy for {options.target}.")
     if options.target == TARGET_GCP_CLOUD_RUN:
         result = run_deploy_gcp_cloud_run(
