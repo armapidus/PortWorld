@@ -194,10 +194,10 @@ class WorkspaceSession:
 
     @property
     def env_path(self) -> Path | None:
-        if self.project_paths is not None:
-            return self.project_paths.env_file
         if self.effective_runtime_source == RUNTIME_SOURCE_PUBLISHED:
             return self.workspace_paths.workspace_env_file
+        if self.project_paths is not None:
+            return self.project_paths.env_file
         return None
 
 

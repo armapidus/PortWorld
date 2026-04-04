@@ -1294,15 +1294,17 @@ def _resolve_runtime_source_for_target(
         return str(options.runtime_source)
     if requested_target != LOCAL_TARGET:
         return RUNTIME_SOURCE_PUBLISHED
+    if has_source_checkout and setup_mode == SETUP_MODE_QUICKSTART:
+        return RUNTIME_SOURCE_SOURCE
     if setup_mode == SETUP_MODE_MANUAL and has_source_checkout:
         return prompt_choice(
             cli_context,
             message="Local runtime",
             choices=(RUNTIME_SOURCE_PUBLISHED, RUNTIME_SOURCE_SOURCE),
-            default=RUNTIME_SOURCE_PUBLISHED,
+            default=RUNTIME_SOURCE_SOURCE,
             labels={
-                RUNTIME_SOURCE_PUBLISHED: "Published GHCR image (recommended)",
-                RUNTIME_SOURCE_SOURCE: "Build from local source checkout",
+                RUNTIME_SOURCE_PUBLISHED: "Published GHCR image",
+                RUNTIME_SOURCE_SOURCE: "Build from local source checkout (recommended)",
             },
         )
     return RUNTIME_SOURCE_PUBLISHED

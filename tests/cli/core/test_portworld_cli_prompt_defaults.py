@@ -11,9 +11,13 @@ from portworld_cli.services.config.prompts import (
 )
 from portworld_cli.services.init.service import (
     InitOptions,
+    LOCAL_TARGET,
+    RUNTIME_SOURCE_PUBLISHED,
+    RUNTIME_SOURCE_SOURCE,
     SETUP_MODE_MANUAL,
     SETUP_MODE_QUICKSTART,
     _resolve_setup_mode,
+    _resolve_runtime_source_for_target,
 )
 
 
@@ -131,6 +135,26 @@ class PromptDefaultBehaviorTests(unittest.TestCase):
             options,
         )
         self.assertEqual(mode, SETUP_MODE_QUICKSTART)
+
+    def test_repo_quickstart_defaults_local_runtime_to_source(self) -> None:
+        runtime_source = _resolve_runtime_source_for_target(
+            _base_cli_context(non_interactive=False),
+            options=_base_init_options(),
+            setup_mode=SETUP_MODE_QUICKSTART,
+            requested_target=LOCAL_TARGET,
+            has_source_checkout=True,
+        )
+        self.assertEqual(runtime_source, RUNTIME_SOURCE_SOURCE)
+
+    def test_non_repo_quickstart_keeps_local_runtime_published(self) -> None:
+        runtime_source = _resolve_runtime_source_for_target(
+            _base_cli_context(non_interactive=False),
+            options=_base_init_options(),
+            setup_mode=SETUP_MODE_QUICKSTART,
+            requested_target=LOCAL_TARGET,
+            has_source_checkout=False,
+        )
+        self.assertEqual(runtime_source, RUNTIME_SOURCE_PUBLISHED)
 
 
 if __name__ == "__main__":
