@@ -153,7 +153,7 @@ enum AssistantWSInboundType: String, Codable, Sendable {
       let jsonObject = try JSONSerialization.jsonObject(with: data) as? [String: Any],
       let type = jsonObject["type"] as? String,
       let sessionID = jsonObject["session_id"] as? String,
-      let seq = jsonObject["seq"] as? Int,
+      let seq = decodeInteger(jsonObject["seq"]),
       let tsValue = jsonObject["ts_ms"]
     else {
       throw AssistantTransportError.decoding("Malformed websocket control envelope.")
@@ -170,14 +170,40 @@ enum AssistantWSInboundType: String, Codable, Sendable {
       throw AssistantTransportError.decoding("Invalid websocket envelope timestamp.")
     }
 
-    let payloadObject = jsonObject["payload"] ?? [:]
-    guard JSONSerialization.isValidJSONObject(payloadObject) else {
+    guard let payloadObject = normalizePayloadObject(jsonObject["payload"]),
+      JSONSerialization.isValidJSONObject(payloadObject)
+    else {
       throw AssistantTransportError.decoding("Invalid websocket envelope payload object.")
     }
 
     let payloadData = try JSONSerialization.data(withJSONObject: payloadObject)
     let payload = try decoder.decode(payloadType, from: payloadData)
     return AssistantWSControlEnvelope(type: type, sessionID: sessionID, seq: seq, tsMs: tsMs, payload: payload)
+  }
+
+  private nonisolated static func decodeInteger(_ value: Any?) -> Int? {
+    if let integer = value as? Int {
+      return integer
+    }
+    guard let number = value as? NSNumber else {
+      return nil
+    }
+    let doubleValue = number.doubleValue
+    let intValue = number.intValue
+    guard doubleValue == Double(intValue) else {
+      return nil
+    }
+    return intValue
+  }
+
+  private nonisolated static func normalizePayloadObject(_ value: Any?) -> [String: Any]? {
+    if value == nil || value is NSNull {
+      return [:]
+    }
+    if let payloadObject = value as? [String: Any] {
+      return payloadObject
+    }
+    return nil
   }
 
   nonisolated static func encodeEnvelope<Payload: Encodable>(

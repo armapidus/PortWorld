@@ -8,6 +8,7 @@ extension BackendSessionClient {
 
       do {
         let message = try await webSocketTask.receive()
+        markConnectedIfCurrent(webSocketTask)
         switch message {
         case .string(let text):
           guard let data = text.data(using: .utf8) else { continue }
@@ -31,8 +32,39 @@ extension BackendSessionClient {
 
   func shouldIgnoreReceiveLoopError(_ error: Error) -> Bool {
     guard isLocallyDisconnecting else { return false }
+
+    if let urlError = error as? URLError, urlError.code == .cancelled {
+      return true
+    }
+
+    let nsError = error as NSError
+    if isExpectedDisconnectNSError(nsError) {
+      return true
+    }
+
+    if let underlyingError = nsError.userInfo[NSUnderlyingErrorKey] as? NSError,
+      isExpectedDisconnectNSError(underlyingError)
+    {
+      return true
+    }
+
     let normalized = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     return normalized.contains("socket is not connected")
+  }
+
+  func isExpectedDisconnectNSError(_ error: NSError) -> Bool {
+    if error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled {
+      return true
+    }
+
+    if error.domain == NSPOSIXErrorDomain,
+      let posixCode = POSIXErrorCode(rawValue: Int32(error.code)),
+      posixCode == .ENOTCONN
+    {
+      return true
+    }
+
+    return false
   }
 
   func handleControlMessage(_ data: Data) async throws {

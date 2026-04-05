@@ -74,8 +74,6 @@ actor BackendSessionClient {
     connectionState = .connecting
     yieldEvent(.stateChanged(.connecting))
     task.resume()
-    connectionState = .connected
-    yieldEvent(.stateChanged(.connected))
     receiveTask = Task { [weak self] in
       await self?.runReceiveLoop()
     }
@@ -162,6 +160,14 @@ actor BackendSessionClient {
 
   func setEventHandler(_ handler: (@Sendable (EventEnvelope) -> Void)?) {
     eventHandler = handler
+  }
+
+  func markConnectedIfCurrent(_ task: URLSessionWebSocketTask) {
+    guard webSocketTask === task, connectionState == .connecting else {
+      return
+    }
+    connectionState = .connected
+    yieldEvent(.stateChanged(.connected))
   }
 
   func yieldEvent(_ event: Event, sessionID: String? = nil) {

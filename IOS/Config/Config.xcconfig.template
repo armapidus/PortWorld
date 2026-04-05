@@ -1,5 +1,5 @@
 // Copy this file to Debug.xcconfig or Release.xcconfig and set environment-specific values.
-BACKEND_BASE_URL = http:/$()/127.0.0.1:8080
+BACKEND_BASE_URL = http://127.0.0.1:8080
 
 // DAT developer mode defaults
 PORTWORLD_DAT_META_APP_ID =

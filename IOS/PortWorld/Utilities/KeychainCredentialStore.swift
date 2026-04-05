@@ -6,6 +6,7 @@ enum KeychainCredentialStore {
   private static let service = "com.portworld.ios.credentials"
   private static let apiKeyAccount = "api-key"
   private static let bearerTokenAccount = "bearer-token"
+  private static let accessibility = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
 
   enum KeychainError: Error, Equatable {
     case duplicateItem
@@ -69,6 +70,7 @@ enum KeychainCredentialStore {
 
     var addQuery = baseQuery
     addQuery[kSecValueData as String] = data
+    addQuery[kSecAttrAccessible as String] = accessibility
 
     let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
     switch addStatus {
@@ -76,7 +78,8 @@ enum KeychainCredentialStore {
       return
     case errSecDuplicateItem:
       let updateAttributes: [String: Any] = [
-        kSecValueData as String: data
+        kSecValueData as String: data,
+        kSecAttrAccessible as String: accessibility,
       ]
       let updateStatus = SecItemUpdate(baseQuery as CFDictionary, updateAttributes as CFDictionary)
       guard updateStatus == errSecSuccess else {
