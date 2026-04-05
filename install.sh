@@ -154,6 +154,39 @@ prepend_path_dir() {
   esac
 }
 
+append_line_if_missing() {
+  local file="$1"
+  local line="$2"
+  [[ -n "$file" ]] || return 0
+  if [[ ! -f "$file" ]]; then
+    : >"$file"
+  fi
+  grep -Fqx "$line" "$file" 2>/dev/null || printf '%s\n' "$line" >>"$file"
+}
+
+persist_path_dir() {
+  local dir="$1"
+  local export_line="export PATH=\"$dir:\$PATH\""
+  local profile_files=()
+
+  [[ -n "$dir" ]] || return 0
+  [[ -d "$dir" ]] || return 0
+
+  case "$CURRENT_OS" in
+    linux)
+      profile_files+=("$HOME/.profile" "$HOME/.bashrc")
+      ;;
+    macos)
+      profile_files+=("$HOME/.zprofile" "$HOME/.bash_profile")
+      ;;
+  esac
+
+  local file
+  for file in "${profile_files[@]}"; do
+    append_line_if_missing "$file" "$export_line"
+  done
+}
+
 ensure_supported_os() {
   case "$(uname -s 2>/dev/null || true)" in
     Darwin)
@@ -307,11 +340,11 @@ normalize_node_version() {
 resolve_latest_lts_node_version() {
   local raw_json
   raw_json="$(curl_get "$NODE_DIST_BASE_URL/index.json")" || return 1
-  PORTWORLD_NODE_RELEASE_PAYLOAD="$raw_json" run_selected_python -c '
+  printf '%s' "$raw_json" | run_selected_python -c '
 import json
-import os
+import sys
 
-raw = os.environ.get("PORTWORLD_NODE_RELEASE_PAYLOAD", "").strip()
+raw = sys.stdin.read().strip()
 if not raw:
     raise SystemExit(1)
 payload = json.loads(raw)
@@ -470,11 +503,11 @@ version_from_tag() {
 resolve_latest_release_tag() {
   local raw_json
   raw_json="$(curl_get "$PORTWORLD_RELEASE_API_URL")" || return 1
-  PORTWORLD_RELEASE_PAYLOAD="$raw_json" run_selected_python -c '
+  printf '%s' "$raw_json" | run_selected_python -c '
 import json
-import os
+import sys
 
-raw = os.environ.get("PORTWORLD_RELEASE_PAYLOAD", "").strip()
+raw = sys.stdin.read().strip()
 if not raw:
     raise SystemExit(1)
 payload = json.loads(raw)
@@ -518,6 +551,17 @@ ensure_portworld_on_path() {
     "portworld was installed but is not on PATH. Open a new shell or run: export PATH=\"$uv_tool_bin_dir:\$PATH\""
 }
 
+persist_tooling_path() {
+  local uv_tool_bin_dir
+  uv_tool_bin_dir="$("$UV_BIN" tool dir --bin 2>/dev/null || true)"
+  if [[ -z "$uv_tool_bin_dir" ]]; then
+    uv_tool_bin_dir="$HOME/.local/bin"
+  fi
+  persist_path_dir "$uv_tool_bin_dir"
+  log_info "Persisted PATH update for future shells: $uv_tool_bin_dir"
+  log_info "Current shell: run 'export PATH=\"$uv_tool_bin_dir:\$PATH\" && hash -r' if needed"
+}
+
 run_install() {
   local -a install_args
 
@@ -546,6 +590,7 @@ run_install() {
 
   "${install_args[@]}"
   ensure_portworld_on_path
+  persist_tooling_path
   portworld --version >/dev/null
   log_success "PortWorld CLI installed"
 }
