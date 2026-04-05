@@ -2,6 +2,20 @@
   <img src="Port World logo.png" width="100%" alt="Port:World Logo">
 </p>
 
+<p align="center">
+  <strong>Open-source runtime for voice-and-vision AI assistants connected to the real world.</strong>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
+  <a href="#quickstart"><img src="https://img.shields.io/badge/PyPI-portworld-3775A9?logo=pypi&logoColor=white" alt="PyPI package portworld" /></a>
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+" />
+  <img src="https://img.shields.io/badge/iOS-17%2B-black" alt="iOS 17+" />
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey" alt="Platform" />
+</p>
+
+---
+
 ## What if AI could see the world the way we do?
 
 **Port:World** is an open source framework that lets anyone connect their Meta glasses to any AI.
@@ -13,18 +27,8 @@ It connects an iOS app running on Meta glasses to a FastAPI backend that handles
 
 Built during the Mistral Worldwide Hackathon 2026 by **Pierre Haas, Vassili de Rosen, Arman Artola.**
 
-🏆 **We finished top 10 out of 600 teams worldwide + won the Giant Venture prize "futur unicorn prize".** 🏆
-
 <p align="center">
-  <strong>Open-source runtime for voice-and-vision AI assistants connected to the real world.</strong>
-</p>
-
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
-  <a href="https://pypi.org/project/portworld/"><img src="https://img.shields.io/pypi/v/portworld?label=CLI" alt="PyPI" /></a>
-  <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+" />
-  <img src="https://img.shields.io/badge/iOS-17%2B-black" alt="iOS 17+" />
-  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey" alt="Platform" />
+  🏆 <strong>We finished top 10 out of 600 teams worldwide + won the Giant Venture prize "futur unicorn prize".</strong> 🏆
 </p>
 
 ---
