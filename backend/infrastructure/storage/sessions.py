@@ -26,26 +26,20 @@ logger = logging.getLogger(__name__)
 class SessionStorageMixin:
     def bootstrap_session_storage(self, *, session_id: str) -> SessionStorageResult:
         session_dir = self.session_storage_dir(session_id=session_id)
-        created_session_dir = not session_dir.exists()
         session_dir.mkdir(parents=True, exist_ok=True)
         session_storage = self._build_session_storage_result(session_id=session_id)
 
-        created_any = created_session_dir
-        created_any = self._ensure_text_file(
+        self._ensure_text_file(
             session_storage.short_term_memory_markdown_path,
             SHORT_TERM_MEMORY_TEMPLATE,
-        ) or created_any
-        created_any = self._ensure_text_file(
+        )
+        self._ensure_text_file(
             session_storage.session_memory_markdown_path,
             SESSION_MEMORY_TEMPLATE,
-        ) or created_any
-        created_any = (
-            self._ensure_text_file(session_storage.memory_candidates_log_path, "") or created_any
         )
-        created_any = self._ensure_text_file(session_storage.vision_events_log_path, "") or created_any
-        created_any = (
-            self._ensure_text_file(session_storage.vision_routing_events_log_path, "") or created_any
-        )
+        self._ensure_text_file(session_storage.memory_candidates_log_path, "")
+        self._ensure_text_file(session_storage.vision_events_log_path, "")
+        self._ensure_text_file(session_storage.vision_routing_events_log_path, "")
 
         return session_storage
 

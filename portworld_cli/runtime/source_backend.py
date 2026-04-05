@@ -41,7 +41,7 @@ def coerce_source_backend_payload(
         try:
             payload = json.loads(stdout)
         except json.JSONDecodeError:
-            payload = None
+            pass
         else:
             if isinstance(payload, dict):
                 return payload

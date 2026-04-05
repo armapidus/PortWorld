@@ -34,19 +34,6 @@ _UPDATE_ALLOWED_PROVIDERS_BY_TARGET: dict[str, str | None] = {
     TARGET_AZURE_CONTAINER_APPS: PROVIDER_KEY_AZURE,
 }
 
-_SUPPORTED_DOCTOR_TARGETS = (
-    "local",
-    TARGET_GCP_CLOUD_RUN,
-    TARGET_AWS_ECS_FARGATE,
-    TARGET_AZURE_CONTAINER_APPS,
-)
-
-_SUPPORTED_MANAGED_TARGETS = (
-    TARGET_GCP_CLOUD_RUN,
-    TARGET_AWS_ECS_FARGATE,
-    TARGET_AZURE_CONTAINER_APPS,
-)
-
 
 @dataclass(frozen=True, slots=True)
 class GCPCloudOptions:
@@ -365,4 +352,3 @@ def problem_next_message(*, problem: str, next_step: str, stage: str | None = No
     lines.append(f"problem: {problem}")
     lines.append(f"next: {next_step}")
     return "\n".join(lines)
-

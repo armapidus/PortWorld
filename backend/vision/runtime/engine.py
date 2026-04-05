@@ -217,6 +217,7 @@ class VisionMemoryRuntime(
                 try:
                     await worker.task
                 except asyncio.CancelledError:
+                    # Task cancellation is expected after an explicit timeout-driven cancel.
                     pass
             except asyncio.CancelledError:
                 pass

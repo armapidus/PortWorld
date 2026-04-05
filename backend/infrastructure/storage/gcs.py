@@ -6,7 +6,9 @@ try:
     from google.api_core.exceptions import NotFound
     from google.cloud import storage
 except ImportError:  # pragma: no cover - exercised only when dependency is missing at runtime.
-    NotFound = None
+    class NotFound(Exception):
+        """Fallback exception type so optional-import handlers remain valid."""
+
     storage = None
 
 
