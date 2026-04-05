@@ -59,6 +59,7 @@ def tls_http_get_upgrade(
     request_lines = [f"GET {path} HTTP/1.1", *(f"{key}: {value}" for key, value in headers.items()), "", ""]
     request = "\r\n".join(request_lines).encode("ascii", errors="ignore")
     context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     with socket.create_connection((host, port), timeout=timeout) as tcp_sock:
         with context.wrap_socket(tcp_sock, server_hostname=host) as tls_sock:
             tls_sock.settimeout(timeout)

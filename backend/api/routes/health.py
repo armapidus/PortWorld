@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter
@@ -15,6 +16,7 @@ from backend.core.constants import SERVICE_NAME
 from backend.core.runtime import get_app_runtime
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class HealthStatusResponse(BaseModel):
@@ -44,12 +46,12 @@ def _readiness_checks(request: Request, *, redact_details: bool) -> list[dict[st
         RealtimeProviderFactory(settings=runtime.settings).validate_configuration()
         checks.append({"name": "realtime_provider_configuration", "ok": True})
     except Exception as exc:
-        detail = "check_failed" if redact_details else str(exc)
+        logger.warning("readyz realtime provider validation failed: %s", exc)
         checks.append(
             {
                 "name": "realtime_provider_configuration",
                 "ok": False,
-                "detail": detail,
+                "detail": "check_failed",
             }
         )
     try:
@@ -57,12 +59,12 @@ def _readiness_checks(request: Request, *, redact_details: bool) -> list[dict[st
             VisionAnalyzerFactory(settings=runtime.settings).validate_configuration()
         checks.append({"name": "vision_provider_configuration", "ok": True})
     except Exception as exc:
-        detail = "check_failed" if redact_details else str(exc)
+        logger.warning("readyz vision provider validation failed: %s", exc)
         checks.append(
             {
                 "name": "vision_provider_configuration",
                 "ok": False,
-                "detail": detail,
+                "detail": "check_failed",
             }
         )
     try:
@@ -70,12 +72,12 @@ def _readiness_checks(request: Request, *, redact_details: bool) -> list[dict[st
             SearchProviderFactory(settings=runtime.settings)
         checks.append({"name": "realtime_tooling_configuration", "ok": True})
     except Exception as exc:
-        detail = "check_failed" if redact_details else str(exc)
+        logger.warning("readyz realtime tooling validation failed: %s", exc)
         checks.append(
             {
                 "name": "realtime_tooling_configuration",
                 "ok": False,
-                "detail": detail,
+                "detail": "check_failed",
             }
         )
     if runtime.settings.realtime_tooling_enabled:

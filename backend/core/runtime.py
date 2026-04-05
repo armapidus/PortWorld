@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from hashlib import sha1
+from hashlib import sha256
 from typing import TYPE_CHECKING, Any
 
 from backend.bootstrap.runtime import build_runtime_dependencies
@@ -231,4 +231,4 @@ def _rate_key(raw_value: str) -> str:
         return "unknown"
     if len(normalized) <= 64:
         return normalized
-    return sha1(normalized.encode("utf-8")).hexdigest()
+    return sha256(normalized.encode("utf-8")).hexdigest()
