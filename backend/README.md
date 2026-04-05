@@ -207,7 +207,7 @@ portworld providers show <provider_id>
 
 Notes:
 - `POST /vision/frame` acknowledges ingest, not completed analysis. Use `GET /memory/sessions/{id}/status` to inspect analysis state.
-- `mistral` uses native model IDs such as `ministral-14b-2512`.
+- `mistral` uses native model IDs such as `ministral-3b-2512`.
 - `nvidia_integrate` uses NVIDIA-style model IDs such as `mistralai/ministral-14b-instruct-2512`.
 
 ## Storage

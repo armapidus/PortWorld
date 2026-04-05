@@ -19,7 +19,7 @@ STORAGE_BACKEND_MANAGED = "managed"
 SUPPORTED_STORAGE_BACKENDS = {"local", STORAGE_BACKEND_MANAGED}
 SUPPORTED_OBJECT_STORE_PROVIDERS = {"filesystem", "gcs", "s3", "azure_blob"}
 DEFAULT_VISION_MODELS_BY_PROVIDER: dict[str, str] = {
-    "mistral": "ministral-14b-2512",
+    "mistral": "ministral-3b-2512",
     "nvidia_integrate": "mistralai/ministral-14b-instruct-2512",
     "openai": "gpt-5.4-nano",
     "gemini": "gemini-3.1-flash-lite-preview",

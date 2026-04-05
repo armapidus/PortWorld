@@ -118,16 +118,19 @@ class BackendProviderSettingsTests(unittest.TestCase):
         )
 
         self.assertEqual(settings.resolve_vision_provider_model(provider="mistral"), "ministral-3b-2512")
-        self.assertEqual(settings.resolve_vision_provider_model(provider="openai"), "gpt-4.1-mini")
-        self.assertEqual(settings.resolve_vision_provider_model(provider="gemini"), "gemini-2.0-flash")
-        self.assertEqual(settings.resolve_vision_provider_model(provider="claude"), "claude-3-5-sonnet-latest")
+        self.assertEqual(settings.resolve_vision_provider_model(provider="openai"), "gpt-5.4-nano")
+        self.assertEqual(
+            settings.resolve_vision_provider_model(provider="gemini"),
+            "gemini-3.1-flash-lite-preview",
+        )
+        self.assertEqual(settings.resolve_vision_provider_model(provider="claude"), "claude-haiku-4-5")
         self.assertEqual(
             settings.resolve_vision_provider_model(provider="bedrock"),
-            "anthropic.claude-3-5-sonnet-20240620-v1:0",
+            "mistral.ministral-3-3b-instruct",
         )
         self.assertEqual(
             settings.resolve_vision_provider_model(provider="groq"),
-            "llama-3.2-90b-vision-preview",
+            "meta-llama/llama-4-scout-17b-16e-instruct",
         )
 
     def test_openai_realtime_registry_exports_capabilities(self) -> None:
