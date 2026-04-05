@@ -75,8 +75,12 @@ Documentation = "https://github.com/portworld/PortWorld/blob/main/portworld_cli/
 [project.optional-dependencies]
 dev = [
   "build>=1.2.2",
+  "pytest>=8.0.0",
   "twine>=5.1.1",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
 include = ["portworld_cli*", "portworld_shared*"]
