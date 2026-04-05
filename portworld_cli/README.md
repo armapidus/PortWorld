@@ -22,6 +22,22 @@ Bootstrap installer (installs `uv`, Python 3.11+, and Node.js tooling if missing
 curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/portworld/PortWorld/main/install.sh | bash
 ```
 
+## Agent skill (Cursor, Codex, others)
+
+Install the **portworld-cli-autopilot** skill so agents get consistent bootstrap and operator commands ([Agent Skills](https://agentskills.io) format):
+
+```bash
+npx skills add portworld/PortWorld --skill portworld-cli-autopilot -a cursor -a codex -y
+```
+
+Direct install of the skill folder only:
+
+```bash
+npx skills add https://github.com/portworld/PortWorld/tree/main/skills/portworld-cli-autopilot -y
+```
+
+See [skills/README.md](https://github.com/portworld/PortWorld/blob/main/skills/README.md) for `--list`, `-g` (global), and telemetry options.
+
 ## Requirements
 
 - macOS or Linux

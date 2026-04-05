@@ -1,53 +1,63 @@
 ---
 name: portworld-cli-autopilot
-description: Install, initialize, validate, and operate the PortWorld CLI end-to-end without asking developers to run setup manually. Use when working in the PortWorld repo and needing to bootstrap or re-bootstrap CLI config, run local readiness checks, inspect status/logs, or execute managed deploy flows (GCP/AWS/Azure) through `portworld` commands.
+description: Installs, initializes, validates, and operates the PortWorld `portworld` CLI end-to-end with non-interactive defaults. Use when the user needs CLI bootstrap or re-bootstrap, local readiness checks (`doctor`, `status`), managed deploy flows (GCP, AWS, Azure), logs, or config/providers work. Applies to a PortWorld git checkout, a published CLI install on PATH, or agents using this skill after `npx skills add`.
 ---
 
 # PortWorld CLI Autopilot
 
 ## Overview
 
-Automate PortWorld CLI setup and operation with non-interactive defaults so the agent performs setup work directly instead of delegating setup steps to developers.
+Automate PortWorld CLI setup and operation so the agent runs concrete commands instead of asking the user to perform setup steps manually.
 
 ## Use This Flow
 
-1. Run bootstrap first using `scripts/bootstrap_portworld_cli.sh`.
+1. Run bootstrap first using `scripts/bootstrap_portworld_cli.sh` (see [Bootstrap](#bootstrap-workflow)).
 2. Run the requested PortWorld CLI task (`doctor`, `status`, `logs`, `deploy`, `config`, `providers`, `update`).
-3. Verify with `doctor`/`status` before and after material changes.
+3. Verify with `doctor` / `status` before and after material changes.
 
 For detailed command matrices and target-specific examples, read [references/command-map.md](references/command-map.md).
 
+## CLI entry (choose one)
+
+- **`portworld`** — use when the CLI is installed from PyPI/pipx/uv tool and on `PATH` (typical for operators and many agents).
+- **`uv run python -m portworld_cli.main`** — use in a **repo checkout** with `uv sync` / editable install, or when debugging against source.
+
+Do not assume `uv` is available unless the workspace is a PortWorld clone with a synced environment.
+
 ## Bootstrap Workflow
 
+Bootstrap needs **`uv`**, a PortWorld **project root** (repo checkout or published workspace root), and **`OPENAI_API_KEY` or `GEMINI_LIVE_API_KEY`** in the environment.
+
 1. Confirm `uv` exists. If missing, stop and ask for permission to install `uv`.
-2. Run bootstrap script from repo root:
+2. **Change to the skill directory** (the folder that contains this `SKILL.md` — after `npx skills add`, that is the installed skill root, e.g. `.agents/skills/portworld-cli-autopilot` or `skills/portworld-cli-autopilot` in a clone).
+3. Run:
 
 ```bash
-./skills/portworld-cli-autopilot/scripts/bootstrap_portworld_cli.sh --project-root "<repo-root>" --mode source
+bash scripts/bootstrap_portworld_cli.sh --project-root "<repo-root>" --mode source
 ```
 
-3. For published workspace bootstrap:
+4. For published workspace bootstrap:
 
 ```bash
-./skills/portworld-cli-autopilot/scripts/bootstrap_portworld_cli.sh --project-root "<repo-root>" --mode published --stack-name default
+bash scripts/bootstrap_portworld_cli.sh --project-root "<repo-root>" --mode published --stack-name default
 ```
 
-4. Treat bootstrap as idempotent. Re-run when config drift or missing runtime prerequisites are detected.
+5. Treat bootstrap as idempotent. Re-run when config drift or missing runtime prerequisites are detected.
 
 ## Operating Rules
 
 1. Prefer non-interactive CLI execution in automation contexts.
 2. Prefer explicit flags over prompts.
-3. Keep defaults unless the user asked for custom provider/deploy shape.
-4. Use source mode for repo development tasks.
-5. Use published mode for operator-style local runtime when source checkout behavior is not needed.
+3. Keep defaults unless the user asked for custom provider or deploy shape.
+4. Use **source** mode for repo development tasks.
+5. Use **published** mode for operator-style local runtime when a source checkout is not required.
 
 ## Provider and Secrets Policy
 
 1. Use `OPENAI_API_KEY` when present.
-2. Fallback to `GEMINI_LIVE_API_KEY` when OpenAI key is absent.
+2. Fallback to `GEMINI_LIVE_API_KEY` when the OpenAI key is absent.
 3. If neither key exists, stop with one concise request for a key; do not continue with a half-configured setup.
-4. Keep vision/tooling disabled by default during bootstrap unless the user explicitly requests them.
+4. Keep vision and tooling disabled by default during bootstrap unless the user explicitly requests them.
 
 ## Verification Gates
 
@@ -57,26 +67,28 @@ For detailed command matrices and target-specific examples, read [references/com
 
 ## Common Task Shortcuts
 
+Prefer `portworld` when available; otherwise use `uv run` as in [references/command-map.md](references/command-map.md).
+
 1. Validate local runtime:
 
 ```bash
-uv run python -m portworld_cli.main doctor --target local
+portworld doctor --target local
 ```
 
 2. Show workspace/deploy state:
 
 ```bash
-uv run python -m portworld_cli.main status
+portworld status
 ```
 
 3. Show config:
 
 ```bash
-uv run python -m portworld_cli.main config show
+portworld config show
 ```
 
 4. List providers:
 
 ```bash
-uv run python -m portworld_cli.main providers list
+portworld providers list
 ```

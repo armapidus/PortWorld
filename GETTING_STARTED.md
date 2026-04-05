@@ -14,6 +14,7 @@ For subsystem-specific detail after initial setup:
 - backend runtime reference: [backend/README.md](backend/README.md)
 - CLI/operator reference: [portworld_cli/README.md](portworld_cli/README.md)
 - iOS app reference: [IOS/README.md](IOS/README.md)
+- agent skill install (`npx skills add`): [skills/README.md](skills/README.md)
 
 ## Minimum Supported Platforms And Tools
 
@@ -136,6 +137,22 @@ The first meaningful success state for the source path is:
 3. `curl http://127.0.0.1:8080/livez` returns `{"status":"ok","service":"portworld-backend"}`
 4. Xcode opens `IOS/PortWorld.xcodeproj` and the `PortWorld` scheme builds
 5. the app can validate a reachable PortWorld backend in its onboarding flow
+
+## Agent skill for the CLI (Cursor, Codex, others)
+
+To give coding agents guided steps for `portworld` bootstrap, `doctor`, deploy, and logs, install the **portworld-cli-autopilot** skill from this repository using the [skills CLI](https://github.com/vercel-labs/skills):
+
+```bash
+npx skills add portworld/PortWorld --skill portworld-cli-autopilot -a cursor -a codex -y
+```
+
+Or install only that skill folder via tree URL:
+
+```bash
+npx skills add https://github.com/portworld/PortWorld/tree/main/skills/portworld-cli-autopilot -y
+```
+
+Details, `--list`, and global install: [skills/README.md](skills/README.md).
 
 ## What To Read Next
 

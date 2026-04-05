@@ -46,6 +46,7 @@ Golden rules:
 - Active backend runtime: `backend/`
 - Active public CLI: `portworld_cli/`
 - Active shared Python contracts: `portworld_shared/`
+- CLI agent skill (Codex, Cursor, etc.): `skills/portworld-cli-autopilot/` — install for end users with `npx skills add` ([skills/README.md](skills/README.md))
 - Historical docs: `docs/archived/`
 - Historical runtime context: git history
 
