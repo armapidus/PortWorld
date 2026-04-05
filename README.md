@@ -1,6 +1,19 @@
 <p align="center">
-  <img src="portworldimage.png" alt="PortWorld" width="480" />
+  <img src="Port World logo.png" width="100%" alt="Port:World Logo">
 </p>
+
+## What if AI could see the world the way we do?
+
+**Port:World** is an open source framework that lets anyone connect their Meta glasses to any AI.
+The AI sees exactly what the wearer sees and can respond with voice, reasoning, or actions.
+
+The use cases are infinite: connect your AI agents, customize them, prompt them, link your MCP, connect your OpenClaw…
+
+It connects an iOS app running on Meta glasses to a FastAPI backend that handles video streaming, AI inference, voice responses, and tool execution. You define the prompts and domain logic. Port:World handles the streaming, model routing, and real-time communication.
+
+Built during the Mistral Worldwide Hackathon 2026 by **Pierre Haas, Vassili de Rosen, Arman Artola.**
+
+🏆 **We finished top 10 out of 600 teams worldwide + won the Giant Venture prize "futur unicorn prize".** 🏆
 
 <p align="center">
   <strong>Open-source runtime for voice-and-vision AI assistants connected to the real world.</strong>
@@ -15,8 +28,6 @@
 </p>
 
 ---
-
-PortWorld is a self-hostable backend and iOS client for building AI assistants that can hear, see, and remember. It bridges realtime voice sessions through selectable AI providers, processes vision frames from Meta Ray-Ban smart glasses, and maintains persistent memory across conversations. Deploy locally with Docker, or push to GCP, AWS, or Azure with a single CLI command.
 
 ## Architecture
 
@@ -113,7 +124,7 @@ Everything else (vision, tooling, consolidation) is off by default and can be en
 ### Realtime
 
 | Provider | ID | Required Key |
-|----------|----|-------------|
+|----------|----|--------------|
 | OpenAI Realtime | `openai` | `OPENAI_API_KEY` |
 | Gemini Live | `gemini_live` | `GEMINI_LIVE_API_KEY` |
 
@@ -133,7 +144,7 @@ Everything else (vision, tooling, consolidation) is off by default and can be en
 ### Search (opt-in)
 
 | Provider | ID | Required Key |
-|----------|----|-------------|
+|----------|----|--------------|
 | Tavily | `tavily` | `TAVILY_API_KEY` |
 
 Use `portworld providers list` and `portworld providers show <id>` to inspect providers from the CLI.
