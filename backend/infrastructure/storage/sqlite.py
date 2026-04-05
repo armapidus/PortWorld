@@ -277,14 +277,15 @@ class SQLiteStorageMixin:
         operation: Callable[[], _SQLiteRetryResult],
     ) -> _SQLiteRetryResult:
         """Sync-only helper. Intended for storage calls already running off the event loop."""
-        for attempt_index in range(len(_SQLITE_BUSY_BACKOFF_SECONDS) + 1):
+        total_attempts = len(_SQLITE_BUSY_BACKOFF_SECONDS) + 1
+        for attempt_index in range(total_attempts):
             try:
                 return operation()
             except sqlite3.OperationalError as exc:
-                if not self._is_sqlite_busy_error(exc) or attempt_index >= len(_SQLITE_BUSY_BACKOFF_SECONDS):
+                if not self._is_sqlite_busy_error(exc) or attempt_index + 1 >= total_attempts:
                     raise
                 sleep(_SQLITE_BUSY_BACKOFF_SECONDS[attempt_index])
-        return operation()
+        raise RuntimeError("sqlite retry loop exhausted without returning or raising")
 
     @staticmethod
     def _is_sqlite_busy_error(exc: sqlite3.OperationalError) -> bool:

@@ -570,7 +570,7 @@ class DurableMemoryConsolidationRuntime:
         )
         if next_user_memory is None or next_cross_session is None:
             logger.warning("Memory consolidation produced invalid markdown session=%s", session_id)
-            return
+            return "failed"
 
         if _materially_changed(user_memory_markdown, next_user_memory):
             await _run_storage(self.storage.write_user_memory, markdown=next_user_memory)

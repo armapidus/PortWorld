@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from backend.core.storage import now_ms
 from backend.memory.materializer import build_accepted_vision_event
 from backend.vision.contracts import VisionProviderError, VisionRateLimitError
-from backend.vision.policy.gating import AcceptedFrameReference, VisionGateError, VisionRouteDecision, extract_vision_signal_snapshot
+from backend.vision.policy.gating import AcceptedFrameReference, VisionRouteDecision, extract_vision_signal_snapshot
 from backend.vision.runtime.models import (
     DeferredVisionCandidate,
     PendingVisionFrame,
@@ -15,10 +15,6 @@ from backend.vision.runtime.models import (
 )
 
 logger = logging.getLogger(__name__)
-
-if TYPE_CHECKING:
-    from backend.vision.policy.gating import VisionProviderBudgetState, VisionSignalSnapshot
-    from backend.vision.runtime.models import SessionVisionWorker
 
 
 class VisionAnalysisMixin:
