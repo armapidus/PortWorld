@@ -383,6 +383,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download distributions
         uses: actions/download-artifact@v5
         with:
