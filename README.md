@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
-  <a href="#quickstart"><img src="https://img.shields.io/badge/PyPI-portworld-3775A9?logo=pypi&logoColor=white" alt="PyPI package portworld" /></a>
+  <a href="#quickstart"><img src="https://img.shields.io/badge/CLI-installer-3775A9" alt="PortWorld CLI installer" /></a>
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+" />
   <img src="https://img.shields.io/badge/iOS-17%2B-black" alt="iOS 17+" />
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey" alt="Platform" />
@@ -178,9 +178,11 @@ See the [CLI README](portworld_cli/README.md) for readiness checks, log streamin
 
 ## Status
 
-PortWorld ships as a public `v0.x` beta. The supported surfaces are usable today, but the project is under active development.
+PortWorld is in its first stable release cutover. The core product surfaces are release-ready, while managed deploy hardening and operator-facing documentation continue to improve.
 
-**Stable:** backend self-hosting, CLI bootstrap and deploy workflows, iOS app with Meta glasses integration, published CLI on PyPI.
+**Stable-targeted:** backend self-hosting, CLI bootstrap and deploy workflows, and the iOS app with Meta glasses integration.
+
+**Release rollout:** the first public PyPI publication and GitHub release packaging land with the `v0.2.0` release cut.
 
 **Hardening:** managed cloud deploy defaults, public-facing operator documentation, production security posture for one-click deploys.
 
