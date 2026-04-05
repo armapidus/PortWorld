@@ -14,7 +14,6 @@ from portworld_cli.targets import (
 from portworld_cli.workspace.project_config import (
     AWSECSFargateConfig,
     AzureContainerAppsConfig,
-    GCP_CLOUD_RUN_TARGET,
     PROJECT_MODE_LOCAL,
     PROJECT_MODE_MANAGED,
     RUNTIME_SOURCE_PUBLISHED,
@@ -28,7 +27,6 @@ from portworld_cli.services.config.prompts import (
     normalize_backend_profile,
     resolve_bearer_token,
     resolve_choice_value,
-    resolve_csv_value,
     resolve_int_value,
     resolve_optional_text_value,
     resolve_required_text_value,

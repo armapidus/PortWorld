@@ -4,7 +4,6 @@ from collections import OrderedDict
 from pathlib import Path
 import unittest
 
-from portworld_cli.context import CLIContext
 from portworld_cli.envfile import ParsedEnvFile
 from portworld_cli.services.init.service import _bearer_token_changed, _build_final_success_message
 

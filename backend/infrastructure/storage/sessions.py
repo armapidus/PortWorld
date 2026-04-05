@@ -10,10 +10,9 @@ from typing import Any
 
 from backend.infrastructure.storage.errors import SessionNotFoundError
 from backend.infrastructure.storage.types import SessionMemoryResetResult, SessionStorageResult, now_ms
-from backend.memory.candidates import MemoryCandidate, coerce_memory_candidate
+from backend.memory.candidates import coerce_memory_candidate
 from backend.memory.events import AcceptedVisionEvent, coerce_accepted_vision_event
 from backend.memory.lifecycle import (
-    MEMORY_CANDIDATES_LOG_FILE_NAME,
     SHORT_TERM_MEMORY_TEMPLATE,
     SESSION_MEMORY_TEMPLATE,
     SessionMemoryResetEligibility,

@@ -9,8 +9,6 @@ import tempfile
 import unittest
 from unittest import mock
 
-import backend.tools.runtime
-
 from backend.bootstrap.runtime import check_runtime_configuration
 from backend.core.settings import Settings
 from backend.extensions.manifest import ExtensionManifestError, load_extension_manifest

@@ -1,11 +1,5 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from backend.vision.policy.gating import VisionProviderBudgetState, VisionRouteDecision, VisionSignalSnapshot
-    from backend.vision.runtime.models import PendingVisionFrame
-
 
 class VisionFrameJournalMixin:
     def _build_routing_metadata(
