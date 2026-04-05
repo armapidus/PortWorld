@@ -26,6 +26,29 @@ must mirror the corresponding section in this changelog.
 
 - No user-visible security changes recorded yet.
 
+## [v0.2.1] - 2026-04-05
+
+### Added
+
+- No user-visible additions recorded yet.
+
+### Changed
+
+- Backend container builds now use a dedicated backend package manifest and a
+  backend-only wheel install path, so the published GHCR image no longer ships
+  CLI source or build leftovers.
+
+### Fixed
+
+- The tagged release workflow now checks out the repository before creating the
+  GitHub Release, so annotated tag notes can be published correctly.
+- Backend image smoke checks now assert that runtime images do not contain
+  `/app/portworld_cli`, `/app/build`, or top-level `*.egg-info` leftovers.
+
+### Security
+
+- No user-visible security changes recorded yet.
+
 ## [v0.2.0] - 2026-04-05
 
 ### Added
