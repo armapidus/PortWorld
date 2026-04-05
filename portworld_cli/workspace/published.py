@@ -100,7 +100,7 @@ def resolve_published_release_ref(requested_tag: str | None) -> PublishedRelease
 
     if not RELEASE_TAG_RE.match(release_tag):
         raise PublishedWorkspaceError(
-            "Published workspaces require a concrete release tag like v0.1.0 or --release-tag latest."
+            "Published workspaces require a concrete release tag like vX.Y.Z or --release-tag latest."
         )
     return PublishedReleaseRef(
         release_tag=release_tag,

@@ -80,8 +80,6 @@
 	<string>$(BACKEND_BEARER_TOKEN)</string>
 	<key>SON_PHOTO_FPS</key>
 	<real>1</real>
-	<key>SON_QUERY_PATH</key>
-	<string>/v1/query</string>
 	<key>SON_SLEEP_PHRASE</key>
 	<string>goodbye mario</string>
 	<key>SON_VISION_PATH</key>
