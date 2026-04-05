@@ -121,6 +121,9 @@ jobs:
           docker exec portworld-backend-smoke node --version
           docker exec portworld-backend-smoke npm --version
           docker exec portworld-backend-smoke npx --version
+          docker exec portworld-backend-smoke test ! -d /app/portworld_cli
+          docker exec portworld-backend-smoke test ! -d /app/build
+          docker exec portworld-backend-smoke sh -lc 'test -z "$(find /app -maxdepth 1 -name "*.egg-info" -print -quit)"'
 
           docker run --rm \
             -e OPENAI_API_KEY=test-key \

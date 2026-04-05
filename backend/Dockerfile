@@ -2,34 +2,37 @@ ARG PORTWORLD_NODE_IMAGE=node:22-bookworm-slim
 
 FROM ${PORTWORLD_NODE_IMAGE} AS node-runtime
 
+FROM python:3.11-slim AS python-builder
+
+COPY --from=ghcr.io/astral-sh/uv:0.9.13 /uv /uvx /bin/
+
+WORKDIR /src/backend
+
+COPY backend/ ./
+
+RUN uv build --wheel . --out-dir /tmp/dist
+
+FROM python:3.11-slim AS python-installer
+
+COPY --from=ghcr.io/astral-sh/uv:0.9.13 /uv /uvx /bin/
+COPY --from=python-builder /tmp/dist/*.whl /tmp/dist/
+
+RUN uv pip install --system /tmp/dist/*.whl \
+    && rm -rf /tmp/dist /root/.cache/uv /bin/uv /bin/uvx
+
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Keep the runtime rooted at /app so BACKEND_DATA_DIR=backend/var resolves
-# consistently for both local Compose and later container-hosted installs.
 WORKDIR /app
 
 COPY --from=node-runtime /usr/local/ /usr/local/
+COPY --from=python-installer /usr/local/lib/python3.11/site-packages/ /usr/local/lib/python3.11/site-packages/
 
-COPY pyproject.toml ./pyproject.toml
-COPY backend/README.md ./backend/README.md
-COPY backend/__init__.py ./backend/__init__.py
-COPY backend/cli.py ./backend/cli.py
-COPY portworld_cli/ ./portworld_cli/
-COPY backend/api/ ./backend/api/
-COPY backend/bootstrap/ ./backend/bootstrap/
-COPY backend/core/ ./backend/core/
-COPY backend/extensions/ ./backend/extensions/
-COPY backend/infrastructure/ ./backend/infrastructure/
-COPY backend/memory/ ./backend/memory/
-COPY backend/realtime/ ./backend/realtime/
-COPY backend/tools/ ./backend/tools/
-COPY backend/vision/ ./backend/vision/
-COPY backend/ws/ ./backend/ws/
-
-RUN pip install --no-cache-dir .
+# Keep the runtime rooted at /app so BACKEND_DATA_DIR=backend/var resolves
+# consistently for both local Compose and later container-hosted installs.
+RUN mkdir -p /app/backend/var
 
 EXPOSE 8080
 

@@ -1,10 +1,10 @@
 # Transitional pinned dependency artifact kept for compatibility.
-# The authoritative dependency source of truth now lives in pyproject.toml.
-# Refresh intentionally from pyproject.toml when this file is still needed.
+# The authoritative backend runtime dependency source of truth now lives in
+# backend/pyproject.toml. Refresh intentionally from that manifest when this
+# file is still needed.
 annotated-types==0.7.0
 anyio==4.11.0
 certifi==2025.11.12
-click==8.3.1
 fastapi==0.109.2
 h11==0.16.0
 httpcore==1.0.9
@@ -27,6 +27,4 @@ starlette==0.36.3
 typing-extensions==4.15.0
 typing-inspection==0.4.2
 uvicorn[standard]==0.27.1
-uvloop==0.22.1 ; sys_platform != "win32" and platform_python_implementation == "CPython"
-watchfiles==1.1.1
 websockets==15.0.1
