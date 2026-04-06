@@ -264,6 +264,13 @@ class Settings:
     vision_session_rollup_min_accepted_events: int
     vision_debug_retain_raw_frames: bool
     realtime_tooling_enabled: bool
+    openclaw_enabled: bool
+    openclaw_base_url: str | None
+    openclaw_auth_token: str | None
+    openclaw_agent_id: str
+    openclaw_request_timeout_ms: int
+    openclaw_task_ttl_seconds: int
+    openclaw_max_concurrent_tasks: int
     realtime_tool_timeout_ms: int
     realtime_web_search_provider: str
     realtime_web_search_max_results: int
@@ -798,6 +805,32 @@ def _load_tooling_settings(
         "realtime_tooling_enabled": _parse_bool_env(
             "REALTIME_TOOLING_ENABLED",
             default=False,
+        ),
+        "openclaw_enabled": _parse_bool_env(
+            "OPENCLAW_ENABLED",
+            default=False,
+        ),
+        "openclaw_base_url": (_get_env("OPENCLAW_BASE_URL") or "").strip() or None,
+        "openclaw_auth_token": (_get_env("OPENCLAW_AUTH_TOKEN") or "").strip() or None,
+        "openclaw_agent_id": (
+            (_get_env("OPENCLAW_AGENT_ID") or "openclaw/default").strip()
+            or "openclaw/default"
+        ),
+        "openclaw_request_timeout_ms": _parse_int_env(
+            "OPENCLAW_REQUEST_TIMEOUT_MS",
+            default=60000,
+            minimum=1000,
+        ),
+        "openclaw_task_ttl_seconds": _parse_int_env(
+            "OPENCLAW_TASK_TTL_SECONDS",
+            default=3600,
+            minimum=60,
+        ),
+        "openclaw_max_concurrent_tasks": _parse_int_env(
+            "OPENCLAW_MAX_CONCURRENT_TASKS",
+            default=4,
+            minimum=1,
+            maximum=32,
         ),
         "realtime_tool_timeout_ms": _parse_int_env(
             "REALTIME_TOOL_TIMEOUT_MS",

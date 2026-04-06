@@ -17,6 +17,7 @@ from backend.extensions.models import ExtensionHealthSummary
 from backend.extensions.runtime import ExtensionRuntime
 from backend.tools.contracts import ToolCall, ToolDefinition, ToolResult
 from backend.tools.instructions import build_tool_usage_block, build_user_memory_instruction_snippet
+from backend.tools.openclaw_runtime import OpenClawDelegationRuntime
 from backend.tools.provider_factory import (
     SearchProviderBuilder,
     SearchProviderDefinition,
@@ -42,6 +43,7 @@ class RealtimeToolingRuntime:
     tool_timeout_ms: int
     web_search_max_results: int
     registry: RealtimeToolRegistry
+    openclaw_runtime: OpenClawDelegationRuntime | None = field(repr=False, compare=False)
     extension_runtime: ExtensionRuntime = field(repr=False, compare=False)
     search_provider_factory: SearchProviderFactory = field(repr=False, compare=False)
 
@@ -56,12 +58,14 @@ class RealtimeToolingRuntime:
         search_provider_factory = SearchProviderFactory(settings=settings)
         web_search_provider, search_provider = search_provider_factory.build_if_enabled()
         web_search_enabled = search_provider is not None
+        openclaw_runtime = OpenClawDelegationRuntime.from_settings(settings)
         context = ToolCatalogContext(
             storage=read_only_storage,
             user_memory_storage=storage,
             search_provider=search_provider,
             web_search_provider=web_search_provider,
             web_search_max_results=settings.realtime_web_search_max_results,
+            openclaw_runtime=openclaw_runtime,
         )
         extension_runtime = ExtensionRuntime.from_settings(
             settings=settings,
@@ -80,6 +84,7 @@ class RealtimeToolingRuntime:
             tool_timeout_ms=settings.realtime_tool_timeout_ms,
             web_search_max_results=settings.realtime_web_search_max_results,
             registry=registry,
+            openclaw_runtime=openclaw_runtime,
             extension_runtime=extension_runtime,
             search_provider_factory=search_provider_factory,
         )
@@ -118,6 +123,7 @@ class RealtimeToolingRuntime:
             tool_timeout_ms=self.tool_timeout_ms,
             web_search_max_results=self.web_search_max_results,
             registry=filtered_registry,
+            openclaw_runtime=self.openclaw_runtime,
             extension_runtime=self.extension_runtime,
             search_provider_factory=self.search_provider_factory,
         )
@@ -209,10 +215,14 @@ class RealtimeToolingRuntime:
     async def startup(self) -> None:
         if self.search_provider is not None:
             await self.search_provider.startup()
+        if self.openclaw_runtime is not None:
+            await self.openclaw_runtime.startup()
         await self.extension_runtime.startup(registry=self.registry)
 
     async def shutdown(self) -> None:
         await self.extension_runtime.shutdown()
+        if self.openclaw_runtime is not None:
+            await self.openclaw_runtime.shutdown()
         if self.search_provider is not None:
             await self.search_provider.shutdown()
 

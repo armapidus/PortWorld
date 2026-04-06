@@ -7,6 +7,12 @@ from backend.core.storage import BackendStorage, RealtimeReadOnlyStorageView
 from backend.tools.contracts import ToolDefinition, ToolExecutor
 from backend.tools.memory import MemoryScope, MemoryToolExecutor
 from backend.tools.memory_candidates import MemoryCandidateToolExecutor
+from backend.tools.openclaw import (
+    DelegateToOpenClawToolExecutor,
+    OpenClawTaskCancelToolExecutor,
+    OpenClawTaskStatusToolExecutor,
+)
+from backend.tools.openclaw_runtime import OpenClawDelegationRuntime
 from backend.tools.registry import RealtimeToolRegistry
 from backend.tools.search import SearchProvider
 from backend.tools.user_memory import UserMemoryMode, UserMemoryToolExecutor
@@ -20,6 +26,9 @@ TOOL_UPDATE_USER_MEMORY = "update_user_memory"
 TOOL_COMPLETE_USER_MEMORY_ONBOARDING = "complete_user_memory_onboarding"
 TOOL_CAPTURE_MEMORY_CANDIDATE = "capture_memory_candidate"
 TOOL_WEB_SEARCH = "web_search"
+TOOL_DELEGATE_TO_OPENCLAW = "delegate_to_openclaw"
+TOOL_OPENCLAW_TASK_STATUS = "openclaw_task_status"
+TOOL_OPENCLAW_TASK_CANCEL = "openclaw_task_cancel"
 
 DEFAULT_MODE_ALLOWED_TOOL_NAMES: frozenset[str] = frozenset(
     {
@@ -28,6 +37,9 @@ DEFAULT_MODE_ALLOWED_TOOL_NAMES: frozenset[str] = frozenset(
         TOOL_GET_CROSS_SESSION_MEMORY,
         TOOL_CAPTURE_MEMORY_CANDIDATE,
         TOOL_WEB_SEARCH,
+        TOOL_DELEGATE_TO_OPENCLAW,
+        TOOL_OPENCLAW_TASK_STATUS,
+        TOOL_OPENCLAW_TASK_CANCEL,
     }
 )
 
@@ -111,6 +123,39 @@ _CAPTURE_MEMORY_CANDIDATE_INPUT_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+_DELEGATE_TO_OPENCLAW_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "task": {
+            "type": "string",
+            "description": "Task instructions for the delegated OpenClaw agent.",
+        },
+        "context": {
+            "type": "object",
+            "description": "Optional structured context for the delegated task.",
+            "additionalProperties": True,
+        },
+        "agent_id": {
+            "type": "string",
+            "description": "Optional OpenClaw agent id override for this task.",
+        },
+    },
+    "required": ["task"],
+    "additionalProperties": False,
+}
+
+_OPENCLAW_TASK_STATUS_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "task_id": {
+            "type": "string",
+            "description": "OpenClaw task id returned by delegate_to_openclaw.",
+        }
+    },
+    "required": ["task_id"],
+    "additionalProperties": False,
+}
+
 
 @dataclass(frozen=True, slots=True)
 class ToolCatalogContext:
@@ -119,6 +164,7 @@ class ToolCatalogContext:
     search_provider: SearchProvider | None
     web_search_provider: str | None
     web_search_max_results: int
+    openclaw_runtime: OpenClawDelegationRuntime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,10 +325,53 @@ def _register_user_memory_tools(
     )
 
 
+def _register_openclaw_tools(
+    *,
+    registry: RealtimeToolRegistry,
+    context: ToolCatalogContext,
+) -> None:
+    if context.openclaw_runtime is None:
+        return
+    _register_specs(
+        registry=registry,
+        context=context,
+        specs=(
+            ToolSpec(
+                name=TOOL_DELEGATE_TO_OPENCLAW,
+                description=(
+                    "Delegate a longer-running task to the configured OpenClaw agent. "
+                    "Returns immediately with task_id."
+                ),
+                input_schema=_DELEGATE_TO_OPENCLAW_INPUT_SCHEMA,
+                build_executor=lambda ctx: DelegateToOpenClawToolExecutor(
+                    runtime=ctx.openclaw_runtime,
+                ),
+            ),
+            ToolSpec(
+                name=TOOL_OPENCLAW_TASK_STATUS,
+                description="Check the status of a delegated OpenClaw task.",
+                input_schema=_OPENCLAW_TASK_STATUS_INPUT_SCHEMA,
+                build_executor=lambda ctx: OpenClawTaskStatusToolExecutor(
+                    runtime=ctx.openclaw_runtime,
+                ),
+            ),
+            ToolSpec(
+                name=TOOL_OPENCLAW_TASK_CANCEL,
+                description="Cancel a delegated OpenClaw task.",
+                input_schema=_OPENCLAW_TASK_STATUS_INPUT_SCHEMA,
+                build_executor=lambda ctx: OpenClawTaskCancelToolExecutor(
+                    runtime=ctx.openclaw_runtime,
+                ),
+            ),
+        ),
+    )
+
+
 DEFAULT_TOOL_CATALOG_CONTRIBUTORS: tuple[ToolCatalogContributor, ...] = (
     _register_memory_tools,
     _register_user_memory_tools,
     _register_web_search_tool,
+    _register_openclaw_tools,
 )
 
 

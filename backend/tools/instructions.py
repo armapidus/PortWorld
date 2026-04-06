@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from backend.memory.lifecycle import USER_MEMORY_TEMPLATE
 from backend.tools.catalog import (
+    TOOL_DELEGATE_TO_OPENCLAW,
     TOOL_CAPTURE_MEMORY_CANDIDATE,
     TOOL_COMPLETE_USER_MEMORY_ONBOARDING,
     TOOL_GET_CROSS_SESSION_MEMORY,
     TOOL_GET_LONG_TERM_MEMORY,
+    TOOL_OPENCLAW_TASK_CANCEL,
+    TOOL_OPENCLAW_TASK_STATUS,
     TOOL_GET_SHORT_TERM_MEMORY,
     TOOL_UPDATE_USER_MEMORY,
     TOOL_WEB_SEARCH,
@@ -40,6 +43,18 @@ def build_tool_usage_block(*, registry: RealtimeToolRegistry) -> str:
     if registry.has_tool(TOOL_WEB_SEARCH):
         guidance_lines.append(
             "- Use web_search only when the user explicitly asks for fresh external facts or documentation."
+        )
+    if registry.has_tool(TOOL_DELEGATE_TO_OPENCLAW):
+        guidance_lines.append(
+            "- Use delegate_to_openclaw for long-running delegated tasks and then check progress with openclaw_task_status."
+        )
+    if registry.has_tool(TOOL_OPENCLAW_TASK_CANCEL):
+        guidance_lines.append(
+            "- Use openclaw_task_cancel only when the user explicitly asks to stop a delegated task."
+        )
+    if registry.has_tool(TOOL_OPENCLAW_TASK_STATUS):
+        guidance_lines.append(
+            "- Use openclaw_task_status to poll delegated task progress after delegate_to_openclaw."
         )
     if registry.has_tool(TOOL_CAPTURE_MEMORY_CANDIDATE):
         guidance_lines.extend(
