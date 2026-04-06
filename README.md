@@ -336,7 +336,7 @@ Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before
 
 ## Origin
 
-Built during the **Mistral Worldwide Hackathon 2026** by [Pierre Haas](https://github.com/pierrehaas), Vassili de Rosen, and Arman Artola.
+Built during the **Mistral Worldwide Hackathon 2026** by [Pierre Haas](https://github.com/p-haas), Vassili de Rosen, and Arman Artola.
 
 <br/>
 
