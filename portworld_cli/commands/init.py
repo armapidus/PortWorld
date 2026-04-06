@@ -38,6 +38,11 @@ from portworld_cli.services.init import InitOptions, run_init
     default=None,
     help="Select the web-search provider id when tooling is enabled.",
 )
+@click.option("--with-openclaw", is_flag=True, default=False, help="Enable OpenClaw delegated tooling.")
+@click.option("--without-openclaw", is_flag=True, default=False, help="Disable OpenClaw delegated tooling.")
+@click.option("--openclaw-url", default=None, help="OpenClaw gateway base URL.")
+@click.option("--openclaw-token", default=None, help="OpenClaw gateway auth token.")
+@click.option("--openclaw-agent-id", default=None, help="OpenClaw agent id (default: openclaw/default).")
 @click.option("--realtime-api-key", default=None, help="Realtime provider API key for the selected realtime provider.")
 @click.option("--vision-api-key", default=None, help="Vision provider API key for the selected vision provider.")
 @click.option("--search-api-key", default=None, help="Search provider API key for the selected search provider.")
@@ -146,6 +151,11 @@ def init_command(
     with_tooling: bool,
     without_tooling: bool,
     search_provider: str | None,
+    with_openclaw: bool,
+    without_openclaw: bool,
+    openclaw_url: str | None,
+    openclaw_token: str | None,
+    openclaw_agent_id: str | None,
     realtime_api_key: str | None,
     vision_api_key: str | None,
     search_api_key: str | None,
@@ -198,6 +208,11 @@ def init_command(
                 with_tooling=with_tooling,
                 without_tooling=without_tooling,
                 search_provider=search_provider,
+                with_openclaw=with_openclaw,
+                without_openclaw=without_openclaw,
+                openclaw_url=openclaw_url,
+                openclaw_token=openclaw_token,
+                openclaw_agent_id=openclaw_agent_id,
                 realtime_api_key=realtime_api_key,
                 vision_api_key=vision_api_key,
                 search_api_key=search_api_key,

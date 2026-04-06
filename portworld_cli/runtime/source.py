@@ -9,6 +9,7 @@ from portworld_cli.runtime.source_backend import (
     coerce_source_backend_payload,
     run_source_backend_cli,
 )
+from portworld_cli.runtime.openclaw import build_openclaw_doctor_checks
 from portworld_cli.runtime.reporting import probe_external_command
 from portworld_cli.services.config.errors import ConfigUsageError
 from portworld_cli.workspace.discovery.paths import ProjectPaths, ProjectRootResolutionError
@@ -162,6 +163,11 @@ def run_local_doctor_source(
                     action="Fix the backend profile or provider settings in backend/.env.",
                 )
             )
+        checks.extend(
+            build_openclaw_doctor_checks(
+                env_values=config_session.merged_env_values(),
+            )
+        )
 
     ok = not any(check.status == "fail" for check in checks)
     data: dict[str, object] = {

@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from portworld_cli.output import CommandResult, DiagnosticCheck, format_key_value_lines
+from portworld_cli.runtime.openclaw import build_openclaw_doctor_checks
 from portworld_cli.runtime.reporting import LocalRuntimeStatus, probe_external_command
 
 
@@ -288,6 +289,13 @@ def run_local_doctor_published(
                     action="Fix the workspace .env or start the workspace container manually to inspect runtime issues.",
                 )
             )
+
+    if env_exists:
+        checks.extend(
+            build_openclaw_doctor_checks(
+                env_values=config_session.merged_env_values(),
+            )
+        )
 
     ok = not any(check.status == "fail" for check in checks)
     return CommandResult(

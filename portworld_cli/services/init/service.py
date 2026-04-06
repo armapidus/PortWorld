@@ -21,8 +21,10 @@ from portworld_cli.services.config.errors import ConfigRuntimeError, ConfigUsage
 from portworld_cli.services.config.messages import build_init_confirmation_lines
 from portworld_cli.services.config.persistence import preview_secret_readiness, write_config_artifacts
 from portworld_cli.services.config.prompts import (
+    resolve_optional_text_value,
     resolve_required_text_value,
     resolve_secret_value,
+    resolve_toggle,
 )
 from portworld_cli.services.config.sections import apply_security_section, collect_security_section
 from portworld_cli.services.config.types import CloudSectionResult, SecurityEditOptions
@@ -92,6 +94,11 @@ class InitOptions:
     with_tooling: bool
     without_tooling: bool
     search_provider: str | None
+    with_openclaw: bool
+    without_openclaw: bool
+    openclaw_url: str | None
+    openclaw_token: str | None
+    openclaw_agent_id: str | None
     realtime_api_key: str | None
     vision_api_key: str | None
     search_api_key: str | None
@@ -551,6 +558,14 @@ def _collect_init_sections(
         session.project_config,
         provider_result,
     )
+    env_updates.update(
+        _collect_openclaw_env_updates(
+            _session_with_project_config(session, project_config),
+            options=options,
+            tooling_enabled=provider_result.tooling_enabled,
+            quickstart=quickstart,
+        )
+    )
 
     security_result = collect_security_section(
         _session_with_project_config(session, project_config),
@@ -633,6 +648,66 @@ def _collect_init_sections(
             secret_readiness=preview_outcome,
         ),
     )
+
+
+def _collect_openclaw_env_updates(
+    session: ConfigSession,
+    *,
+    options: InitOptions,
+    tooling_enabled: bool,
+    quickstart: bool,
+) -> dict[str, str]:
+    if options.with_openclaw and options.without_openclaw:
+        raise ConfigUsageError("Use only one of --with-openclaw or --without-openclaw.")
+
+    existing_values = session.merged_env_values()
+    openclaw_enabled = resolve_toggle(
+        session.cli_context,
+        prompt="Enable OpenClaw delegated tooling?",
+        current_value=_parse_bool_value(
+            existing_values.get("OPENCLAW_ENABLED"),
+            default=False,
+        ),
+        explicit_enable=options.with_openclaw,
+        explicit_disable=options.without_openclaw,
+    )
+
+    env_updates: dict[str, str] = {
+        "OPENCLAW_ENABLED": "true" if openclaw_enabled else "false",
+    }
+    if not openclaw_enabled:
+        return env_updates
+    if not tooling_enabled:
+        raise ConfigUsageError(
+            "OpenClaw delegation requires realtime tooling. Enable tooling with --with-tooling or disable OpenClaw."
+        )
+
+    env_updates["OPENCLAW_BASE_URL"] = resolve_required_text_value(
+        session.cli_context,
+        prompt="OPENCLAW_BASE_URL (OpenClaw gateway URL)",
+        current_value=(existing_values.get("OPENCLAW_BASE_URL") or "").strip(),
+        explicit_value=options.openclaw_url,
+        prompt_when_current_set=not quickstart,
+    )
+    env_updates["OPENCLAW_AUTH_TOKEN"] = resolve_secret_value(
+        session.cli_context,
+        label="OPENCLAW_AUTH_TOKEN (OpenClaw gateway token)",
+        existing_value=(existing_values.get("OPENCLAW_AUTH_TOKEN") or "").strip(),
+        explicit_value=options.openclaw_token,
+        required=True,
+        prompt_when_existing=not quickstart,
+    )
+    env_updates["OPENCLAW_AGENT_ID"] = (
+        resolve_optional_text_value(
+            session.cli_context,
+            prompt="OPENCLAW_AGENT_ID (OpenClaw agent id)",
+            current_value=(existing_values.get("OPENCLAW_AGENT_ID") or "openclaw/default").strip(),
+            explicit_value=options.openclaw_agent_id,
+            prompt_when_current_set=not quickstart,
+        )
+        or "openclaw/default"
+    )
+    return env_updates
 
 
 def _cloud_result_for_onboarding(
@@ -1520,6 +1595,15 @@ def _resolve_bool_flag(*, enable_flag: bool, disable_flag: bool, default: bool) 
     if enable_flag:
         return True
     if disable_flag:
+        return False
+    return default
+
+
+def _parse_bool_value(value: str | None, *, default: bool) -> bool:
+    normalized = (value or "").strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
         return False
     return default
 
