@@ -6,6 +6,7 @@ from time import time_ns
 from typing import Any, TypedDict
 
 from backend.memory.normalize import normalize_string
+from backend.memory.types_v2 import MemoryCandidateV2, MemoryEvidence
 
 ALLOWED_MEMORY_CANDIDATE_SCOPES = frozenset({"user", "cross_session"})
 ALLOWED_MEMORY_CANDIDATE_SECTION_HINTS = frozenset(
@@ -93,6 +94,87 @@ def render_memory_candidate_ndjson(candidates: list[MemoryCandidate]) -> str:
     ) + "\n"
 
 
+def build_memory_candidate_v2(
+    *,
+    candidate: MemoryCandidate,
+) -> MemoryCandidateV2:
+    return MemoryCandidateV2(
+        candidate_id="",
+        session_id=candidate["session_id"],
+        scope=candidate["scope"],
+        memory_class=_memory_class_for_section_hint(candidate["section_hint"]),
+        section_hint=candidate["section_hint"],
+        fact=candidate["fact"],
+        summary=candidate["fact"],
+        stability=candidate["stability"],
+        status="pending",
+        confidence=candidate["confidence"],
+        relevance=candidate["confidence"],
+        fingerprint="",
+        evidence_ids=(),
+        source=candidate["source"],
+        captured_at_ms=candidate["captured_at_ms"],
+        tags=(),
+        metadata={
+            "legacy_section_hint": candidate["section_hint"],
+            "legacy_scope": candidate["scope"],
+        },
+    )
+
+
+def build_candidate_evidence_v2(
+    *,
+    candidate: MemoryCandidate,
+    candidate_id: str,
+) -> MemoryEvidence | None:
+    fact = normalize_string(candidate["fact"])
+    if not fact:
+        return None
+    return MemoryEvidence(
+        evidence_id="",
+        evidence_kind="conversation",
+        session_id=candidate["session_id"],
+        source_ref=candidate["source"],
+        excerpt=fact,
+        captured_at_ms=int(candidate["captured_at_ms"]),
+        confidence=float(candidate["confidence"]),
+        item_id=None,
+        observation_id=None,
+        candidate_id=candidate_id,
+        tags=(),
+        metadata={"origin": "capture_memory_candidate"},
+    )
+
+
+def merge_candidates_for_consolidation(
+    *,
+    legacy_candidates: list[dict[str, Any]],
+    v2_candidates: list[MemoryCandidateV2],
+) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = [dict(candidate) for candidate in legacy_candidates]
+    seen_keys = {
+        _legacy_candidate_dedup_key(candidate)
+        for candidate in merged
+    }
+    for candidate in v2_candidates:
+        mapped = {
+            "session_id": candidate.session_id,
+            "scope": candidate.scope,
+            "section_hint": candidate.section_hint,
+            "fact": candidate.fact,
+            "stability": candidate.stability,
+            "confidence": candidate.confidence,
+            "captured_at_ms": candidate.captured_at_ms,
+            "source": candidate.source or "memory_candidate_v2",
+        }
+        dedup_key = _legacy_candidate_dedup_key(mapped)
+        if dedup_key in seen_keys:
+            continue
+        seen_keys.add(dedup_key)
+        merged.append(mapped)
+    return merged
+
+
 def _coerce_confidence(value: object) -> float | None:
     try:
         parsed = float(value)
@@ -117,3 +199,23 @@ def _coerce_optional_int(value: object) -> int | None:
 
 def _now_ms() -> int:
     return time_ns() // 1_000_000
+
+
+def _memory_class_for_section_hint(section_hint: str) -> str:
+    mapping = {
+        "identity": "identity",
+        "preferences": "preference",
+        "stable_facts": "recent_fact",
+        "ongoing_threads": "ongoing_thread",
+        "follow_ups": "ongoing_thread",
+        "recent_facts": "recent_fact",
+    }
+    return mapping.get(section_hint, "recent_fact")
+
+
+def _legacy_candidate_dedup_key(candidate: Mapping[str, object]) -> tuple[str, str, str]:
+    return (
+        normalize_string(candidate.get("scope")).lower(),
+        normalize_string(candidate.get("section_hint")).lower(),
+        normalize_string(candidate.get("fact")).lower(),
+    )

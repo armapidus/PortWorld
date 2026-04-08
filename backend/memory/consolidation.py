@@ -10,7 +10,9 @@ import httpx
 
 from backend.core.settings import Settings
 from backend.core.storage import BackendStorage
+from backend.memory.candidates import merge_candidates_for_consolidation
 from backend.memory.lifecycle import CROSS_SESSION_MEMORY_TEMPLATE, USER_MEMORY_TEMPLATE
+from backend.memory.repository_v2 import MemoryRepositoryV2
 from backend.vision.contracts import VisionProviderError
 from backend.vision.providers.shared import (
     coalesce_text_content,
@@ -534,6 +536,10 @@ class DurableMemoryConsolidationRuntime:
             return "disabled"
 
         candidates = await _run_storage(self.storage.read_memory_candidates, session_id=session_id)
+        v2_candidates = await _run_storage(
+            self._read_v2_candidates_safely,
+            session_id=session_id,
+        )
         session_memory_payload = await _run_storage(
             self.storage.read_session_memory,
             session_id=session_id,
@@ -542,18 +548,23 @@ class DurableMemoryConsolidationRuntime:
             self.storage.read_session_memory_markdown,
             session_id=session_id,
         )
-        if not candidates and not session_memory_payload:
+        if not candidates and not v2_candidates and not session_memory_payload:
             return "skipped"
 
         user_memory_markdown = await _run_storage(self.storage.read_user_memory)
         cross_session_markdown = await _run_storage(self.storage.read_cross_session_memory)
+
+        merged_candidates = merge_candidates_for_consolidation(
+            legacy_candidates=candidates,
+            v2_candidates=v2_candidates,
+        )
 
         payload, outcome = await self._request_consolidation(
             session_id=session_id,
             current_user_memory=user_memory_markdown,
             current_cross_session_memory=cross_session_markdown,
             session_memory_markdown=session_memory_markdown,
-            memory_candidates=candidates,
+            memory_candidates=merged_candidates,
         )
         if payload is None:
             return outcome
@@ -620,6 +631,18 @@ class DurableMemoryConsolidationRuntime:
                 sanitize_sensitive_text(str(exc)),
             )
             return None, outcome
+
+    def _read_v2_candidates_safely(self, *, session_id: str):
+        try:
+            repository = MemoryRepositoryV2(storage=self.storage)
+            return repository.list_candidates(session_id=session_id)
+        except Exception as exc:  # pragma: no cover - defensive for transitional compatibility
+            logger.warning(
+                "Memory consolidation v2 candidate read failed session=%s detail=%s",
+                session_id,
+                sanitize_sensitive_text(str(exc)),
+            )
+            return []
 
 
 async def _run_storage(function, /, *args, **kwargs):

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import logging
 from typing import Literal
 
 from backend.core.storage import now_ms
+from backend.memory.events import build_observation_evidence_v2, build_session_observation_v2
 from backend.memory.materializer import build_accepted_vision_event
+from backend.memory.repository_v2 import MemoryRepositoryV2
 from backend.vision.contracts import VisionProviderError, VisionRateLimitError
 from backend.vision.policy.gating import AcceptedFrameReference, VisionRouteDecision, extract_vision_signal_snapshot
 from backend.vision.runtime.models import (
@@ -18,6 +21,122 @@ logger = logging.getLogger(__name__)
 
 
 class VisionAnalysisMixin:
+    async def _write_v2_observation_and_evidence(
+        self,
+        *,
+        accepted_event: dict[str, object],
+        route: VisionRouteDecision,
+    ) -> dict[str, object]:
+        repository = MemoryRepositoryV2(storage=self.storage)
+        base_observation = build_session_observation_v2(
+            event=accepted_event,
+            route_reason=route.reason,
+            routing_score=route.priority_score,
+        )
+        try:
+            stored_observation = await self._run_storage(
+                repository.create_observation,
+                session_id=base_observation.session_id,
+                observation=base_observation,
+            )
+        except Exception as exc:
+            logger.warning(
+                "VISION_V2_OBSERVATION_WRITE_FAILED session=%s frame=%s",
+                base_observation.session_id,
+                base_observation.frame_id,
+                exc_info=exc,
+            )
+            return {
+                "status": "failed",
+                "stage": "observation_write",
+                "error_type": type(exc).__name__,
+            }
+
+        evidence = build_observation_evidence_v2(
+            observation=stored_observation,
+            route_reason=route.reason,
+            routing_score=route.priority_score,
+        )
+        try:
+            stored_evidence = await self._run_storage(
+                self.storage.write_memory_evidence,
+                evidence=evidence,
+            )
+        except Exception as exc:
+            logger.warning(
+                "VISION_V2_EVIDENCE_WRITE_FAILED session=%s frame=%s observation_id=%s",
+                stored_observation.session_id,
+                stored_observation.frame_id,
+                stored_observation.observation_id,
+                exc_info=exc,
+            )
+            try:
+                await self._run_storage(
+                    repository.create_observation,
+                    session_id=stored_observation.session_id,
+                    observation=replace(
+                        stored_observation,
+                        metadata={
+                            **stored_observation.metadata,
+                            "v2_evidence_status": "failed",
+                            "v2_evidence_error_type": type(exc).__name__,
+                        },
+                    ),
+                )
+            except Exception:
+                logger.warning(
+                    "VISION_V2_OBSERVATION_INCOMPLETE_MARK_FAILED session=%s frame=%s observation_id=%s",
+                    stored_observation.session_id,
+                    stored_observation.frame_id,
+                    stored_observation.observation_id,
+                    exc_info=True,
+                )
+            return {
+                "status": "failed",
+                "stage": "evidence_write",
+                "observation_id": stored_observation.observation_id,
+                "error_type": type(exc).__name__,
+            }
+
+        linked_observation = replace(
+            stored_observation,
+            evidence_ids=tuple(
+                dict.fromkeys([*stored_observation.evidence_ids, stored_evidence.evidence_id])
+            ),
+            metadata={
+                **stored_observation.metadata,
+                "v2_evidence_status": "linked",
+            },
+        )
+        try:
+            await self._run_storage(
+                repository.create_observation,
+                session_id=linked_observation.session_id,
+                observation=linked_observation,
+            )
+        except Exception as exc:
+            logger.warning(
+                "VISION_V2_OBSERVATION_LINK_UPDATE_FAILED session=%s frame=%s observation_id=%s evidence_id=%s",
+                linked_observation.session_id,
+                linked_observation.frame_id,
+                linked_observation.observation_id,
+                stored_evidence.evidence_id,
+                exc_info=exc,
+            )
+            return {
+                "status": "failed",
+                "stage": "observation_link_update",
+                "observation_id": linked_observation.observation_id,
+                "evidence_id": stored_evidence.evidence_id,
+                "error_type": type(exc).__name__,
+            }
+
+        return {
+            "status": "ok",
+            "observation_id": linked_observation.observation_id,
+            "evidence_id": stored_evidence.evidence_id,
+        }
+
     def _build_signal_snapshot(
         self,
         *,
@@ -475,12 +594,23 @@ class VisionAnalysisMixin:
             session_id=observation.session_id,
             event=accepted_event,
         )
+        v2_dual_write = await self._write_v2_observation_and_evidence(
+            accepted_event=accepted_event,
+            route=route,
+        )
         worker.accepted_event_count += 1
         worker.pending_session_events.append(accepted_event)
         self._append_short_term_window_event(worker=worker, event=accepted_event)
         await self._materialize_short_term_memory(worker)
         if self._should_roll_session_memory(worker):
             await self._materialize_session_memory(worker)
+        routing_metadata = self._build_routing_metadata(
+            signal=signal,
+            route=route,
+            provider_budget_state=slot_state,
+            analysis_outcome="analyzed",
+        )
+        routing_metadata["v2_dual_write"] = v2_dual_write
         await self._update_frame_processing(
             session_id=observation.session_id,
             frame_id=observation.frame_id,
@@ -495,12 +625,7 @@ class VisionAnalysisMixin:
             routing_status=route.action,
             routing_reason=route.reason,
             routing_score=route.priority_score,
-            routing_metadata=self._build_routing_metadata(
-                signal=signal,
-                route=route,
-                provider_budget_state=slot_state,
-                analysis_outcome="analyzed",
-            ),
+            routing_metadata=routing_metadata,
         )
         await self._append_routing_event(
             signal=signal,
@@ -508,6 +633,11 @@ class VisionAnalysisMixin:
             provider_budget_state=slot_state,
             did_attempt_analysis=True,
             analysis_outcome="analyzed",
+            error_details=(
+                {"v2_dual_write": v2_dual_write}
+                if v2_dual_write.get("status") != "ok"
+                else None
+            ),
         )
         logger.info(
             "VISION_ANALYSIS_ACCEPTED session=%s frame=%s provider=%s model=%s scene_summary=%s",

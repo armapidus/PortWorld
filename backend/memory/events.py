@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import TypedDict
 
 from backend.memory.normalize import coerce_optional_int, normalize_string, normalize_string_list
+from backend.memory.types_v2 import MemoryEvidence, SessionObservation
 
 
 class AcceptedVisionEvent(TypedDict):
@@ -78,3 +79,67 @@ def _coerce_confidence(value: object) -> float | None:
             return parsed / 100.0
         return 1.0
     return parsed
+
+
+def build_session_observation_v2(
+    *,
+    event: Mapping[str, object],
+    route_reason: str,
+    routing_score: float | None,
+) -> SessionObservation:
+    accepted_event, _ = coerce_accepted_vision_event(event)
+    if accepted_event is None:
+        raise ValueError("Cannot build SessionObservation from invalid accepted vision event payload.")
+    return SessionObservation(
+        observation_id="",
+        session_id=accepted_event["session_id"],
+        frame_id=accepted_event["frame_id"],
+        capture_ts_ms=accepted_event["capture_ts_ms"],
+        analyzed_at_ms=accepted_event["analyzed_at_ms"],
+        provider=accepted_event["provider"],
+        model=accepted_event["model"],
+        scene_summary=accepted_event["scene_summary"],
+        user_activity_guess=accepted_event["user_activity_guess"],
+        entities=tuple(accepted_event["entities"]),
+        actions=tuple(accepted_event["actions"]),
+        visible_text=tuple(accepted_event["visible_text"]),
+        documents_seen=tuple(accepted_event["documents_seen"]),
+        salient_change=accepted_event["salient_change"],
+        confidence=accepted_event["confidence"],
+        metadata={
+            "event_type": accepted_event["event_type"],
+            "route_reason": normalize_string(route_reason),
+            "routing_score": routing_score,
+            "source": "accepted_vision_event",
+        },
+    )
+
+
+def build_observation_evidence_v2(
+    *,
+    observation: SessionObservation,
+    route_reason: str,
+    routing_score: float | None,
+) -> MemoryEvidence:
+    excerpt_parts = [observation.scene_summary]
+    if observation.user_activity_guess:
+        excerpt_parts.append(f"activity={observation.user_activity_guess}")
+    excerpt = " | ".join(part for part in excerpt_parts if part).strip()
+    return MemoryEvidence(
+        evidence_id="",
+        evidence_kind="vision_observation",
+        session_id=observation.session_id,
+        source_ref=f"vision_frame:{observation.frame_id}",
+        excerpt=excerpt,
+        captured_at_ms=observation.analyzed_at_ms or observation.capture_ts_ms,
+        confidence=observation.confidence,
+        observation_id=observation.observation_id,
+        metadata={
+            "frame_id": observation.frame_id,
+            "provider": observation.provider,
+            "model": observation.model,
+            "route_reason": normalize_string(route_reason),
+            "routing_score": routing_score,
+            "source": "vision_runtime_dual_write",
+        },
+    )
