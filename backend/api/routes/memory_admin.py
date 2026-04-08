@@ -8,10 +8,13 @@ from typing import Annotated
 from fastapi import APIRouter
 from fastapi import HTTPException
 from fastapi import Path
+from fastapi import Query
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
+
+from backend.memory.repository_v2 import MemoryRepositoryV2
 
 SessionIdPath = Annotated[
     str,
@@ -51,6 +54,93 @@ class SessionMemoryResetResponse(BaseModel):
     deleted_session_rows: int
     removed_session_dir: bool
     removed_vision_frames_dir: bool
+
+
+class MemoryItemListResponse(BaseModel):
+    count: int
+    items: list[dict[str, object]]
+
+
+class MemoryItemLookupResponse(BaseModel):
+    found: bool
+    item: dict[str, object] | None = None
+
+
+class MemoryItemEvidenceResponse(BaseModel):
+    item_id: str
+    count: int
+    evidence: list[dict[str, object]]
+
+
+class MemoryItemUpdatePayload(BaseModel):
+    summary: str | None = None
+    structured_value: dict[str, object] | None = None
+    confidence: float | None = None
+    relevance: float | None = None
+    maturity: float | None = None
+    tags: list[str] | None = None
+    correction_note: str | None = None
+    session_id: str | None = None
+    status: str | None = None
+
+
+class MemoryItemSuppressPayload(BaseModel):
+    note: str | None = None
+
+
+def _serialize_item(item) -> dict[str, object]:
+    return {
+        "item_id": item.item_id,
+        "memory_class": item.memory_class,
+        "scope": item.scope,
+        "session_id": item.session_id,
+        "status": item.status,
+        "summary": item.summary,
+        "structured_value": dict(item.structured_value),
+        "confidence": item.confidence,
+        "relevance": item.relevance,
+        "maturity": item.maturity,
+        "fingerprint": item.fingerprint,
+        "subject_key": item.subject_key,
+        "value_key": item.value_key,
+        "first_seen_at_ms": item.first_seen_at_ms,
+        "last_seen_at_ms": item.last_seen_at_ms,
+        "last_promoted_at_ms": item.last_promoted_at_ms,
+        "source_kinds": list(item.source_kinds),
+        "evidence_ids": list(item.evidence_ids),
+        "relation_ids": list(item.relation_ids),
+        "tags": list(item.tags),
+        "correction_notes": list(item.correction_notes),
+        "metadata": dict(item.metadata),
+    }
+
+
+def _serialize_evidence(evidence) -> dict[str, object]:
+    return {
+        "evidence_id": evidence.evidence_id,
+        "evidence_kind": evidence.evidence_kind,
+        "session_id": evidence.session_id,
+        "source_ref": evidence.source_ref,
+        "excerpt": evidence.excerpt,
+        "captured_at_ms": evidence.captured_at_ms,
+        "confidence": evidence.confidence,
+        "item_id": evidence.item_id,
+        "observation_id": evidence.observation_id,
+        "candidate_id": evidence.candidate_id,
+        "tags": list(evidence.tags),
+        "metadata": dict(evidence.metadata),
+    }
+
+
+ItemIdPath = Annotated[
+    str,
+    Path(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[a-zA-Z0-9_\-]+$",
+        description="Memory v2 item identifier",
+    ),
+]
 
 
 @router.get("/memory/export")
@@ -127,6 +217,124 @@ async def reset_session_memory(
         removed_session_dir=result.removed_session_dir,
         removed_vision_frames_dir=result.removed_vision_frames_dir,
     )
+
+
+@router.get("/memory/items", response_model=MemoryItemListResponse)
+async def list_memory_items(
+    request: Request,
+    scope: str | None = Query(default=None),
+    memory_class: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
+    session_id: str | None = Query(default=None),
+    limit: int | None = Query(default=None, ge=0),
+) -> MemoryItemListResponse:
+    runtime = get_app_runtime(request.app)
+    require_http_bearer_auth(request=request, settings=runtime.settings)
+    await enforce_http_rate_limit(request, "memory_items_list")
+    repository = MemoryRepositoryV2(storage=runtime.storage)
+    items = await asyncio.to_thread(
+        repository.list_items,
+        scope=scope,
+        memory_class=memory_class,
+        status=status,
+        tag=tag,
+        session_id=session_id,
+        limit=limit,
+    )
+    return MemoryItemListResponse(
+        count=len(items),
+        items=[_serialize_item(item) for item in items],
+    )
+
+
+@router.get("/memory/items/{item_id}", response_model=MemoryItemLookupResponse)
+async def get_memory_item(
+    request: Request,
+    item_id: ItemIdPath,
+) -> MemoryItemLookupResponse:
+    runtime = get_app_runtime(request.app)
+    require_http_bearer_auth(request=request, settings=runtime.settings)
+    await enforce_http_rate_limit(request, "memory_items_get")
+    repository = MemoryRepositoryV2(storage=runtime.storage)
+    item = await asyncio.to_thread(repository.get_item, item_id=item_id)
+    if item is None:
+        return MemoryItemLookupResponse(found=False, item=None)
+    return MemoryItemLookupResponse(found=True, item=_serialize_item(item))
+
+
+@router.get("/memory/items/{item_id}/evidence", response_model=MemoryItemEvidenceResponse)
+async def get_memory_item_evidence(
+    request: Request,
+    item_id: ItemIdPath,
+) -> MemoryItemEvidenceResponse:
+    runtime = get_app_runtime(request.app)
+    require_http_bearer_auth(request=request, settings=runtime.settings)
+    await enforce_http_rate_limit(request, "memory_items_evidence")
+    repository = MemoryRepositoryV2(storage=runtime.storage)
+    evidence = await asyncio.to_thread(repository.list_item_evidence, item_id=item_id)
+    return MemoryItemEvidenceResponse(
+        item_id=item_id,
+        count=len(evidence),
+        evidence=[_serialize_evidence(record) for record in evidence],
+    )
+
+
+@router.patch("/memory/items/{item_id}", response_model=MemoryItemLookupResponse)
+async def patch_memory_item(
+    request: Request,
+    item_id: ItemIdPath,
+    payload: MemoryItemUpdatePayload,
+) -> MemoryItemLookupResponse:
+    runtime = get_app_runtime(request.app)
+    require_http_bearer_auth(request=request, settings=runtime.settings)
+    await enforce_http_rate_limit(request, "memory_items_patch")
+    repository = MemoryRepositoryV2(storage=runtime.storage)
+    item = await asyncio.to_thread(
+        repository.correct_item,
+        item_id=item_id,
+        summary=payload.summary,
+        structured_value=payload.structured_value,
+        confidence=payload.confidence,
+        relevance=payload.relevance,
+        maturity=payload.maturity,
+        tags=payload.tags,
+        correction_note=payload.correction_note,
+        session_id=payload.session_id,
+        status=payload.status,
+    )
+    if item is None:
+        return MemoryItemLookupResponse(found=False, item=None)
+    return MemoryItemLookupResponse(found=True, item=_serialize_item(item))
+
+
+@router.post("/memory/items/{item_id}/suppress", response_model=MemoryItemLookupResponse)
+async def suppress_memory_item(
+    request: Request,
+    item_id: ItemIdPath,
+    payload: MemoryItemSuppressPayload,
+) -> MemoryItemLookupResponse:
+    runtime = get_app_runtime(request.app)
+    require_http_bearer_auth(request=request, settings=runtime.settings)
+    await enforce_http_rate_limit(request, "memory_items_suppress")
+    repository = MemoryRepositoryV2(storage=runtime.storage)
+    item = await asyncio.to_thread(repository.suppress_item, item_id=item_id, note=payload.note)
+    if item is None:
+        return MemoryItemLookupResponse(found=False, item=None)
+    return MemoryItemLookupResponse(found=True, item=_serialize_item(item))
+
+
+@router.delete("/memory/items/{item_id}")
+async def delete_memory_item(
+    request: Request,
+    item_id: ItemIdPath,
+) -> dict[str, object]:
+    runtime = get_app_runtime(request.app)
+    require_http_bearer_auth(request=request, settings=runtime.settings)
+    await enforce_http_rate_limit(request, "memory_items_delete")
+    repository = MemoryRepositoryV2(storage=runtime.storage)
+    deleted = await asyncio.to_thread(repository.delete_item, item_id=item_id)
+    return {"item_id": item_id, "deleted": bool(deleted)}
 
 
 @router.get("/memory/sessions/{session_id}/status")

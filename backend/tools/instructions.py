@@ -10,6 +10,12 @@ from backend.tools.catalog import (
     TOOL_OPENCLAW_TASK_CANCEL,
     TOOL_OPENCLAW_TASK_STATUS,
     TOOL_GET_SHORT_TERM_MEMORY,
+    TOOL_MEMORY_V2_CORRECT_ITEM,
+    TOOL_MEMORY_V2_DELETE_ITEM,
+    TOOL_MEMORY_V2_GET_ITEM,
+    TOOL_MEMORY_V2_GET_ITEM_EVIDENCE,
+    TOOL_MEMORY_V2_LIST_ITEMS,
+    TOOL_MEMORY_V2_SUPPRESS_ITEM,
     TOOL_UPDATE_USER_MEMORY,
     TOOL_WEB_SEARCH,
 )
@@ -31,6 +37,30 @@ def build_tool_usage_block(*, registry: RealtimeToolRegistry) -> str:
     if registry.has_tool(TOOL_GET_CROSS_SESSION_MEMORY):
         guidance_lines.append(
             "- Use get_cross_session_memory when the user asks about durable context from prior sessions."
+        )
+    if registry.has_tool(TOOL_MEMORY_V2_LIST_ITEMS):
+        guidance_lines.append(
+            "- Use memory_v2_list_items when the user asks what you remember durably and you need item-level memory instead of markdown summaries."
+        )
+    if registry.has_tool(TOOL_MEMORY_V2_GET_ITEM):
+        guidance_lines.append(
+            "- Use memory_v2_get_item when you need the structured details for one durable memory item."
+        )
+    if registry.has_tool(TOOL_MEMORY_V2_GET_ITEM_EVIDENCE):
+        guidance_lines.append(
+            "- Use memory_v2_get_item_evidence when provenance matters before relying on a remembered fact."
+        )
+    if registry.has_tool(TOOL_MEMORY_V2_CORRECT_ITEM):
+        guidance_lines.append(
+            "- Use memory_v2_correct_item only when the user is explicitly correcting or refining something already remembered."
+        )
+    if registry.has_tool(TOOL_MEMORY_V2_SUPPRESS_ITEM):
+        guidance_lines.append(
+            "- Use memory_v2_suppress_item when the user wants a remembered item kept out of use without fully deleting it."
+        )
+    if registry.has_tool(TOOL_MEMORY_V2_DELETE_ITEM):
+        guidance_lines.append(
+            "- Use memory_v2_delete_item only when the user explicitly wants a remembered item removed."
         )
     if registry.has_tool(TOOL_UPDATE_USER_MEMORY):
         guidance_lines.append(

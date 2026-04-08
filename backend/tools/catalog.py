@@ -5,7 +5,7 @@ from typing import Any, Protocol
 
 from backend.core.storage import BackendStorage, RealtimeReadOnlyStorageView
 from backend.tools.contracts import ToolDefinition, ToolExecutor
-from backend.tools.memory import MemoryScope, MemoryToolExecutor
+from backend.tools.memory import MemoryScope, MemoryToolExecutor, MemoryV2ToolExecutor, MemoryV2ToolMode
 from backend.tools.memory_candidates import MemoryCandidateToolExecutor
 from backend.tools.openclaw import (
     DelegateToOpenClawToolExecutor,
@@ -21,6 +21,12 @@ from backend.tools.web_search import WebSearchToolExecutor
 TOOL_GET_SHORT_TERM_MEMORY = "get_short_term_memory"
 TOOL_GET_LONG_TERM_MEMORY = "get_long_term_memory"
 TOOL_GET_CROSS_SESSION_MEMORY = "get_cross_session_memory"
+TOOL_MEMORY_V2_LIST_ITEMS = "memory_v2_list_items"
+TOOL_MEMORY_V2_GET_ITEM = "memory_v2_get_item"
+TOOL_MEMORY_V2_GET_ITEM_EVIDENCE = "memory_v2_get_item_evidence"
+TOOL_MEMORY_V2_CORRECT_ITEM = "memory_v2_correct_item"
+TOOL_MEMORY_V2_SUPPRESS_ITEM = "memory_v2_suppress_item"
+TOOL_MEMORY_V2_DELETE_ITEM = "memory_v2_delete_item"
 TOOL_GET_USER_MEMORY = "get_user_memory"
 TOOL_UPDATE_USER_MEMORY = "update_user_memory"
 TOOL_COMPLETE_USER_MEMORY_ONBOARDING = "complete_user_memory_onboarding"
@@ -35,6 +41,12 @@ DEFAULT_MODE_ALLOWED_TOOL_NAMES: frozenset[str] = frozenset(
         TOOL_GET_SHORT_TERM_MEMORY,
         TOOL_GET_LONG_TERM_MEMORY,
         TOOL_GET_CROSS_SESSION_MEMORY,
+        TOOL_MEMORY_V2_LIST_ITEMS,
+        TOOL_MEMORY_V2_GET_ITEM,
+        TOOL_MEMORY_V2_GET_ITEM_EVIDENCE,
+        TOOL_MEMORY_V2_CORRECT_ITEM,
+        TOOL_MEMORY_V2_SUPPRESS_ITEM,
+        TOOL_MEMORY_V2_DELETE_ITEM,
         TOOL_CAPTURE_MEMORY_CANDIDATE,
         TOOL_WEB_SEARCH,
         TOOL_DELEGATE_TO_OPENCLAW,
@@ -144,6 +156,59 @@ _DELEGATE_TO_OPENCLAW_INPUT_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+_MEMORY_V2_LIST_ITEMS_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "scope": {"type": "string"},
+        "memory_class": {"type": "string"},
+        "status": {"type": "string"},
+        "tag": {"type": "string"},
+        "session_id": {"type": "string"},
+        "limit": {"type": "integer", "minimum": 0},
+    },
+    "additionalProperties": False,
+}
+
+_MEMORY_V2_ITEM_ID_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "item_id": {"type": "string"},
+    },
+    "required": ["item_id"],
+    "additionalProperties": False,
+}
+
+_MEMORY_V2_CORRECT_ITEM_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "item_id": {"type": "string"},
+        "summary": {"type": "string"},
+        "structured_value": {
+            "type": "object",
+            "additionalProperties": True,
+        },
+        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "relevance": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "maturity": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "tags": {"type": "array", "items": {"type": "string"}},
+        "correction_note": {"type": "string"},
+        "session_id": {"type": "string"},
+        "status": {"type": "string"},
+    },
+    "required": ["item_id"],
+    "additionalProperties": False,
+}
+
+_MEMORY_V2_SUPPRESS_ITEM_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "item_id": {"type": "string"},
+        "note": {"type": "string"},
+    },
+    "required": ["item_id"],
+    "additionalProperties": False,
+}
+
 _OPENCLAW_TASK_STATUS_INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -239,6 +304,60 @@ def _register_memory_tools(
                 build_executor=lambda ctx: MemoryToolExecutor(
                     storage=ctx.storage,
                     memory_scope=MemoryScope.CROSS_SESSION,
+                ),
+            ),
+            ToolSpec(
+                name=TOOL_MEMORY_V2_LIST_ITEMS,
+                description="List canonical Memory v2 items with optional filters.",
+                input_schema=_MEMORY_V2_LIST_ITEMS_INPUT_SCHEMA,
+                build_executor=lambda ctx: MemoryV2ToolExecutor(
+                    storage=ctx.user_memory_storage,
+                    mode=MemoryV2ToolMode.LIST_ITEMS,
+                ),
+            ),
+            ToolSpec(
+                name=TOOL_MEMORY_V2_GET_ITEM,
+                description="Get a canonical Memory v2 item by id.",
+                input_schema=_MEMORY_V2_ITEM_ID_INPUT_SCHEMA,
+                build_executor=lambda ctx: MemoryV2ToolExecutor(
+                    storage=ctx.user_memory_storage,
+                    mode=MemoryV2ToolMode.GET_ITEM,
+                ),
+            ),
+            ToolSpec(
+                name=TOOL_MEMORY_V2_GET_ITEM_EVIDENCE,
+                description="Inspect evidence linked to a canonical Memory v2 item.",
+                input_schema=_MEMORY_V2_ITEM_ID_INPUT_SCHEMA,
+                build_executor=lambda ctx: MemoryV2ToolExecutor(
+                    storage=ctx.user_memory_storage,
+                    mode=MemoryV2ToolMode.GET_ITEM_EVIDENCE,
+                ),
+            ),
+            ToolSpec(
+                name=TOOL_MEMORY_V2_CORRECT_ITEM,
+                description="Correct or update a canonical Memory v2 item.",
+                input_schema=_MEMORY_V2_CORRECT_ITEM_INPUT_SCHEMA,
+                build_executor=lambda ctx: MemoryV2ToolExecutor(
+                    storage=ctx.user_memory_storage,
+                    mode=MemoryV2ToolMode.CORRECT_ITEM,
+                ),
+            ),
+            ToolSpec(
+                name=TOOL_MEMORY_V2_SUPPRESS_ITEM,
+                description="Suppress a canonical Memory v2 item while preserving history.",
+                input_schema=_MEMORY_V2_SUPPRESS_ITEM_INPUT_SCHEMA,
+                build_executor=lambda ctx: MemoryV2ToolExecutor(
+                    storage=ctx.user_memory_storage,
+                    mode=MemoryV2ToolMode.SUPPRESS_ITEM,
+                ),
+            ),
+            ToolSpec(
+                name=TOOL_MEMORY_V2_DELETE_ITEM,
+                description="Delete a canonical Memory v2 item.",
+                input_schema=_MEMORY_V2_ITEM_ID_INPUT_SCHEMA,
+                build_executor=lambda ctx: MemoryV2ToolExecutor(
+                    storage=ctx.user_memory_storage,
+                    mode=MemoryV2ToolMode.DELETE_ITEM,
                 ),
             ),
         ),
