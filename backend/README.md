@@ -138,6 +138,28 @@ Required when `REALTIME_TOOLING_ENABLED=true`:
 |-------------|-------------|
 | `tavily` | `TAVILY_API_KEY` |
 
+### OpenClaw Delegation (Local + Remote)
+
+When `REALTIME_TOOLING_ENABLED=true`, you can enable OpenClaw task delegation:
+
+```dotenv
+OPENCLAW_ENABLED=true
+OPENCLAW_BASE_URL=https://<stable-openclaw-endpoint>
+OPENCLAW_AUTH_TOKEN=<gateway-token>
+OPENCLAW_AGENT_ID=openclaw/default
+```
+
+Notes:
+
+- `OPENCLAW_BASE_URL` is the gateway root URL only (no `/v1/...` suffix).
+- PortWorld uses OpenClaw HTTP APIs (`/v1/models`, `/v1/responses`) for delegation.
+- For cross-cloud setups, prefer a stable HTTPS endpoint or private mesh route. SSH tunnels are suitable for dev fallback only.
+
+For provider-agnostic remote setup automation with coding agents, use:
+
+- skill: [skills/openclaw-gateway-bridge/SKILL.md](../skills/openclaw-gateway-bridge/SKILL.md)
+- runbook: [skills/openclaw-gateway-bridge/references/runbook.md](../skills/openclaw-gateway-bridge/references/runbook.md)
+
 ### Production Hardening
 
 Set `BACKEND_PROFILE=production` to enforce security defaults at startup:

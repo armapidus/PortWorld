@@ -38,6 +38,18 @@ npx skills add https://github.com/portworld/PortWorld/tree/main/skills/portworld
 
 See [skills/README.md](https://github.com/portworld/PortWorld/blob/main/skills/README.md) for `--list`, `-g` (global), and telemetry options.
 
+For provider-agnostic remote OpenClaw gateway setup (OpenClaw on separate VM/VPS/cloud), install the **openclaw-gateway-bridge** skill:
+
+```bash
+npx skills add portworld/PortWorld --skill openclaw-gateway-bridge -a cursor -a codex -y
+```
+
+Direct install of the skill folder only:
+
+```bash
+npx skills add https://github.com/portworld/PortWorld/tree/main/skills/openclaw-gateway-bridge -y
+```
+
 ## Requirements
 
 - macOS or Linux

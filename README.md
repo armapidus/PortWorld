@@ -134,6 +134,16 @@ Available phrases:
 
 If onboarding is incomplete or backend or glasses readiness is blocked, Siri still opens the app but the session will not start until those requirements are met.
 
+### OpenClaw (cross-cloud) setup
+
+If your OpenClaw gateway runs on a different VM/VPS/cloud than PortWorld, use the `openclaw-gateway-bridge` agent skill for provider-agnostic setup and validation:
+
+```bash
+npx skills add portworld/PortWorld --skill openclaw-gateway-bridge -a codex -y
+```
+
+It guides secure endpoint exposure, auth wiring, and PortWorld `OPENCLAW_*` configuration end-to-end.
+
 ### Minimum config
 
 You only need **one API key** to start:

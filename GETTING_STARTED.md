@@ -154,6 +154,22 @@ npx skills add https://github.com/portworld/PortWorld/tree/main/skills/portworld
 
 Details, `--list`, and global install: [skills/README.md](skills/README.md).
 
+## Agent skill for remote OpenClaw setup (cross-cloud)
+
+When OpenClaw runs on a different VM/VPS/cloud than PortWorld (for example AWS ECS vs GCP Cloud Run), install the **openclaw-gateway-bridge** skill so your coding agent can handle secure exposure, token auth wiring, reverse proxy or tunnel choice, and end-to-end validation:
+
+```bash
+npx skills add portworld/PortWorld --skill openclaw-gateway-bridge -a cursor -a codex -y
+```
+
+Direct install of the skill folder only:
+
+```bash
+npx skills add https://github.com/portworld/PortWorld/tree/main/skills/openclaw-gateway-bridge -y
+```
+
+Runbook and details: [skills/openclaw-gateway-bridge/references/runbook.md](skills/openclaw-gateway-bridge/references/runbook.md).
+
 ## What To Read Next
 
 - Read [backend/README.md](backend/README.md) for:
