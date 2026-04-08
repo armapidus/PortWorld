@@ -98,6 +98,7 @@ class SessionStorageMixin:
     def _session_has_persisted_memory(self, *, session_id: str) -> bool:
         session_storage = self._build_session_storage_result(session_id=session_id)
         raw_vision_dir = self._session_vision_frames_dir(session_id=session_id)
+        memory_v2_session_dir = self.memory_v2_session_dir(session_id=session_id)
         with self.connect() as connection:
             session_row = connection.execute(
                 """
@@ -135,6 +136,7 @@ class SessionStorageMixin:
                 vision_frame_count > 0,
                 session_storage.session_dir.exists(),
                 raw_vision_dir.exists(),
+                memory_v2_session_dir.exists(),
             ]
         )
 
@@ -605,13 +607,16 @@ class SessionStorageMixin:
 
         session_storage = self._build_session_storage_result(session_id=session_id)
         raw_vision_dir = self._session_vision_frames_dir(session_id=session_id)
+        memory_v2_session_dir = self.memory_v2_session_dir(session_id=session_id)
 
         staged_root = self.paths.data_root / "pending_delete" / str(now_ms())
         staged_root.mkdir(parents=True, exist_ok=True)
         staged_session_dir = staged_root / "session"
         staged_vision_dir = staged_root / "vision_frames"
+        staged_memory_v2_dir = staged_root / "memory_v2_session"
         renamed_session_dir = False
         renamed_vision_dir = False
+        renamed_memory_v2_dir = False
 
         if session_storage.session_dir.exists():
             staged_session_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -622,6 +627,11 @@ class SessionStorageMixin:
             staged_vision_dir.parent.mkdir(parents=True, exist_ok=True)
             raw_vision_dir.rename(staged_vision_dir)
             renamed_vision_dir = True
+
+        if memory_v2_session_dir.exists():
+            staged_memory_v2_dir.parent.mkdir(parents=True, exist_ok=True)
+            memory_v2_session_dir.rename(staged_memory_v2_dir)
+            renamed_memory_v2_dir = True
 
         try:
             with self.connect() as connection:
@@ -652,6 +662,12 @@ class SessionStorageMixin:
                 staged_session_dir.rename(session_storage.session_dir)
             if renamed_vision_dir and staged_vision_dir.exists() and not raw_vision_dir.exists():
                 staged_vision_dir.rename(raw_vision_dir)
+            if (
+                renamed_memory_v2_dir
+                and staged_memory_v2_dir.exists()
+                and not memory_v2_session_dir.exists()
+            ):
+                staged_memory_v2_dir.rename(memory_v2_session_dir)
             raise
 
         removed_session_dir = False
@@ -663,6 +679,9 @@ class SessionStorageMixin:
         if staged_vision_dir.exists():
             shutil.rmtree(staged_vision_dir)
             removed_vision_frames_dir = True
+
+        if staged_memory_v2_dir.exists():
+            shutil.rmtree(staged_memory_v2_dir)
 
         if staged_root.exists():
             try:

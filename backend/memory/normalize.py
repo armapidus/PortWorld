@@ -21,7 +21,7 @@ def normalize_optional_string(value: object) -> str | None:
 def normalize_string_list(value: Any) -> list[str]:
     if value is None:
         return []
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple, set, frozenset)):
         items = value
     else:
         items = [value]

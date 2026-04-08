@@ -5,6 +5,13 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
+from backend.infrastructure.storage.memory_v2_layout import (
+    MEMORY_V2_GLOBAL_EVIDENCE_DIR,
+    MEMORY_V2_INDEXES_DIR,
+    MEMORY_V2_ITEMS_DIR,
+    MEMORY_V2_ROOT,
+    MEMORY_V2_SESSIONS_DIR,
+)
 from backend.memory.lifecycle import (
     CROSS_SESSION_MEMORY_TEMPLATE,
     MEMORY_CANDIDATES_LOG_FILE_NAME,
@@ -41,6 +48,21 @@ class StoragePathMixin:
             root=self.paths.vision_frames_root,
             raw_id=session_id,
         )
+
+    def memory_v2_root_dir(self) -> Path:
+        return self.paths.data_root / MEMORY_V2_ROOT
+
+    def memory_v2_items_dir(self) -> Path:
+        return self.paths.data_root / MEMORY_V2_ITEMS_DIR
+
+    def memory_v2_global_evidence_dir(self) -> Path:
+        return self.paths.data_root / MEMORY_V2_GLOBAL_EVIDENCE_DIR
+
+    def memory_v2_indexes_dir(self) -> Path:
+        return self.paths.data_root / MEMORY_V2_INDEXES_DIR
+
+    def memory_v2_session_dir(self, *, session_id: str) -> Path:
+        return self.paths.data_root / MEMORY_V2_SESSIONS_DIR / self._storage_component_for_id(session_id)
 
     def _ensure_directories(self) -> None:
         for path in (

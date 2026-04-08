@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any, Mapping
 
 from backend.core.storage import (
@@ -14,12 +15,44 @@ from backend.core.storage import (
     VisionFrameIngestResult,
 )
 from backend.infrastructure.storage.artifacts import ArtifactStorageMixin
+from backend.infrastructure.storage.memory_v2_layout import (
+    global_memory_evidence_relative_path,
+    maintenance_state_relative_path,
+    memory_item_relative_path,
+    retrieval_index_relative_path,
+    session_memory_candidate_log_relative_path,
+    session_memory_evidence_relative_path,
+    session_observation_log_relative_path,
+)
 from backend.infrastructure.storage.paths import StoragePathMixin
 from backend.infrastructure.storage.user_memory import UserMemoryStorageMixin
 from backend.infrastructure.storage.sessions import SessionStorageMixin
 from backend.infrastructure.storage.sqlite import SQLiteStorageMixin
 from backend.infrastructure.storage.types import StorageBootstrapResult, StorageInfo, StoragePaths, now_ms
 from backend.infrastructure.storage.vision import VisionFrameStorageMixin
+from backend.memory.normalization_v2 import (
+    parse_maintenance_state,
+    parse_memory_candidate,
+    parse_memory_evidence,
+    parse_memory_item,
+    parse_retrieval_index_state,
+    parse_session_observation,
+    render_maintenance_state,
+    render_memory_candidate,
+    render_memory_evidence,
+    render_memory_item,
+    render_ndjson,
+    render_retrieval_index_state,
+    render_session_observation,
+)
+from backend.memory.types_v2 import (
+    MaintenanceState,
+    MemoryCandidateV2,
+    MemoryEvidence,
+    MemoryItem,
+    RetrievalIndexState,
+    SessionObservation,
+)
 
 if TYPE_CHECKING:
     from backend.memory.events import AcceptedVisionEvent
@@ -266,6 +299,145 @@ class LocalBackendStorage(
     ) -> VisionFrameIndexRecord | None:
         return super().get_vision_frame_record(session_id=session_id, frame_id=frame_id)
 
+    def write_memory_item(self, *, item: MemoryItem) -> MemoryItem:
+        rendered = render_memory_item(item)
+        path = self._memory_item_path(item_id=str(rendered["item_id"]))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(rendered, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return parse_memory_item(rendered)
+
+    def read_memory_item(self, *, item_id: str) -> MemoryItem | None:
+        path = self._memory_item_path(item_id=item_id)
+        payload = self._read_json_file(path)
+        if payload is None:
+            return None
+        return parse_memory_item(payload)
+
+    def list_memory_items(self) -> list[MemoryItem]:
+        items_dir = self.memory_v2_items_dir()
+        if not items_dir.exists():
+            return []
+        items: list[MemoryItem] = []
+        for path in sorted(items_dir.glob("*.json")):
+            payload = self._read_json_file(path)
+            if payload is None:
+                continue
+            items.append(parse_memory_item(payload))
+        items.sort(key=lambda item: (item.last_seen_at_ms or 0, item.item_id), reverse=True)
+        return items
+
+    def delete_memory_item(self, *, item_id: str) -> bool:
+        path = self._memory_item_path(item_id=item_id)
+        if not path.exists():
+            return False
+        path.unlink()
+        return True
+
+    def write_memory_evidence(self, *, evidence: MemoryEvidence) -> MemoryEvidence:
+        rendered = render_memory_evidence(evidence)
+        path = self._memory_evidence_path(
+            evidence_id=str(rendered["evidence_id"]),
+            session_id=str(rendered["session_id"]) if rendered["session_id"] is not None else None,
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(rendered, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return parse_memory_evidence(rendered)
+
+    def read_memory_evidence(self, *, evidence_id: str) -> MemoryEvidence | None:
+        candidates = [self._memory_evidence_path(evidence_id=evidence_id, session_id=None)]
+        session_root = self.memory_v2_root_dir() / "sessions"
+        if session_root.exists():
+            candidates.extend(sorted(session_root.rglob(f"evidence/{evidence_id}.json")))
+        for path in candidates:
+            payload = self._read_json_file(path)
+            if payload is not None:
+                return parse_memory_evidence(payload)
+        return None
+
+    def write_memory_candidate_v2(
+        self,
+        *,
+        session_id: str,
+        candidate: MemoryCandidateV2,
+    ) -> MemoryCandidateV2:
+        path = self._memory_candidate_log_path(session_id=session_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payloads = self._read_ndjson_file(path=path)
+        rendered = render_memory_candidate(candidate)
+        replaced = False
+        for index, payload in enumerate(payloads):
+            if str(payload.get("candidate_id")) == str(rendered["candidate_id"]):
+                payloads[index] = rendered
+                replaced = True
+                break
+        if not replaced:
+            payloads.append(rendered)
+        path.write_text(render_ndjson(payloads), encoding="utf-8")
+        return parse_memory_candidate(rendered)
+
+    def read_memory_candidates_v2(self, *, session_id: str) -> list[MemoryCandidateV2]:
+        path = self._memory_candidate_log_path(session_id=session_id)
+        return [parse_memory_candidate(payload) for payload in self._read_ndjson_file(path=path)]
+
+    def write_session_observation(
+        self,
+        *,
+        session_id: str,
+        observation: SessionObservation,
+    ) -> SessionObservation:
+        path = self._session_observation_log_path(session_id=session_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payloads = self._read_ndjson_file(path=path)
+        rendered = render_session_observation(observation)
+        replaced = False
+        for index, payload in enumerate(payloads):
+            if str(payload.get("observation_id")) == str(rendered["observation_id"]):
+                payloads[index] = rendered
+                replaced = True
+                break
+        if not replaced:
+            payloads.append(rendered)
+        path.write_text(render_ndjson(payloads), encoding="utf-8")
+        return parse_session_observation(rendered)
+
+    def read_session_observations(self, *, session_id: str) -> list[SessionObservation]:
+        path = self._session_observation_log_path(session_id=session_id)
+        return [parse_session_observation(payload) for payload in self._read_ndjson_file(path=path)]
+
+    def write_retrieval_index_state(self, *, state: RetrievalIndexState) -> RetrievalIndexState:
+        path = self.paths.data_root / retrieval_index_relative_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rendered = render_retrieval_index_state(state)
+        path.write_text(
+            json.dumps(rendered, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return parse_retrieval_index_state(self._read_json_file(path))
+
+    def read_retrieval_index_state(self) -> RetrievalIndexState:
+        path = self.paths.data_root / retrieval_index_relative_path()
+        return parse_retrieval_index_state(self._read_json_file(path))
+
+    def write_maintenance_state(self, *, state: MaintenanceState) -> MaintenanceState:
+        path = self.paths.data_root / maintenance_state_relative_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rendered = render_maintenance_state(state)
+        path.write_text(
+            json.dumps(rendered, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return parse_maintenance_state(self._read_json_file(path))
+
+    def read_maintenance_state(self) -> MaintenanceState:
+        path = self.paths.data_root / maintenance_state_relative_path()
+        return parse_maintenance_state(self._read_json_file(path))
+
     def __init__(self, *, paths: StoragePaths) -> None:
         self.paths = paths
         super().__init__(
@@ -299,3 +471,54 @@ class LocalBackendStorage(
 
     def local_storage_paths(self) -> StoragePaths:
         return self.paths
+
+    def _memory_item_path(self, *, item_id: str):
+        return self.paths.data_root / memory_item_relative_path(item_id=item_id)
+
+    def _memory_evidence_path(self, *, evidence_id: str, session_id: str | None):
+        if session_id:
+            return self.paths.data_root / session_memory_evidence_relative_path(
+                session_component=self._storage_component_for_id(session_id),
+                evidence_id=evidence_id,
+            )
+        return self.paths.data_root / global_memory_evidence_relative_path(evidence_id=evidence_id)
+
+    def _memory_candidate_log_path(self, *, session_id: str):
+        return self.paths.data_root / session_memory_candidate_log_relative_path(
+            session_component=self._storage_component_for_id(session_id)
+        )
+
+    def _session_observation_log_path(self, *, session_id: str):
+        return self.paths.data_root / session_observation_log_relative_path(
+            session_component=self._storage_component_for_id(session_id)
+        )
+
+    def _read_json_file(self, path) -> dict[str, object] | None:
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return payload
+
+    def _read_ndjson_file(self, *, path) -> list[dict[str, object]]:
+        if not path.exists():
+            return []
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            return []
+        payloads: list[dict[str, object]] = []
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                payloads.append(payload)
+        return payloads

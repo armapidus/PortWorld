@@ -169,6 +169,22 @@ class ObjectStoreMetadataStore(ManagedMetadataStore):
         )
         return records
 
+    def list_artifact_records(self) -> list[ArtifactRecord]:
+        records = [
+            self._artifact_record_from_payload(payload)
+            for payload in self._read_artifact_index().values()
+            if isinstance(payload, dict)
+        ]
+        records.sort(
+            key=lambda record: (
+                record.session_id or "",
+                record.artifact_kind,
+                record.created_at_ms,
+                record.artifact_id,
+            )
+        )
+        return records
+
     def upsert_vision_frame_index(self, record: VisionFrameIndexRecord) -> None:
         index = self._read_vision_frame_index(session_id=record.session_id)
         index[record.frame_id] = self._vision_frame_payload(record)

@@ -10,6 +10,21 @@ from typing import Any, Mapping
 from backend.core.storage import BackendStorage
 from backend.infrastructure.storage.errors import SessionNotFoundError
 from backend.infrastructure.storage.metadata_protocol import ManagedMetadataStore
+from backend.infrastructure.storage.memory_v2_layout import (
+    MEMORY_V2_CANDIDATE_LOG_ARTIFACT_KIND,
+    MEMORY_V2_EVIDENCE_ARTIFACT_KIND,
+    MEMORY_V2_ITEM_ARTIFACT_KIND,
+    MEMORY_V2_MAINTENANCE_STATE_ARTIFACT_KIND,
+    MEMORY_V2_OBSERVATION_LOG_ARTIFACT_KIND,
+    MEMORY_V2_RETRIEVAL_INDEX_ARTIFACT_KIND,
+    global_memory_evidence_relative_path,
+    maintenance_state_relative_path,
+    memory_item_relative_path,
+    retrieval_index_relative_path,
+    session_memory_candidate_log_relative_path,
+    session_memory_evidence_relative_path,
+    session_observation_log_relative_path,
+)
 from backend.infrastructure.storage.object_store import ObjectStore, normalize_object_store_relative_path
 from backend.infrastructure.storage.types import (
     ArtifactRecord,
@@ -23,6 +38,21 @@ from backend.infrastructure.storage.types import (
     now_ms,
 )
 from backend.memory.events import AcceptedVisionEvent, coerce_accepted_vision_event
+from backend.memory.normalization_v2 import (
+    parse_maintenance_state,
+    parse_memory_candidate,
+    parse_memory_evidence,
+    parse_memory_item,
+    parse_retrieval_index_state,
+    parse_session_observation,
+    render_maintenance_state,
+    render_memory_candidate,
+    render_memory_evidence,
+    render_memory_item,
+    render_ndjson,
+    render_retrieval_index_state,
+    render_session_observation,
+)
 from backend.memory.lifecycle import (
     CROSS_SESSION_MEMORY_FILE_NAME,
     CROSS_SESSION_MEMORY_TEMPLATE,
@@ -37,6 +67,14 @@ from backend.memory.lifecycle import (
     VISION_ROUTING_EVENTS_LOG_FILE_NAME,
     SessionMemoryResetEligibility,
     SessionMemoryRetentionEligibility,
+)
+from backend.memory.types_v2 import (
+    MaintenanceState,
+    MemoryCandidateV2,
+    MemoryEvidence,
+    MemoryItem,
+    RetrievalIndexState,
+    SessionObservation,
 )
 from backend.memory.candidates import coerce_memory_candidate
 from backend.memory.user_memory import (
@@ -610,6 +648,219 @@ class ManagedBackendStorage(BackendStorage):
             frame_id=frame_id,
         )
 
+    def write_memory_item(self, *, item: MemoryItem) -> MemoryItem:
+        rendered = render_memory_item(item)
+        relative_path = self._relative_path(
+            memory_item_relative_path(item_id=str(rendered["item_id"]))
+        )
+        self.object_store.put_text(
+            relative_path=relative_path,
+            content=json.dumps(rendered, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
+            content_type="application/json",
+        )
+        self.register_artifact(
+            artifact_id=f"memory_v2_item:{rendered['item_id']}",
+            session_id=None,
+            artifact_kind=MEMORY_V2_ITEM_ARTIFACT_KIND,
+            artifact_path=relative_path,
+            content_type="application/json",
+            metadata={"schema": "memory_v2", "record_type": "item"},
+        )
+        return parse_memory_item(rendered)
+
+    def read_memory_item(self, *, item_id: str) -> MemoryItem | None:
+        payload = self._read_json_artifact(
+            relative_path=self._relative_path(memory_item_relative_path(item_id=item_id))
+        )
+        if payload is None:
+            return None
+        return parse_memory_item(payload)
+
+    def list_memory_items(self) -> list[MemoryItem]:
+        items: list[MemoryItem] = []
+        for record in self.metadata_store.list_artifact_records():
+            if record.artifact_kind != MEMORY_V2_ITEM_ARTIFACT_KIND:
+                continue
+            payload = self._read_json_artifact(relative_path=record.relative_path)
+            if payload is None:
+                continue
+            items.append(parse_memory_item(payload))
+        items.sort(key=lambda item: (item.last_seen_at_ms or 0, item.item_id), reverse=True)
+        return items
+
+    def delete_memory_item(self, *, item_id: str) -> bool:
+        relative_path = self._relative_path(memory_item_relative_path(item_id=item_id))
+        if not self.object_store.exists(relative_path=relative_path):
+            return False
+        self.object_store.delete(relative_path=relative_path)
+        return True
+
+    def write_memory_evidence(self, *, evidence: MemoryEvidence) -> MemoryEvidence:
+        rendered = render_memory_evidence(evidence)
+        relative_path = self._memory_evidence_relative_path(
+            evidence_id=str(rendered["evidence_id"]),
+            session_id=str(rendered["session_id"]) if rendered["session_id"] is not None else None,
+        )
+        self.object_store.put_text(
+            relative_path=relative_path,
+            content=json.dumps(rendered, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
+            content_type="application/json",
+        )
+        self.register_artifact(
+            artifact_id=f"memory_v2_evidence:{rendered['evidence_id']}",
+            session_id=rendered["session_id"],
+            artifact_kind=MEMORY_V2_EVIDENCE_ARTIFACT_KIND,
+            artifact_path=relative_path,
+            content_type="application/json",
+            metadata={"schema": "memory_v2", "record_type": "evidence"},
+        )
+        return parse_memory_evidence(rendered)
+
+    def read_memory_evidence(self, *, evidence_id: str) -> MemoryEvidence | None:
+        global_path = self._memory_evidence_relative_path(evidence_id=evidence_id, session_id=None)
+        payload = self._read_json_artifact(relative_path=global_path)
+        if payload is not None:
+            return parse_memory_evidence(payload)
+        for record in self.metadata_store.list_artifact_records():
+            if record.artifact_kind != MEMORY_V2_EVIDENCE_ARTIFACT_KIND:
+                continue
+            if not record.relative_path.endswith(f"/evidence/{evidence_id}.json"):
+                continue
+            payload = self._read_json_artifact(relative_path=record.relative_path)
+            if payload is not None:
+                return parse_memory_evidence(payload)
+        return None
+
+    def write_memory_candidate_v2(
+        self,
+        *,
+        session_id: str,
+        candidate: MemoryCandidateV2,
+    ) -> MemoryCandidateV2:
+        relative_path = self._memory_candidate_relative_path(session_id=session_id)
+        payloads = self._read_ndjson_artifact(
+            relative_path=relative_path,
+            context=f"managed memory_v2 candidate artifact session_id={session_id}",
+        ) or []
+        rendered = render_memory_candidate(candidate)
+        replaced = False
+        for index, payload in enumerate(payloads):
+            if str(payload.get("candidate_id")) == str(rendered["candidate_id"]):
+                payloads[index] = rendered
+                replaced = True
+                break
+        if not replaced:
+            payloads.append(rendered)
+        self.object_store.put_text(
+            relative_path=relative_path,
+            content=render_ndjson(payloads),
+            content_type="application/x-ndjson",
+        )
+        self.register_artifact(
+            artifact_id=f"{session_id}:memory_v2_candidate_log",
+            session_id=session_id,
+            artifact_kind=MEMORY_V2_CANDIDATE_LOG_ARTIFACT_KIND,
+            artifact_path=relative_path,
+            content_type="application/x-ndjson",
+            metadata={"schema": "memory_v2", "record_type": "candidate_log"},
+        )
+        return parse_memory_candidate(rendered)
+
+    def read_memory_candidates_v2(self, *, session_id: str) -> list[MemoryCandidateV2]:
+        payloads = self._read_ndjson_artifact(
+            relative_path=self._memory_candidate_relative_path(session_id=session_id),
+            context=f"managed memory_v2 candidate artifact session_id={session_id}",
+        ) or []
+        return [parse_memory_candidate(payload) for payload in payloads]
+
+    def write_session_observation(
+        self,
+        *,
+        session_id: str,
+        observation: SessionObservation,
+    ) -> SessionObservation:
+        relative_path = self._session_observation_relative_path(session_id=session_id)
+        payloads = self._read_ndjson_artifact(
+            relative_path=relative_path,
+            context=f"managed memory_v2 observation artifact session_id={session_id}",
+        ) or []
+        rendered = render_session_observation(observation)
+        replaced = False
+        for index, payload in enumerate(payloads):
+            if str(payload.get("observation_id")) == str(rendered["observation_id"]):
+                payloads[index] = rendered
+                replaced = True
+                break
+        if not replaced:
+            payloads.append(rendered)
+        self.object_store.put_text(
+            relative_path=relative_path,
+            content=render_ndjson(payloads),
+            content_type="application/x-ndjson",
+        )
+        self.register_artifact(
+            artifact_id=f"{session_id}:memory_v2_observation_log",
+            session_id=session_id,
+            artifact_kind=MEMORY_V2_OBSERVATION_LOG_ARTIFACT_KIND,
+            artifact_path=relative_path,
+            content_type="application/x-ndjson",
+            metadata={"schema": "memory_v2", "record_type": "observation_log"},
+        )
+        return parse_session_observation(rendered)
+
+    def read_session_observations(self, *, session_id: str) -> list[SessionObservation]:
+        payloads = self._read_ndjson_artifact(
+            relative_path=self._session_observation_relative_path(session_id=session_id),
+            context=f"managed memory_v2 observation artifact session_id={session_id}",
+        ) or []
+        return [parse_session_observation(payload) for payload in payloads]
+
+    def write_retrieval_index_state(self, *, state: RetrievalIndexState) -> RetrievalIndexState:
+        relative_path = self._relative_path(retrieval_index_relative_path())
+        rendered = render_retrieval_index_state(state)
+        self.object_store.put_text(
+            relative_path=relative_path,
+            content=json.dumps(rendered, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
+            content_type="application/json",
+        )
+        self.register_artifact(
+            artifact_id="memory_v2:retrieval_index",
+            session_id=None,
+            artifact_kind=MEMORY_V2_RETRIEVAL_INDEX_ARTIFACT_KIND,
+            artifact_path=relative_path,
+            content_type="application/json",
+            metadata={"schema": "memory_v2", "record_type": "retrieval_index"},
+        )
+        return parse_retrieval_index_state(rendered)
+
+    def read_retrieval_index_state(self) -> RetrievalIndexState:
+        return parse_retrieval_index_state(
+            self._read_json_artifact(relative_path=self._relative_path(retrieval_index_relative_path()))
+        )
+
+    def write_maintenance_state(self, *, state: MaintenanceState) -> MaintenanceState:
+        relative_path = self._relative_path(maintenance_state_relative_path())
+        rendered = render_maintenance_state(state)
+        self.object_store.put_text(
+            relative_path=relative_path,
+            content=json.dumps(rendered, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
+            content_type="application/json",
+        )
+        self.register_artifact(
+            artifact_id="memory_v2:maintenance_state",
+            session_id=None,
+            artifact_kind=MEMORY_V2_MAINTENANCE_STATE_ARTIFACT_KIND,
+            artifact_path=relative_path,
+            content_type="application/json",
+            metadata={"schema": "memory_v2", "record_type": "maintenance_state"},
+        )
+        return parse_maintenance_state(rendered)
+
+    def read_maintenance_state(self) -> MaintenanceState:
+        return parse_maintenance_state(
+            self._read_json_artifact(relative_path=self._relative_path(maintenance_state_relative_path()))
+        )
+
     def store_vision_frame_ingest(
         self,
         *,
@@ -781,6 +1032,23 @@ class ManagedBackendStorage(BackendStorage):
                     artifact_kind="vision_routing_event_log",
                     session_id=session_id,
                     paths=(self._relative_path(session_storage.vision_routing_events_log_path),),
+                )
+            )
+        for record in self.metadata_store.list_artifact_records():
+            if not record.artifact_kind.startswith("memory_v2_"):
+                continue
+            payload = self.object_store.get_bytes(relative_path=record.relative_path)
+            if payload is None:
+                continue
+            artifacts.append(
+                MemoryExportArtifact(
+                    artifact_id=record.artifact_id,
+                    session_id=record.session_id,
+                    artifact_kind=record.artifact_kind,
+                    relative_path=record.relative_path,
+                    content_type=record.content_type,
+                    created_at_ms=record.created_at_ms,
+                    read_bytes=lambda payload=payload: payload,
                 )
             )
         return artifacts
@@ -1017,6 +1285,19 @@ class ManagedBackendStorage(BackendStorage):
             payloads.append(payload)
         return payloads
 
+    def _read_json_artifact(self, *, relative_path: str) -> dict[str, object] | None:
+        raw_text = self.object_store.get_text(relative_path=relative_path)
+        if raw_text is None:
+            return None
+        try:
+            payload = json.loads(raw_text)
+        except json.JSONDecodeError:
+            logger.warning("Failed decoding managed json artifact relative_path=%s", relative_path)
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return payload
+
     def _read_profile_markdown_export_bytes(self) -> bytes:
         markdown_text = self.object_store.get_text(
             relative_path=_CANONICAL_USER_MEMORY_RELATIVE_PATH
@@ -1052,6 +1333,30 @@ class ManagedBackendStorage(BackendStorage):
                 )
             )
         return artifacts
+
+    def _memory_candidate_relative_path(self, *, session_id: str) -> str:
+        return self._relative_path(
+            session_memory_candidate_log_relative_path(
+                session_component=self._storage_component_for_id(session_id)
+            )
+        )
+
+    def _session_observation_relative_path(self, *, session_id: str) -> str:
+        return self._relative_path(
+            session_observation_log_relative_path(
+                session_component=self._storage_component_for_id(session_id)
+            )
+        )
+
+    def _memory_evidence_relative_path(self, *, evidence_id: str, session_id: str | None) -> str:
+        if session_id:
+            return self._relative_path(
+                session_memory_evidence_relative_path(
+                    session_component=self._storage_component_for_id(session_id),
+                    evidence_id=evidence_id,
+                )
+            )
+        return self._relative_path(global_memory_evidence_relative_path(evidence_id=evidence_id))
 
     def _require_session_persisted(self, *, session_id: str) -> None:
         eligibility = self.get_session_memory_reset_eligibility(session_id=session_id)

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from backend.infrastructure.storage.memory_v2_layout import MEMORY_V2_ROOT
 from backend.infrastructure.storage.types import ArtifactRecord, MemoryExportArtifact, now_ms
 
 
@@ -115,6 +116,7 @@ class ArtifactStorageMixin:
                 artifact_kind="vision_event_log",
                 content_type="application/x-ndjson",
             )
+        self._append_memory_v2_export_artifacts(artifacts=artifacts)
         return artifacts
 
     def _append_session_export_artifact(
@@ -140,3 +142,48 @@ class ArtifactStorageMixin:
                 read_bytes=lambda path=path: path.read_bytes(),
             )
         )
+
+    def _append_memory_v2_export_artifacts(
+        self,
+        *,
+        artifacts: list[MemoryExportArtifact],
+    ) -> None:
+        memory_v2_root = self.paths.data_root / MEMORY_V2_ROOT
+        if not memory_v2_root.exists():
+            return
+        for path in sorted(p for p in memory_v2_root.rglob("*") if p.is_file()):
+            relative_path = path.relative_to(self.paths.data_root)
+            session_id = None
+            artifact_kind = "memory_v2_artifact"
+            content_type = "application/json"
+            suffix = path.suffix.lower()
+            if suffix == ".ndjson":
+                content_type = "application/x-ndjson"
+            if suffix == ".md":
+                content_type = "text/markdown"
+            parts = relative_path.parts
+            if len(parts) >= 5 and parts[:3] == ("memory", "v2", "sessions"):
+                session_id = parts[3]
+            if "items" in parts:
+                artifact_kind = "memory_v2_item"
+            elif "evidence" in parts:
+                artifact_kind = "memory_v2_evidence"
+            elif path.name == "candidates.ndjson":
+                artifact_kind = "memory_v2_candidate_log"
+            elif path.name == "observations.ndjson":
+                artifact_kind = "memory_v2_observation_log"
+            elif path.name == "retrieval.json":
+                artifact_kind = "memory_v2_retrieval_index"
+            elif path.name == "maintenance_state.json":
+                artifact_kind = "memory_v2_maintenance_state"
+            artifacts.append(
+                MemoryExportArtifact(
+                    artifact_id=None,
+                    session_id=session_id,
+                    artifact_kind=artifact_kind,
+                    relative_path=str(relative_path),
+                    content_type=content_type,
+                    created_at_ms=None,
+                    read_bytes=lambda path=path: path.read_bytes(),
+                )
+            )

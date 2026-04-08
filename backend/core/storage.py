@@ -26,6 +26,14 @@ from backend.memory.lifecycle import (
 
 if TYPE_CHECKING:
     from backend.memory.events import AcceptedVisionEvent
+    from backend.memory.types_v2 import (
+        MaintenanceState,
+        MemoryCandidateV2,
+        MemoryEvidence,
+        MemoryItem,
+        RetrievalIndexState,
+        SessionObservation,
+    )
 
 
 class BackendStorage:
@@ -230,6 +238,66 @@ class BackendStorage:
         session_id: str,
         frame_id: str,
     ) -> VisionFrameIndexRecord | None:
+        raise NotImplementedError
+
+    def write_memory_item(self, *, item: "MemoryItem") -> "MemoryItem":
+        raise NotImplementedError
+
+    def read_memory_item(self, *, item_id: str) -> "MemoryItem | None":
+        raise NotImplementedError
+
+    def list_memory_items(self) -> list["MemoryItem"]:
+        raise NotImplementedError
+
+    def delete_memory_item(self, *, item_id: str) -> bool:
+        raise NotImplementedError
+
+    def write_memory_evidence(self, *, evidence: "MemoryEvidence") -> "MemoryEvidence":
+        raise NotImplementedError
+
+    def read_memory_evidence(self, *, evidence_id: str) -> "MemoryEvidence | None":
+        raise NotImplementedError
+
+    def write_memory_candidate_v2(
+        self,
+        *,
+        session_id: str,
+        candidate: "MemoryCandidateV2",
+    ) -> "MemoryCandidateV2":
+        raise NotImplementedError
+
+    def read_memory_candidates_v2(self, *, session_id: str) -> list["MemoryCandidateV2"]:
+        raise NotImplementedError
+
+    def write_session_observation(
+        self,
+        *,
+        session_id: str,
+        observation: "SessionObservation",
+    ) -> "SessionObservation":
+        raise NotImplementedError
+
+    def read_session_observations(self, *, session_id: str) -> list["SessionObservation"]:
+        raise NotImplementedError
+
+    def write_retrieval_index_state(
+        self,
+        *,
+        state: "RetrievalIndexState",
+    ) -> "RetrievalIndexState":
+        raise NotImplementedError
+
+    def read_retrieval_index_state(self) -> "RetrievalIndexState":
+        raise NotImplementedError
+
+    def write_maintenance_state(
+        self,
+        *,
+        state: "MaintenanceState",
+    ) -> "MaintenanceState":
+        raise NotImplementedError
+
+    def read_maintenance_state(self) -> "MaintenanceState":
         raise NotImplementedError
 
 __all__ = [
