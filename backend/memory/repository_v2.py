@@ -63,6 +63,29 @@ class MemoryRepositoryV2:
                 return item
         return None
 
+    def find_conflicting_item(
+        self,
+        *,
+        memory_class: str,
+        scope: str,
+        subject_key: str,
+        value_key: str,
+        allowed_statuses: tuple[str, ...] = ("active", "conflicted"),
+    ) -> MemoryItem | None:
+        for item in self.storage.list_memory_items():
+            if item.memory_class != memory_class:
+                continue
+            if item.scope != scope:
+                continue
+            if item.subject_key != subject_key:
+                continue
+            if item.status not in allowed_statuses:
+                continue
+            if item.value_key == value_key:
+                continue
+            return item
+        return None
+
     def suppress_item(
         self,
         *,
@@ -169,6 +192,17 @@ class MemoryRepositoryV2:
     def list_candidates(self, *, session_id: str) -> list[MemoryCandidateV2]:
         return self.storage.read_memory_candidates_v2(session_id=session_id)
 
+    def get_candidate(
+        self,
+        *,
+        session_id: str,
+        candidate_id: str,
+    ) -> MemoryCandidateV2 | None:
+        for candidate in self.list_candidates(session_id=session_id):
+            if candidate.candidate_id == candidate_id:
+                return candidate
+        return None
+
     def create_observation(
         self,
         *,
@@ -180,6 +214,49 @@ class MemoryRepositoryV2:
 
     def list_observations(self, *, session_id: str) -> list[SessionObservation]:
         return self.storage.read_session_observations(session_id=session_id)
+
+    def get_observation(
+        self,
+        *,
+        session_id: str,
+        observation_id: str,
+    ) -> SessionObservation | None:
+        for observation in self.list_observations(session_id=session_id):
+            if observation.observation_id == observation_id:
+                return observation
+        return None
+
+    def read_evidence(self, *, evidence_id: str) -> MemoryEvidence | None:
+        return self.storage.read_memory_evidence(evidence_id=evidence_id)
+
+    def list_evidence_records(
+        self,
+        *,
+        evidence_ids: list[str] | tuple[str, ...],
+    ) -> list[MemoryEvidence]:
+        evidence: list[MemoryEvidence] = []
+        seen: set[str] = set()
+        for evidence_id in evidence_ids:
+            if not evidence_id or evidence_id in seen:
+                continue
+            seen.add(evidence_id)
+            record = self.read_evidence(evidence_id=evidence_id)
+            if record is not None:
+                evidence.append(record)
+        evidence.sort(key=lambda record: (record.captured_at_ms, record.evidence_id), reverse=True)
+        return evidence
+
+    def list_session_ids_with_memory_activity(self) -> list[str]:
+        session_ids = {
+            eligibility.session_id
+            for eligibility in self.storage.list_session_memory_retention_eligibility(
+                retention_days=365000,
+            )
+        }
+        for item in self.storage.list_memory_items():
+            if item.session_id:
+                session_ids.add(item.session_id)
+        return sorted(session_ids)
 
     def read_retrieval_index_state(self) -> RetrievalIndexState:
         return self.storage.read_retrieval_index_state()
@@ -196,4 +273,3 @@ class MemoryRepositoryV2:
 
     def write_maintenance_state(self, *, state: MaintenanceState) -> MaintenanceState:
         return self.storage.write_maintenance_state(state=state)
-

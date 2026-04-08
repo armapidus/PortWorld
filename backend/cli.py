@@ -15,6 +15,8 @@ from backend.bootstrap.runtime import (
 )
 from backend.core.settings import Settings, load_environment_files
 from backend.core.storage import now_ms
+from backend.memory.maintenance_v2 import MemoryMaintenanceServiceV2
+from backend.memory.repository_v2 import MemoryRepositoryV2
 
 
 def _json_dump(payload: dict[str, Any]) -> None:
@@ -118,6 +120,22 @@ def _migrate_storage_layout(_: argparse.Namespace) -> int:
     return 0
 
 
+def _memory_maintenance_run(args: argparse.Namespace) -> int:
+    settings = Settings.from_env()
+    _, storage = build_backend_storage(settings)
+    storage.bootstrap()
+    repository = MemoryRepositoryV2(storage=storage)
+    service = MemoryMaintenanceServiceV2(repository=repository)
+    result = service.run_phase(
+        phase=args.phase,
+        scope=args.scope,
+        session_id=args.session_id,
+        dry_run=bool(args.dry_run),
+    )
+    _json_dump({"status": "ok", **result.to_dict()})
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="PortWorld backend operator CLI.")
     parser.add_argument(
@@ -173,6 +191,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="Migrate legacy local storage layout artifacts when supported.",
     )
     migrate_parser.set_defaults(handler=_migrate_storage_layout)
+
+    maintenance_parser = subparsers.add_parser(
+        "memory-maintenance-run",
+        help="Run memory v2 maintenance and promotion phases.",
+    )
+    maintenance_parser.add_argument(
+        "--scope",
+        choices=("global", "session"),
+        default="global",
+        help="Run maintenance across all known sessions or only one session.",
+    )
+    maintenance_parser.add_argument(
+        "--session-id",
+        default=None,
+        help="Required when --scope=session.",
+    )
+    maintenance_parser.add_argument(
+        "--phase",
+        choices=("full", "candidates", "observations", "retrieval", "decay"),
+        default="full",
+        help="Limit maintenance to a specific phase.",
+    )
+    maintenance_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Compute maintenance decisions without persisting changes.",
+    )
+    maintenance_parser.set_defaults(handler=_memory_maintenance_run)
 
     return parser
 

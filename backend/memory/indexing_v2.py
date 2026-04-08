@@ -33,25 +33,28 @@ def filter_memory_items(
     return filtered
 
 
-def live_usefulness_score(item: MemoryItem) -> float:
+def live_usefulness_score(item: MemoryItem, *, reference_time_ms: int | None = None) -> float:
     freshness = 0.0
     if item.last_seen_at_ms is not None:
-        freshness = min(item.last_seen_at_ms / max(item.last_seen_at_ms, 1), 1.0)
+        reference_ms = reference_time_ms or now_ms()
+        age_ms = max(0, reference_ms - item.last_seen_at_ms)
+        freshness = max(0.0, 1.0 - min(age_ms / (7 * 24 * 60 * 60 * 1000), 1.0))
     status_bonus = 0.15 if item.status == "active" else 0.0
     return (
         (item.relevance * 0.45)
         + (item.confidence * 0.3)
         + (item.maturity * 0.15)
-        + freshness * 0.0
+        + freshness * 0.1
         + status_bonus
     )
 
 
 def sort_memory_items_for_live_use(items: Iterable[MemoryItem]) -> list[MemoryItem]:
+    reference_ms = now_ms()
     return sorted(
         items,
         key=lambda item: (
-            live_usefulness_score(item),
+            live_usefulness_score(item, reference_time_ms=reference_ms),
             item.last_seen_at_ms or 0,
             item.item_id,
         ),
@@ -60,30 +63,31 @@ def sort_memory_items_for_live_use(items: Iterable[MemoryItem]) -> list[MemoryIt
 
 
 def build_retrieval_index_state(items: Iterable[MemoryItem]) -> RetrievalIndexState:
+    reference_ms = now_ms()
     entries = tuple(
         RetrievalIndexEntry(
             item_id=item.item_id,
-            score=live_usefulness_score(item),
+            score=live_usefulness_score(item, reference_time_ms=reference_ms),
             reasons=tuple(
                 reason
                 for reason in (
                     "high_relevance" if item.relevance >= 0.6 else "",
                     "high_confidence" if item.confidence >= 0.6 else "",
                     "mature" if item.maturity >= 0.5 else "",
+                    "recent" if (item.last_seen_at_ms or 0) >= reference_ms - (3 * 24 * 60 * 60 * 1000) else "",
                     "active" if item.status == "active" else "",
                 )
                 if reason
             ),
             tags=item.tags,
-            updated_at_ms=now_ms(),
+            updated_at_ms=reference_ms,
         )
         for item in sort_memory_items_for_live_use(items)
     )
     return normalize_retrieval_index_state(
         RetrievalIndexState(
-            updated_at_ms=now_ms(),
+            updated_at_ms=reference_ms,
             entries=entries,
             metadata={"entry_count": len(entries)},
         )
     )
-
