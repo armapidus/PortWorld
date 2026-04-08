@@ -24,6 +24,7 @@ TOOL_GET_CROSS_SESSION_MEMORY = "get_cross_session_memory"
 TOOL_MEMORY_V2_LIST_ITEMS = "memory_v2_list_items"
 TOOL_MEMORY_V2_GET_ITEM = "memory_v2_get_item"
 TOOL_MEMORY_V2_GET_ITEM_EVIDENCE = "memory_v2_get_item_evidence"
+TOOL_MEMORY_V2_GET_LIVE_BUNDLE = "memory_v2_get_live_bundle"
 TOOL_MEMORY_V2_CORRECT_ITEM = "memory_v2_correct_item"
 TOOL_MEMORY_V2_SUPPRESS_ITEM = "memory_v2_suppress_item"
 TOOL_MEMORY_V2_DELETE_ITEM = "memory_v2_delete_item"
@@ -44,6 +45,7 @@ DEFAULT_MODE_ALLOWED_TOOL_NAMES: frozenset[str] = frozenset(
         TOOL_MEMORY_V2_LIST_ITEMS,
         TOOL_MEMORY_V2_GET_ITEM,
         TOOL_MEMORY_V2_GET_ITEM_EVIDENCE,
+        TOOL_MEMORY_V2_GET_LIVE_BUNDLE,
         TOOL_MEMORY_V2_CORRECT_ITEM,
         TOOL_MEMORY_V2_SUPPRESS_ITEM,
         TOOL_MEMORY_V2_DELETE_ITEM,
@@ -175,6 +177,16 @@ _MEMORY_V2_ITEM_ID_INPUT_SCHEMA: dict[str, Any] = {
         "item_id": {"type": "string"},
     },
     "required": ["item_id"],
+    "additionalProperties": False,
+}
+
+_MEMORY_V2_GET_LIVE_BUNDLE_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "session_id": {"type": "string"},
+        "limit": {"type": "integer", "minimum": 0},
+        "evidence_limit_per_item": {"type": "integer", "minimum": 0},
+    },
     "additionalProperties": False,
 }
 
@@ -331,6 +343,18 @@ def _register_memory_tools(
                 build_executor=lambda ctx: MemoryV2ToolExecutor(
                     storage=ctx.user_memory_storage,
                     mode=MemoryV2ToolMode.GET_ITEM_EVIDENCE,
+                ),
+            ),
+            ToolSpec(
+                name=TOOL_MEMORY_V2_GET_LIVE_BUNDLE,
+                description=(
+                    "Get a ranked live bundle of durable Memory v2 items for what is most useful now, "
+                    "including evidence summaries and ranking metadata."
+                ),
+                input_schema=_MEMORY_V2_GET_LIVE_BUNDLE_INPUT_SCHEMA,
+                build_executor=lambda ctx: MemoryV2ToolExecutor(
+                    storage=ctx.user_memory_storage,
+                    mode=MemoryV2ToolMode.GET_LIVE_BUNDLE,
                 ),
             ),
             ToolSpec(

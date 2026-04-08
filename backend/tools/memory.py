@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.core.storage import BackendStorage, RealtimeReadOnlyStorageView
 from backend.memory.cross_session import parse_cross_session_markdown
+from backend.memory.retrieval_v2 import LiveMemoryBundleRequest, MemoryRetrievalServiceV2
 from backend.memory.repository_v2 import MemoryRepositoryV2
 from backend.memory.types_v2 import MemoryEvidence, MemoryItem
 from backend.tools.contracts import ToolCall, ToolResult
@@ -27,6 +28,7 @@ class MemoryV2ToolMode(str, Enum):
     LIST_ITEMS = "list_items"
     GET_ITEM = "get_item"
     GET_ITEM_EVIDENCE = "get_item_evidence"
+    GET_LIVE_BUNDLE = "get_live_bundle"
     CORRECT_ITEM = "correct_item"
     SUPPRESS_ITEM = "suppress_item"
     DELETE_ITEM = "delete_item"
@@ -101,6 +103,13 @@ class MemoryV2ToolExecutor:
                     self._get_item_evidence_payload,
                     repository,
                     call.arguments,
+                )
+            elif self.mode is MemoryV2ToolMode.GET_LIVE_BUNDLE:
+                payload = await asyncio.to_thread(
+                    self._get_live_bundle_payload,
+                    repository,
+                    call.arguments,
+                    call.session_id,
                 )
             elif self.mode is MemoryV2ToolMode.CORRECT_ITEM:
                 payload = await asyncio.to_thread(self._correct_item_payload, repository, call.arguments)
@@ -204,6 +213,27 @@ class MemoryV2ToolExecutor:
         if updated is None:
             return {"updated": False, "item_id": item_id}
         return {"updated": True, "item": self._serialize_item(updated)}
+
+    def _get_live_bundle_payload(
+        self,
+        repository: MemoryRepositoryV2,
+        arguments: dict[str, Any],
+        default_session_id: str,
+    ) -> dict[str, Any]:
+        retrieval = MemoryRetrievalServiceV2(repository=repository)
+        requested_session_id = self._optional_str(arguments.get("session_id"))
+        limit = self._optional_int(arguments.get("limit"))
+        evidence_limit_per_item = self._optional_int(arguments.get("evidence_limit_per_item"))
+        bundle = retrieval.build_live_bundle(
+            request=LiveMemoryBundleRequest(
+                session_id=requested_session_id or default_session_id,
+                limit=8 if limit is None else limit,
+                evidence_limit_per_item=(
+                    3 if evidence_limit_per_item is None else evidence_limit_per_item
+                ),
+            )
+        )
+        return bundle.to_dict()
 
     def _suppress_item_payload(
         self,

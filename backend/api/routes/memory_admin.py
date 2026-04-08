@@ -31,6 +31,11 @@ from backend.core.auth import require_http_bearer_auth
 from backend.core.rate_limit import enforce_http_rate_limit
 from backend.core.runtime import get_app_runtime
 from backend.core.storage import SessionNotFoundError, now_ms
+from backend.memory.retrieval_v2 import (
+    LiveMemoryBundleRequest,
+    MemoryRetrievalServiceV2,
+    summarize_recent_maintenance,
+)
 
 router = APIRouter()
 
@@ -86,6 +91,14 @@ class MemoryItemUpdatePayload(BaseModel):
 
 class MemoryItemSuppressPayload(BaseModel):
     note: str | None = None
+
+
+class MemoryMaintenanceStateResponse(BaseModel):
+    maintenance: dict[str, object]
+
+
+class MemoryLiveBundleResponse(BaseModel):
+    bundle: dict[str, object]
 
 
 def _serialize_item(item) -> dict[str, object]:
@@ -352,3 +365,38 @@ async def session_memory_status(request: Request, session_id: SessionIdPath) -> 
             status_code=404,
             detail="Session memory not found.",
         ) from exc
+
+
+@router.get("/memory/maintenance/state", response_model=MemoryMaintenanceStateResponse)
+async def get_memory_maintenance_state(request: Request) -> MemoryMaintenanceStateResponse:
+    runtime = get_app_runtime(request.app)
+    require_http_bearer_auth(request=request, settings=runtime.settings)
+    await enforce_http_rate_limit(request, "memory_maintenance_state")
+    repository = MemoryRepositoryV2(storage=runtime.storage)
+    maintenance_state = await asyncio.to_thread(repository.read_maintenance_state)
+    return MemoryMaintenanceStateResponse(
+        maintenance=summarize_recent_maintenance(maintenance_state),
+    )
+
+
+@router.get("/memory/live-bundle", response_model=MemoryLiveBundleResponse)
+async def get_memory_live_bundle(
+    request: Request,
+    session_id: str | None = Query(default=None),
+    limit: int = Query(default=8, ge=0),
+    evidence_limit_per_item: int = Query(default=3, ge=0),
+) -> MemoryLiveBundleResponse:
+    runtime = get_app_runtime(request.app)
+    require_http_bearer_auth(request=request, settings=runtime.settings)
+    await enforce_http_rate_limit(request, "memory_live_bundle")
+    repository = MemoryRepositoryV2(storage=runtime.storage)
+    service = MemoryRetrievalServiceV2(repository=repository)
+    bundle = await asyncio.to_thread(
+        service.build_live_bundle,
+        request=LiveMemoryBundleRequest(
+            session_id=session_id,
+            limit=limit,
+            evidence_limit_per_item=evidence_limit_per_item,
+        ),
+    )
+    return MemoryLiveBundleResponse(bundle=bundle.to_dict())

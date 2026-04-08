@@ -14,6 +14,7 @@ from backend.tools.catalog import (
     TOOL_MEMORY_V2_DELETE_ITEM,
     TOOL_MEMORY_V2_GET_ITEM,
     TOOL_MEMORY_V2_GET_ITEM_EVIDENCE,
+    TOOL_MEMORY_V2_GET_LIVE_BUNDLE,
     TOOL_MEMORY_V2_LIST_ITEMS,
     TOOL_MEMORY_V2_SUPPRESS_ITEM,
     TOOL_UPDATE_USER_MEMORY,
@@ -41,6 +42,10 @@ def build_tool_usage_block(*, registry: RealtimeToolRegistry) -> str:
     if registry.has_tool(TOOL_MEMORY_V2_LIST_ITEMS):
         guidance_lines.append(
             "- Use memory_v2_list_items when the user asks what you remember durably and you need item-level memory instead of markdown summaries."
+        )
+    if registry.has_tool(TOOL_MEMORY_V2_GET_LIVE_BUNDLE):
+        guidance_lines.append(
+            "- Use memory_v2_get_live_bundle when the user asks what matters most now; it returns ranked durable memory with evidence summaries."
         )
     if registry.has_tool(TOOL_MEMORY_V2_GET_ITEM):
         guidance_lines.append(
