@@ -23,9 +23,19 @@ _STOPWORDS: Final[frozenset[str]] = frozenset(
         "outside",
         "room",
         "scene",
+        "that",
         "the",
+        "this",
+        "those",
         "to",
+        "up",
+        "via",
         "view",
+        "what",
+        "which",
+        "while",
+        "who",
+        "why",
         "with",
     }
 )
@@ -34,12 +44,64 @@ _GENERIC_OBJECT_TERMS: Final[frozenset[str]] = frozenset(
         "desk",
         "floor",
         "hand",
+        "icon",
+        "image",
+        "item",
         "light",
+        "menu",
+        "object",
+        "page",
+        "paper",
         "person",
         "room",
         "screen",
+        "shelf",
+        "site",
+        "space",
+        "stuff",
         "table",
+        "thing",
+        "text",
+        "ui",
         "wall",
+        "web",
+        "website",
+        "window",
+    }
+)
+_THREAD_GENERIC_TERMS: Final[frozenset[str]] = frozenset(
+    {
+        "app",
+        "button",
+        "click",
+        "close",
+        "continue",
+        "dashboard",
+        "default",
+        "dialog",
+        "document",
+        "error",
+        "file",
+        "help",
+        "home",
+        "info",
+        "login",
+        "logout",
+        "menu",
+        "new",
+        "ok",
+        "open",
+        "page",
+        "panel",
+        "save",
+        "search",
+        "setting",
+        "settings",
+        "start",
+        "stop",
+        "tab",
+        "update",
+        "view",
         "window",
     }
 )
@@ -256,8 +318,8 @@ class MaintenancePolicyV2:
         grouped: dict[str, list[SessionObservation]] = {}
         for observation in observations:
             for entity in observation.entities:
-                normalized = normalize_semantic_key(entity)
-                if not normalized or normalized in _GENERIC_OBJECT_TERMS:
+                normalized = _normalize_important_object_term(entity)
+                if not normalized:
                     continue
                 grouped.setdefault(normalized, []).append(observation)
         proposals: list[ObservationPromotionProposal] = []
@@ -283,7 +345,10 @@ class MaintenancePolicyV2:
                     maturity=min(1.0, 0.35 + 0.1 * len(unique_observation_ids)),
                     observation_ids=tuple(sorted(unique_observation_ids)),
                     tags=(key,),
-                    metadata={"observation_count": len(unique_observation_ids)},
+                    metadata={
+                        "observation_count": len(unique_observation_ids),
+                        "promotion_source": "entity_repetition",
+                    },
                 )
             )
         return proposals
@@ -294,13 +359,9 @@ class MaintenancePolicyV2:
     ) -> list[ObservationPromotionProposal]:
         grouped: dict[str, list[SessionObservation]] = {}
         for observation in observations:
-            terms = [
-                *observation.documents_seen,
-                *[token for token in observation.visible_text if len(token.strip()) >= 4],
-            ]
-            for term in terms:
-                normalized = normalize_semantic_key(term)
-                if not normalized or normalized in _STOPWORDS:
+            terms = _extract_thread_terms(observation)
+            for normalized in terms:
+                if not normalized:
                     continue
                 grouped.setdefault(normalized, []).append(observation)
         proposals: list[ObservationPromotionProposal] = []
@@ -326,7 +387,10 @@ class MaintenancePolicyV2:
                     maturity=min(1.0, 0.4 + 0.12 * len(unique_observation_ids)),
                     observation_ids=tuple(sorted(unique_observation_ids)),
                     tags=(key,),
-                    metadata={"observation_count": len(unique_observation_ids)},
+                    metadata={
+                        "observation_count": len(unique_observation_ids),
+                        "promotion_source": "document_text_repetition",
+                    },
                 )
             )
         return proposals
@@ -424,6 +488,79 @@ def _summary_terms(summary: str, *, limit: int) -> list[str]:
         if len(deduped) >= limit:
             break
     return deduped
+
+
+def _normalize_important_object_term(value: str) -> str:
+    normalized = normalize_semantic_key(value)
+    if not normalized:
+        return ""
+    parts = [part for part in normalized.split("-") if part]
+    if not parts:
+        return ""
+    canonical_parts = [_canonical_object_part(part) for part in parts]
+    canonical_parts = [part for part in canonical_parts if _is_valid_object_part(part)]
+    if not canonical_parts:
+        return ""
+    if all(part in _GENERIC_OBJECT_TERMS for part in canonical_parts):
+        return ""
+    return "-".join(canonical_parts)
+
+
+def _canonical_object_part(part: str) -> str:
+    if len(part) >= 5 and part.endswith("ies"):
+        return f"{part[:-3]}y"
+    if len(part) >= 5 and part.endswith("sses"):
+        return part[:-2]
+    if len(part) >= 4 and part.endswith("s") and not part.endswith("ss"):
+        return part[:-1]
+    return part
+
+
+def _is_valid_object_part(part: str) -> bool:
+    if not part or len(part) < 3:
+        return False
+    if part.isdigit():
+        return False
+    if part in _STOPWORDS or part in _GENERIC_OBJECT_TERMS:
+        return False
+    return True
+
+
+def _extract_thread_terms(observation: SessionObservation) -> tuple[str, ...]:
+    document_terms: list[str] = []
+    for raw in observation.documents_seen:
+        normalized = normalize_semantic_key(raw)
+        if _is_valid_thread_term(normalized):
+            document_terms.append(normalized)
+    text_terms: list[str] = []
+    for raw in observation.visible_text:
+        for token in re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", raw):
+            normalized = normalize_semantic_key(token)
+            if _is_valid_thread_term(normalized):
+                text_terms.append(normalized)
+
+    deduped: list[str] = []
+    for term in [*document_terms, *text_terms]:
+        if term in deduped:
+            continue
+        deduped.append(term)
+    return tuple(deduped[:8])
+
+
+def _is_valid_thread_term(term: str) -> bool:
+    if not term:
+        return False
+    if term in _STOPWORDS or term in _THREAD_GENERIC_TERMS:
+        return False
+    if len(term) < 4:
+        return False
+    if term.isdigit():
+        return False
+    parts = [part for part in term.split("-") if part]
+    if not parts:
+        return False
+    meaningful = [part for part in parts if len(part) >= 4 and part not in _THREAD_GENERIC_TERMS]
+    return bool(meaningful)
 
 
 def _average_confidence(observations: Iterable[SessionObservation]) -> float:

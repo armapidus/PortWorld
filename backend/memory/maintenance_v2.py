@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, replace
 
 from backend.core.storage import now_ms
+from backend.memory.conflicts_v2 import conflict_group_key
 from backend.memory.indexing_v2 import live_usefulness_score
 from backend.memory.maintenance_policy_v2 import (
     MaintenancePolicyV2,
@@ -12,9 +13,30 @@ from backend.memory.maintenance_policy_v2 import (
 from backend.memory.normalization_v2 import (
     build_memory_fingerprint,
     build_memory_item_id,
+    normalize_semantic_key,
 )
 from backend.memory.repository_v2 import MemoryRepositoryV2
 from backend.memory.types_v2 import MaintenanceState, MemoryEvidence, MemoryItem
+
+_SEMANTIC_DUPLICATE_NOISE_TOKENS = frozenset(
+    {
+        "app",
+        "document",
+        "file",
+        "home",
+        "item",
+        "menu",
+        "note",
+        "object",
+        "page",
+        "project",
+        "screen",
+        "task",
+        "text",
+        "thread",
+        "work",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +192,11 @@ class MemoryMaintenanceServiceV2:
             if conflicting is not None:
                 conflicted += 1
                 if not dry_run:
+                    detected_group_key = conflict_group_key(
+                        memory_class=candidate.memory_class,
+                        scope=candidate.scope,
+                        subject_key=subject_key,
+                    )
                     conflict_item = self._candidate_to_item(
                         session_id=candidate.session_id,
                         memory_class=candidate.memory_class,
@@ -189,6 +216,7 @@ class MemoryMaintenanceServiceV2:
                         metadata={
                             **candidate.metadata,
                             "conflict_with_item_id": conflicting.item_id,
+                            "conflict_group_key": detected_group_key,
                             "origin": "candidate_consolidation",
                         },
                     )
@@ -204,6 +232,7 @@ class MemoryMaintenanceServiceV2:
                                 "maintenance_decision": "conflict_detected",
                                 "conflict_item_id": conflict_item.item_id,
                                 "conflict_with_item_id": conflicting.item_id,
+                                "conflict_group_key": detected_group_key,
                                 "maintenance_updated_at_ms": reference_ms,
                             },
                         ),
@@ -261,7 +290,10 @@ class MemoryMaintenanceServiceV2:
             suppressed_count=suppressed,
             rejected_count=rejected,
             conflicted_count=conflicted,
-            metadata={"processed_candidates": processed},
+            metadata={
+                "processed_candidates": processed,
+                "detected_conflict_groups": len(self.repository.list_conflict_groups()),
+            },
         )
 
     def run_observation_promotion(
@@ -316,6 +348,32 @@ class MemoryMaintenanceServiceV2:
                             ),
                         )
                     continue
+                semantic_duplicate = self._find_semantic_duplicate_for_proposal(proposal=proposal)
+                if semantic_duplicate is not None:
+                    merged += 1
+                    if not dry_run:
+                        updated = self._merge_observation_proposal_into_item(
+                            item=semantic_duplicate,
+                            proposal=proposal,
+                            reference_ms=reference_ms,
+                        )
+                        updated = self.repository.upsert_item(item=updated)
+                        self._attach_observation_evidence(
+                            item_id=updated.item_id,
+                            observation_ids=proposal.observation_ids,
+                            observation_map=observation_map,
+                        )
+                        self._attach_derived_pattern_evidence(
+                            item_id=updated.item_id,
+                            proposal=proposal,
+                            session_id=current_session_id,
+                            captured_at_ms=self._proposal_last_seen_at_ms(
+                                proposal,
+                                observation_map,
+                                reference_ms,
+                            ),
+                        )
+                    continue
 
                 conflicting = self.repository.find_conflicting_item(
                     memory_class=proposal.memory_class,
@@ -324,6 +382,15 @@ class MemoryMaintenanceServiceV2:
                     value_key=proposal.value_key,
                 )
                 status = "active" if conflicting is None else "conflicted"
+                detected_group_key = (
+                    conflict_group_key(
+                        memory_class=proposal.memory_class,
+                        scope=proposal.scope,
+                        subject_key=proposal.subject_key,
+                    )
+                    if conflicting is not None
+                    else None
+                )
                 if conflicting is not None:
                     conflicted += 1
                 else:
@@ -349,7 +416,10 @@ class MemoryMaintenanceServiceV2:
                     metadata={
                         **proposal.metadata,
                         **(
-                            {"conflict_with_item_id": conflicting.item_id}
+                            {
+                                "conflict_with_item_id": conflicting.item_id,
+                                "conflict_group_key": detected_group_key,
+                            }
                             if conflicting is not None
                             else {}
                         ),
@@ -381,7 +451,10 @@ class MemoryMaintenanceServiceV2:
             promoted_count=promoted,
             merged_count=merged,
             conflicted_count=conflicted,
-            metadata={"processed_proposals": processed},
+            metadata={
+                "processed_proposals": processed,
+                "detected_conflict_groups": len(self.repository.list_conflict_groups()),
+            },
         )
 
     def run_retrieval_refresh(
@@ -780,6 +853,73 @@ class MemoryMaintenanceServiceV2:
             tags=tags,
             metadata=metadata,
         )
+
+    def _find_semantic_duplicate_for_proposal(
+        self,
+        *,
+        proposal: ObservationPromotionProposal,
+    ) -> MemoryItem | None:
+        if proposal.memory_class not in {"important_object", "ongoing_thread"}:
+            return None
+        proposal_tokens = self._semantic_tokens_for_proposal(proposal=proposal)
+        if not proposal_tokens:
+            return None
+        candidates = self.repository.list_items(
+            scope=proposal.scope,
+            memory_class=proposal.memory_class,
+        )
+        for item in candidates:
+            if item.status != "active":
+                continue
+            item_tokens = self._semantic_tokens_for_item(item=item)
+            if not item_tokens:
+                continue
+            shared = proposal_tokens.intersection(item_tokens)
+            if not shared:
+                continue
+            union = proposal_tokens.union(item_tokens)
+            overlap_ratio = len(shared) / len(union)
+            if proposal.memory_class == "important_object":
+                if overlap_ratio >= 0.7 or self._is_subterm_match(proposal_tokens, item_tokens):
+                    return item
+                continue
+            if overlap_ratio >= 0.6:
+                return item
+        return None
+
+    def _semantic_tokens_for_proposal(
+        self,
+        *,
+        proposal: ObservationPromotionProposal,
+    ) -> set[str]:
+        values = [proposal.subject_key, proposal.value_key, *proposal.tags]
+        return self._semantic_tokens(values)
+
+    def _semantic_tokens_for_item(self, *, item: MemoryItem) -> set[str]:
+        values = [item.subject_key, item.value_key, *item.tags]
+        return self._semantic_tokens(values)
+
+    def _semantic_tokens(self, values: list[str]) -> set[str]:
+        tokens: set[str] = set()
+        for value in values:
+            normalized = normalize_semantic_key(value)
+            if not normalized:
+                continue
+            for part in normalized.split("-"):
+                if len(part) < 3:
+                    continue
+                if part.isdigit():
+                    continue
+                if part in _SEMANTIC_DUPLICATE_NOISE_TOKENS:
+                    continue
+                tokens.add(part)
+        return tokens
+
+    def _is_subterm_match(self, left: set[str], right: set[str]) -> bool:
+        for token in left:
+            if any(token in other or other in token for other in right):
+                return True
+        return False
 
 
 def summarize_live_memory_item(item: MemoryItem) -> dict[str, object]:
