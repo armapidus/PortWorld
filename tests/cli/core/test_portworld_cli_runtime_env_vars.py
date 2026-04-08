@@ -56,6 +56,26 @@ class RuntimeEnvVarsTests(unittest.TestCase):
             "/app/.portworld/extensions/python",
         )
 
+    def test_managed_gcp_env_excludes_openclaw_auth_token(self) -> None:
+        env_values = OrderedDict(
+            [
+                ("OPENCLAW_ENABLED", "true"),
+                ("OPENCLAW_BASE_URL", "https://portworld.duckdns.org"),
+                ("OPENCLAW_AUTH_TOKEN", "secret-token"),
+            ]
+        )
+        config = SimpleNamespace(service_name="portworld-api")
+
+        env_vars = build_runtime_env_vars(
+            env_values=env_values,
+            config=config,
+            bucket_name="gcp-managed-bucket",
+        )
+
+        self.assertEqual(env_vars["OPENCLAW_ENABLED"], "true")
+        self.assertEqual(env_vars["OPENCLAW_BASE_URL"], "https://portworld.duckdns.org")
+        self.assertNotIn("OPENCLAW_AUTH_TOKEN", env_vars)
+
 
 if __name__ == "__main__":
     unittest.main()

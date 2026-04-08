@@ -13,6 +13,7 @@ from portworld_shared.providers import (
     resolve_effective_env_value,
     resolve_selected_providers,
 )
+from portworld_shared.runtime_secrets import additional_required_secret_env_keys
 
 
 def ensure_core_secrets(
@@ -84,6 +85,25 @@ def ensure_core_secrets(
             created_names.append(secret_name)
             provider_secret_names[env_key] = secret_name
             provider_secret_values[env_key] = secret_value
+
+    for env_key in additional_required_secret_env_keys(env_values):
+        if env_key in provider_secret_names:
+            continue
+        secret_value = (env_values.get(env_key, "") or "").strip()
+        if not secret_value:
+            raise DeployUsageError(
+                f"{env_key} is required for Cloud Run deploy but is missing from backend/.env."
+            )
+        secret_name = _ensure_secret_version(
+            adapters=adapters,
+            project_id=config.project_id,
+            secret_name=_service_secret_name(config.service_name, _env_key_secret_suffix(env_key)),
+            secret_value=secret_value,
+            stage="secret_manager_setup",
+        )
+        created_names.append(secret_name)
+        provider_secret_names[env_key] = secret_name
+        provider_secret_values[env_key] = secret_value
 
     bearer_secret_name = _service_secret_name(config.service_name, "backend-bearer-token")
     bearer_secret_result = adapters.secret_manager.get_secret(

@@ -40,6 +40,7 @@ class DeployProviderRuntimeTests(unittest.TestCase):
                 "OPENAI_API_KEY": "pw-openai",
                 "VISION_OPENAI_API_KEY": "pw-vision-openai",
                 "TAVILY_API_KEY": "pw-tavily",
+                "OPENCLAW_AUTH_TOKEN": "pw-openclaw",
             },
             bearer_secret_name="pw-bearer",
             database_url_secret_name="pw-db",
@@ -47,6 +48,7 @@ class DeployProviderRuntimeTests(unittest.TestCase):
         self.assertEqual(bindings["OPENAI_API_KEY"], "pw-openai:latest")
         self.assertEqual(bindings["VISION_OPENAI_API_KEY"], "pw-vision-openai:latest")
         self.assertEqual(bindings["TAVILY_API_KEY"], "pw-tavily:latest")
+        self.assertEqual(bindings["OPENCLAW_AUTH_TOKEN"], "pw-openclaw:latest")
         self.assertEqual(bindings["BACKEND_BEARER_TOKEN"], "pw-bearer:latest")
         self.assertEqual(bindings["BACKEND_DATABASE_URL"], "pw-db:latest")
 
@@ -58,6 +60,8 @@ class DeployProviderRuntimeTests(unittest.TestCase):
                 ("VISION_MEMORY_PROVIDER", "openai"),
                 ("REALTIME_TOOLING_ENABLED", "true"),
                 ("REALTIME_WEB_SEARCH_PROVIDER", "tavily"),
+                ("OPENCLAW_ENABLED", "true"),
+                ("OPENCLAW_AUTH_TOKEN", "openclaw-token"),
                 ("OPENAI_API_KEY", "openai-key"),
                 ("VISION_OPENAI_API_KEY", "vision-key"),
                 ("VISION_GEMINI_API_KEY", "unselected-gemini-key"),
@@ -79,6 +83,7 @@ class DeployProviderRuntimeTests(unittest.TestCase):
         self.assertNotIn("VISION_OPENAI_API_KEY", runtime_env)
         self.assertNotIn("VISION_GEMINI_API_KEY", runtime_env)
         self.assertNotIn("TAVILY_API_KEY", runtime_env)
+        self.assertNotIn("OPENCLAW_AUTH_TOKEN", runtime_env)
         self.assertNotIn("VISION_PROVIDER_API_KEY", runtime_env)
         self.assertNotIn("MISTRAL_API_KEY", runtime_env)
         self.assertEqual(runtime_env["BACKEND_STORAGE_BACKEND"], "managed")

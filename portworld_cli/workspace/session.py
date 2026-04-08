@@ -33,6 +33,7 @@ from portworld_shared.providers import (
     compute_selected_provider_key_set,
     resolve_selected_providers,
 )
+from portworld_shared.runtime_secrets import additional_required_secret_env_keys
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,15 +137,24 @@ class WorkspaceSession:
         config_selection = build_env_overrides_from_project_config(self.project_config)
         selected = resolve_selected_providers(config_selection)
         key_set = compute_selected_provider_key_set(selected)
+        additional_secret_keys = additional_required_secret_env_keys(config_selection)
+        required_secret_keys = tuple(
+            dict.fromkeys(
+                (
+                    *key_set.required_secret_env_keys,
+                    *additional_secret_keys,
+                )
+            ).keys()
+        )
 
         if self.existing_env is None:
-            key_presence = {key: None for key in key_set.required_secret_env_keys}
+            key_presence = {key: None for key in required_secret_keys}
             config_key_presence = {key: None for key in key_set.required_non_secret_env_keys}
             return SecretReadiness(
                 selected_realtime_provider=selected.realtime_provider,
                 selected_vision_provider=selected.vision_provider,
                 selected_search_provider=selected.search_provider,
-                required_secret_keys=key_set.required_secret_env_keys,
+                required_secret_keys=required_secret_keys,
                 optional_secret_keys=key_set.optional_secret_env_keys,
                 missing_required_secret_keys=(),
                 required_config_keys=key_set.required_non_secret_env_keys,
@@ -164,9 +174,22 @@ class WorkspaceSession:
             env_values,
             selected=selected,
         )
+        required_secret_keys = tuple(
+            dict.fromkeys(
+                (
+                    *diagnostics.required_secret_env_keys,
+                    *additional_required_secret_env_keys(env_values),
+                )
+            ).keys()
+        )
+        missing_required_secret_keys = tuple(
+            key
+            for key in required_secret_keys
+            if not (env_values.get(key, "") or "").strip()
+        )
         key_presence = {
-            key: diagnostics.secret_key_presence.get(key, False)
-            for key in diagnostics.required_secret_env_keys
+            key: bool((env_values.get(key, "") or "").strip())
+            for key in required_secret_keys
         }
         config_key_presence = {
             key: diagnostics.non_secret_key_presence.get(key, False)
@@ -177,9 +200,9 @@ class WorkspaceSession:
             selected_realtime_provider=diagnostics.selected.realtime_provider,
             selected_vision_provider=diagnostics.selected.vision_provider,
             selected_search_provider=diagnostics.selected.search_provider,
-            required_secret_keys=diagnostics.required_secret_env_keys,
+            required_secret_keys=required_secret_keys,
             optional_secret_keys=diagnostics.optional_secret_env_keys,
-            missing_required_secret_keys=diagnostics.missing_required_secret_env_keys,
+            missing_required_secret_keys=missing_required_secret_keys,
             required_config_keys=diagnostics.required_non_secret_env_keys,
             optional_config_keys=diagnostics.optional_non_secret_env_keys,
             missing_required_config_keys=diagnostics.missing_required_non_secret_env_keys,

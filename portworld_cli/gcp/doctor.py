@@ -31,6 +31,7 @@ from portworld_cli.runtime.source_backend import (
 )
 from portworld_shared.backend_env import build_backend_env_contract
 from portworld_shared.providers import build_provider_requirement_diagnostics
+from portworld_shared.runtime_secrets import additional_required_secret_env_keys
 
 
 DEFAULT_ARTIFACT_REPOSITORY = DEFAULT_GCP_ARTIFACT_REPOSITORY
@@ -649,17 +650,31 @@ def _build_managed_storage_architecture_checks(payload: dict[str, object]) -> tu
 
 def _build_secret_readiness(env_values: dict[str, str]) -> GCPDoctorSecretReadiness:
     diagnostics = build_provider_requirement_diagnostics(env_values)
+    additional_required_secret_keys = additional_required_secret_env_keys(env_values)
+    required_secret_keys = tuple(
+        dict.fromkeys(
+            (
+                *diagnostics.required_secret_env_keys,
+                *additional_required_secret_keys,
+            )
+        ).keys()
+    )
+    missing_required_secret_keys = tuple(
+        key
+        for key in required_secret_keys
+        if not (env_values.get(key, "") or "").strip()
+    )
     return GCPDoctorSecretReadiness(
         selected_realtime_provider=diagnostics.selected.realtime_provider,
         selected_vision_provider=diagnostics.selected.vision_provider,
         selected_search_provider=diagnostics.selected.search_provider,
-        required_secret_keys=diagnostics.required_secret_env_keys,
-        missing_required_secret_keys=diagnostics.missing_required_secret_env_keys,
+        required_secret_keys=required_secret_keys,
+        missing_required_secret_keys=missing_required_secret_keys,
         required_non_secret_config_keys=diagnostics.required_non_secret_env_keys,
         missing_required_non_secret_config_keys=diagnostics.missing_required_non_secret_env_keys,
         key_presence={
-            key: diagnostics.secret_key_presence.get(key, False)
-            for key in diagnostics.required_secret_env_keys
+            key: bool((env_values.get(key, "") or "").strip())
+            for key in required_secret_keys
         },
         non_secret_config_key_presence={
             key: diagnostics.non_secret_key_presence.get(key, False)

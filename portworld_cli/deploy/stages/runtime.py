@@ -10,6 +10,7 @@ from portworld_cli.deploy.gcp_errors import gcp_error_action, gcp_error_message
 from portworld_cli.gcp import GCPAdapters, build_postgres_url
 from portworld_shared.backend_env import validate_backend_env_contract
 from portworld_shared.providers import list_provider_requirements
+from portworld_shared.runtime_secrets import ADDITIONAL_DEPLOY_SENSITIVE_ENV_KEYS
 
 
 _PROVIDER_SECRET_ENV_KEYS: tuple[str, ...] = tuple(
@@ -35,6 +36,7 @@ _CORE_SENSITIVE_ENV_KEYS: tuple[str, ...] = tuple(
         (
             *_PROVIDER_SECRET_ENV_KEYS,
             *_DEPRECATED_SENSITIVE_ENV_KEYS,
+            *ADDITIONAL_DEPLOY_SENSITIVE_ENV_KEYS,
             "BACKEND_BEARER_TOKEN",
             "BACKEND_DATABASE_URL",
         )
